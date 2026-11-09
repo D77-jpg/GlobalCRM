@@ -172,3 +172,28 @@ export type {
 export {IntegrationInquiry,IntegrationInquiryAttachment,IntegrationInquiryLock} from './IntegrationInquiry';
 
 export {IntegrationWebhook,IntegrationWebhookEvent,IntegrationWebhookAttempt} from './IntegrationWebhook';
+
+export {
+  CustomsSource,
+  CustomsCompany,
+  CustomsShipment,
+  CustomsMatch,
+  customsModels,
+} from './Customs';
+export type {
+  ICustomsSource,
+  ICustomsCompany,
+  ICustomsShipment,
+  ICustomsMatch,
+  CustomsSourceKind,
+  CustomsSourceStatus,
+  CustomsCompanyType,
+  CustomsCompanyStatus,
+  CustomsMatchType,
+  CustomsMatchMethod,
+  CustomsMatchStatus,
+  CustomsSourceDocument,
+  CustomsCompanyDocument,
+  CustomsShipmentDocument,
+  CustomsMatchDocument,
+} from './Customs';

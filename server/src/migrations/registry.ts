@@ -1,4 +1,5 @@
 import { globalSiteOAuthMigration } from './011-globalsite-oauth';
+import { customsDataMigration } from './012-customs-data';
 import {globalSiteWebhookMigration} from './010-globalsite-webhooks';
 import {globalSiteInquiryMigration} from './009-globalsite-inquiries';
 import { defaultOrganizationMigration } from './001-default-organization';
@@ -24,4 +25,5 @@ export const migrations: Migration[] = [
   globalSiteInquiryMigration,
   globalSiteWebhookMigration,
   globalSiteOAuthMigration,
+  customsDataMigration,
 ];

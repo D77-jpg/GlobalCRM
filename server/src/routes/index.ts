@@ -60,6 +60,7 @@ import mailComplianceRoutes from './mail-compliance.routes';
 import organizationRoutes from './organization.routes';
 import platformRoutes from './platform.routes';
 import publicRoutes from './public.routes';
+import customsRoutes from './customs.routes';
 
 const router = Router();
 // Identity management has its own Cookie-only checks; no service credential fallback.
@@ -134,6 +135,7 @@ router.use('/letters', requireAuth, requireProject, letterRoutes);
 router.use('/mail', requireAuth, requireProject, mailRoutes);
 router.use('/quotations', requireAuth, requireProject, quotationRoutes);
 router.use('/products', requireAuth, requireProject, productRoutes);
+router.use('/customs', requireAuth, requireProject, customsRoutes);
 router.use('/templates', requireAuth, requireProject, templateRoutes);
 router.use('/scratchpad', requireAuth, requireProject, scratchpadRoutes);
 router.use('/agent', requireAuth, requireProject, agentRoutes);
