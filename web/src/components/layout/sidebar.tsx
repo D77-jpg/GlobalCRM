@@ -51,6 +51,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: ROUTES.dashboard, labelKey: 'nav.dashboard', icon: LayoutDashboard, end: true },
   { to: ROUTES.customers, labelKey: 'nav.customers', icon: Users, end: false },
+  { to: ROUTES.customs, labelKey: 'nav.tradeIntelligence', icon: Globe2, end: false },
   { to: ROUTES.prospecting, labelKey: 'nav.prospecting', icon: Target, end: false },
   { to: ROUTES.outreachAutomation, labelKey: 'nav.outreach', icon: Bot, end: false },
   { to: '/mail', labelKey: 'nav.mail', icon: Mail, end: false },

@@ -375,6 +375,10 @@ export interface Customer {
   owner?: OwnerSummary | null;
   /** 下一次跟进时间（可空） */
   nextFollowUpAt?: string | Date | null;
+  /** 关联的海关公司 */
+  customsCompanyId?: string;
+  customsMatchConfidence?: number;
+  customsMatchedAt?: string | Date;
   createdAt: string | Date;
   updatedAt: string | Date;
 }
@@ -408,6 +412,60 @@ export interface CustomerListQuery extends PaginationParams {
   ownerId?: string;
   /** 跟进时间筛选 */
   followUp?: FollowUpFilter;
+}
+
+/* ---------------------------- 贸易情报 ---------------------------- */
+
+export interface CustomsCompanySummary {
+  _id: string;
+  canonicalName: string;
+  normalizedName: string;
+  country: string;
+  address?: string;
+  domain?: string;
+  companyType: 'importer' | 'exporter' | 'both' | 'unknown';
+  shipmentCount: number;
+  totalAmountUsd: number;
+  firstSeenAt?: string | Date;
+  lastSeenAt?: string | Date;
+}
+
+export interface CustomsShipment {
+  _id: string;
+  importerNameRaw: string;
+  exporterNameRaw?: string;
+  importerCountry: string;
+  exporterCountry?: string;
+  hsCode?: string;
+  productDescription?: string;
+  quantity?: number;
+  quantityUnit?: string;
+  amountUsd?: number;
+  shipmentDate: string | Date;
+  portOfLoading?: string;
+  portOfDischarge?: string;
+  transportMode?: string;
+  importerCompanyId?: CustomsCompanySummary | string;
+  exporterCompanyId?: CustomsCompanySummary | string;
+}
+
+export interface CustomsCompanyDetail {
+  matched?: boolean;
+  company: CustomsCompanySummary;
+  summary: {
+    shipmentCount: number;
+    totalAmountUsd: number;
+    firstSeenAt?: string | Date | null;
+    lastSeenAt?: string | Date | null;
+  };
+  recentShipments: CustomsShipment[];
+  topSuppliers: Array<{ _id: string; shipments: number; amountUsd: number; company?: CustomsCompanySummary | null }>;
+  match?: unknown;
+}
+
+export interface CustomerCustomsTrade extends Partial<CustomsCompanyDetail> {
+  matched: boolean;
+  customer?: { id: string; name: string; company?: string | null };
 }
 
 /* ---------------------------- 开发信 ---------------------------- */
@@ -1229,7 +1287,8 @@ export interface Prospect {
   aiScore?: number;
   reasons: string[];
   /** serper = 搜索抓取；excel = 业务员导入的线索 */
-  source: 'serper' | 'excel';
+  source: 'serper' | 'excel' | 'customs';
+  customsCompanyId?: string;
   grade?: string;
   priority?: string;
   notes?: string;

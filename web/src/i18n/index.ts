@@ -46,6 +46,7 @@ const zh = {
 
   'nav.dashboard': '仪表盘',
   'nav.customers': '客户管理',
+  'nav.tradeIntelligence': '贸易情报',
   'nav.prospecting': '客户线索池',
   'nav.outreach': '自动开发',
   'nav.mail': '邮件中心',
@@ -352,6 +353,7 @@ const en: Record<TranslationKey, string> = {
 
   'nav.dashboard': 'Dashboard',
   'nav.customers': 'Customers',
+  'nav.tradeIntelligence': 'Trade Intelligence',
   'nav.prospecting': 'Prospect Pool',
   'nav.outreach': 'Outreach Automation',
   'nav.mail': 'Mail Center',

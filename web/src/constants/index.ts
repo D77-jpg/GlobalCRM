@@ -54,6 +54,7 @@ export const ROUTES = {
   legal: '/legal',
   dashboard: '/',
   customers: '/customers',
+  customs: '/customs',
   customerDetail: '/customers/:id',
   prospecting: '/prospecting',
   outreachAutomation: '/outreach-automation',
