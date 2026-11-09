@@ -2,7 +2,7 @@ import {createCustomerSchema} from '../../validators/customer.validator';
 import {cleanCompanyName} from '../../utils/company-name';
 import type {RawLead} from './lead-source';
 
-type ImportedFields = {grade?:string;priority?:string;notes?:string;leadSource?:string;source?:'serper'|'excel'};
+type ImportedFields = {grade?:string;priority?:string;notes?:string;leadSource?:string;source?:'serper'|'excel'|'customs'};
 
 export function prospectCustomerInput(prospect:RawLead&{emails:string[];score:number}&ImportedFields){
  const text=(value:string|undefined,max:number)=>value?.trim().slice(0,max)||undefined;
@@ -13,12 +13,18 @@ export function prospectCustomerInput(prospect:RawLead&{emails:string[];score:nu
  const company=cleanCompanyName(rawCompany)||rawCompany;
  const legacyHeadline=rawCompany===prospect.name&&/^(?:top\s+\d+|\d+\s+(?:best|top))\b/i.test(rawCompany);
  const isExcel=prospect.source==='excel';
+ const isCustoms=prospect.source==='customs';
  const priorityLabel=prospect.priority==='high'?'高':prospect.priority==='low'?'低':prospect.priority==='medium'?'中':'';
  // Excel 线索没有抓取过程，不能套「搜索摘要 / 官网简介」那套说法
  const notes=isExcel
   ?[
     'Excel 导入线索 · 评分 '+prospect.score+'/100'+(prospect.grade?' · 等级 '+prospect.grade:'')+(priorityLabel?' · 优先级 '+priorityLabel:''),
     prospect.leadSource?'业务来源：'+prospect.leadSource:'',
+    prospect.notes?.trim()?'备注：'+prospect.notes.trim():'',
+   ].filter(Boolean).join('\n').slice(0,5000)
+  :isCustoms
+  ?[
+    '海关数据线索 · 评分 '+prospect.score+'/100',
     prospect.notes?.trim()?'备注：'+prospect.notes.trim():'',
    ].filter(Boolean).join('\n').slice(0,5000)
   :[
@@ -36,9 +42,9 @@ export function prospectCustomerInput(prospect:RawLead&{emails:string[];score:nu
   instagram:text(prospect.instagram,300),linkedin:text(prospect.linkedin,300),facebook:text(prospect.facebook,300),whatsapp:text(prospect.whatsapp,200),
   status:'pending',
   priority:(prospect.priority==='high'||prospect.priority==='medium'||prospect.priority==='low')?prospect.priority:'medium',
-  leadSource:text(prospect.leadSource,120)??(prospect.source==='excel'?'Excel 导入':'客户线索池'),
+  leadSource:text(prospect.leadSource,120)??(prospect.source==='excel'?'Excel 导入':prospect.source==='customs'?'海关数据':'客户线索池'),
   grade:text(prospect.grade,20),
-  tags:[prospect.source==='excel'?'Excel 导入':'自动开发'],
+  tags:[prospect.source==='excel'?'Excel 导入':prospect.source==='customs'?'海关数据':'自动开发'],
   notes,
  });
 }

@@ -144,6 +144,21 @@ test('customs source and import normalize and search records', async () => {
   assert.equal(detail.company.normalizedName, 'acme');
   assert.equal(detail.recentShipments.length, 2);
   assert.ok(detail.topSuppliers.length >= 1);
+
+  const converted = await request('POST', `/customs/companies/${companies.items[0]._id}/convert`, salesToken, { notes: 'From customs test' }, 201);
+  assert.equal(converted.created, true);
+  assert.equal(converted.prospect.source, 'customs');
+  assert.equal(String(converted.prospect.customsCompanyId), String(companies.items[0]._id));
+
+  const customer = await request('POST', '/customers', salesToken, {
+    name: 'Acme Trading Ltd.',
+    company: 'Acme Trading Ltd.',
+    email: `acme.customer.${suffix}@example.com`,
+    country: 'United States',
+  }, 201);
+  const trade = await request('GET', `/customs/customers/${customer.id}/trade`, salesToken);
+  assert.equal(trade.matched, true);
+  assert.equal(trade.company.canonicalName, 'Acme Trading Ltd.');
 });
 
 test('customs import is admin only and rejects unknown sources', async () => {

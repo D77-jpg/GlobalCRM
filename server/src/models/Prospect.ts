@@ -22,8 +22,10 @@ export interface IProspect extends LeadContact {
   snippet?: string;
   excerpt?: string;            // first ~600 chars of the crawled homepage
   sourceUrl: string;
-  /** serper = 搜索抓取；excel = 业务员导入的线索（没有抓取证据链） */
-  source: 'serper' | 'excel';
+  /** serper = 搜索抓取；excel = 业务员导入的线索；customs = 海关数据公司 */
+  source: 'serper' | 'excel' | 'customs';
+  /** 海关公司关联；转客户后仍保留来源链 */
+  customsCompanyId?: Types.ObjectId;
   /** Excel 里的等级 / 优先级 / 备注 / 来源列，转客户时原样带过去 */
   grade?: string;
   priority?: string;
@@ -69,7 +71,8 @@ const ProspectSchema = new Schema<IProspect>({
   snippet: { type: String, trim: true, maxlength: 1000 },
   excerpt: { type: String, maxlength: 2000 },
   sourceUrl: { type: String, trim: true, default: '' },
-  source: { type: String, enum: ['serper', 'excel'], default: 'serper' },
+  source: { type: String, enum: ['serper', 'excel', 'customs'], default: 'serper' },
+  customsCompanyId: { type: Schema.Types.ObjectId, ref: 'CustomsCompany', index: true },
   grade: { type: String, trim: true, maxlength: 20 },
   priority: { type: String, trim: true, maxlength: 20 },
   notes: { type: String, trim: true, maxlength: 5000 },

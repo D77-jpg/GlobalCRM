@@ -29,6 +29,7 @@ const LegalPage = React.lazy(() => import('@/pages/legal').then((m) => ({ defaul
 const ResetPasswordPage = React.lazy(() => import('@/pages/reset-password').then((m) => ({ default: m.ResetPasswordPage })));
 const DashboardPage = React.lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.DashboardPage })));
 const CustomersPage = React.lazy(() => import('@/pages/customers').then((m) => ({ default: m.CustomersPage })));
+const CustomsPage = React.lazy(() => import('@/pages/customs').then((m) => ({ default: m.CustomsPage })));
 const CustomerDetailPage = React.lazy(() =>
   import('@/pages/customer-detail').then((m) => ({ default: m.CustomerDetailPage })),
 );
@@ -113,6 +114,7 @@ export const router = createBrowserRouter([
       { index: true, element: withSuspense(<DashboardPage />) },
       { path: 'customers', element: withSuspense(<CustomersPage />) },
       { path: 'customers/:id', element: withSuspense(<CustomerDetailPage />) },
+      { path: 'customs', element: withSuspense(<CustomsPage />) },
       { path: 'prospecting', element: withSuspense(<ProspectingPage />) },
       { path: 'outreach-automation', element: withSuspense(<OutreachAutomationPage />) },
       { path: 'mail', element: withSuspense(<MailPage />) },

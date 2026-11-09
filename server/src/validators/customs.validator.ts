@@ -36,6 +36,11 @@ export const customsImportSchema = z.object({
   dryRun: z.boolean().optional(),
 });
 
+export const customsConvertSchema = z.object({
+  ownerId: objectIdSchema.optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
 export const customsSourceSchema = z.object({
   name: z.string().trim().min(2).max(160),
   provider: z.string().trim().min(2).max(100),

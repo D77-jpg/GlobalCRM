@@ -106,6 +106,12 @@ export interface ICustomer {
   externalSystem?: string;
   /** 外部稳定主键（如 lead:<id>），由来源系统分配，禁止复用邮箱 */
   externalId?: string;
+  /** 关联的海关公司；由海关数据匹配或人工确认后写入 */
+  customsCompanyId?: Types.ObjectId;
+  /** 海关公司匹配置信度 0 到 1 */
+  customsMatchConfidence?: number;
+  /** 海关公司匹配确认时间 */
+  customsMatchedAt?: Date;
   /** 最近一次发送开发信的时间 */
   lastContactAt?: Date;
   /** 负责人（引用 User）；单用户环境下可留空 */
@@ -213,6 +219,9 @@ const CustomerSchema = new Schema<ICustomer, CustomerModel, ICustomerMethods>(
     // 集成外部引用：与 projectId 组成业务唯一键（下方 partial unique 索引）
     externalSystem: { type: String, trim: true, maxlength: 60 },
     externalId: { type: String, trim: true, maxlength: 160 },
+    customsCompanyId: { type: Schema.Types.ObjectId, ref: 'CustomsCompany', index: true },
+    customsMatchConfidence: { type: Number, min: 0, max: 1 },
+    customsMatchedAt: { type: Date },
     lastContactAt: { type: Date },
     ownerId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     nextFollowUpAt: { type: Date, index: true },

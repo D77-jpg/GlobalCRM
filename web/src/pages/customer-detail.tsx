@@ -78,6 +78,7 @@ import { CustomerActivity } from '@/components/customers/customer-activity';
 import { CustomerHandoffDialog } from '@/components/customers/customer-handoff-dialog';
 import { CustomerAttachments } from '@/components/customers/customer-attachments';
 import { CustomerQuotations } from '@/components/customers/customer-quotations';
+import { CustomerTradePanel } from '@/components/customers/customer-trade-panel';
 import { SendLetterDialog } from '@/components/letters/send-letter-dialog';
 import { LetterViewDialog } from '@/components/letters/letter-view-dialog';
 import { LetterHistoryTable } from '@/components/letters/letter-history-table';
@@ -1055,6 +1056,7 @@ export function CustomerDetailPage(): React.JSX.Element {
       {/* ---------------------------- 跟进记录 / 客户动态 ---------------------------- */}
 
       <GlobalSiteInquiries customerId={customer.id} onDraft={()=>{void reloadLetters();void refreshDrafts();}} />
+      <CustomerTradePanel customerId={customer.id} />
       <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} />
 
       {/* ---------------------------- 报价单 ---------------------------- */}

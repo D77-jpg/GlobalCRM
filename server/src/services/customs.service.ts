@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { Types, type FilterQuery } from 'mongoose';
 import { ApiError } from '../utils/ApiError';
 import { countryCode } from '../utils/country';
+import { domainFromAddress } from '../utils/domain';
+import { Customer } from '../models';
+import { Prospect } from '../models/Prospect';
 import { encryptCredential } from './credential-crypto';
 import {
   CustomsCompany,
@@ -399,4 +402,102 @@ export async function getCustomsCompany(projectId: Types.ObjectId, companyId: st
     topSuppliers: topSuppliers.map((row) => ({ ...row, company: supplierMap.get(String(row._id)) ?? null })),
     match: match ?? null,
   };
+}
+
+export interface CustomsConvertInput {
+  ownerId?: string;
+  notes?: string;
+}
+
+/** 把海关公司加入现有潜客池。重复转换返回原潜客，不重复建线索。 */
+export async function convertCustomsCompanyToProspect(
+  projectId: Types.ObjectId,
+  actorId: Types.ObjectId,
+  companyId: string,
+  input: CustomsConvertInput = {},
+) {
+  if (!Types.ObjectId.isValid(companyId)) throw ApiError.badRequest('公司 ID 无效');
+  const company = await CustomsCompany.findOne({ _id: companyId, projectId, status: 'active' }).lean();
+  if (!company) throw ApiError.notFound('海关公司不存在');
+  const ownerId = input.ownerId && Types.ObjectId.isValid(input.ownerId) ? new Types.ObjectId(input.ownerId) : actorId;
+  const domain = company.domain?.replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase();
+  const existing = await Prospect.findOne({
+    projectId,
+    $or: [
+      { customsCompanyId: company._id },
+      ...(domain ? [{ domain }] : []),
+    ],
+  }).lean();
+  if (existing) return { prospect: existing, created: false };
+
+  const customer = await Customer.findOne({
+    projectId,
+    $or: [
+      { customsCompanyId: company._id },
+      ...(domain ? [{ website: new RegExp(domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }] : []),
+    ],
+  }).lean();
+  if (customer) throw ApiError.conflict('该海关公司已经关联现有客户，请先在客户详情中确认匹配');
+
+  const scoreReasons = [
+    `${company.shipmentCount} 票海关记录`,
+    `累计金额 ${Math.round(company.totalAmountUsd).toLocaleString('en-US')} USD`,
+  ];
+  if (company.lastSeenAt) scoreReasons.push(`最近记录 ${company.lastSeenAt.toISOString().slice(0, 10)}`);
+  const prospect = await Prospect.create({
+    projectId,
+    day: new Date().toISOString().slice(0, 10),
+    domain: domain || `customs-${String(company._id)}.local`,
+    website: domain ? `https://${domain}` : '',
+    name: company.canonicalName.slice(0, 200),
+    company: company.canonicalName.slice(0, 200),
+    country: company.country,
+    address: company.address,
+    sourceUrl: '',
+    source: 'customs',
+    customsCompanyId: company._id,
+    ownerId,
+    notes: input.notes?.trim() || `来自海关数据：${company.canonicalName}`,
+    score: Math.min(100, Math.round(Math.log10(company.totalAmountUsd + 1) * 12 + Math.min(company.shipmentCount, 20))),
+    scoreReasons,
+    status: 'ready',
+    emails: [],
+    convertedBy: undefined,
+  });
+  return { prospect: prospect.toObject(), created: true };
+}
+
+/** 客户详情的贸易动态。优先使用已确认的海关公司，否则按域名和公司名给出建议匹配。 */
+export async function getCustomerCustomsTrade(projectId: Types.ObjectId, customerId: string) {
+  if (!Types.ObjectId.isValid(customerId)) throw ApiError.badRequest('客户 ID 无效');
+  const customer = await Customer.findOne({ _id: customerId, projectId }).lean();
+  if (!customer) throw ApiError.notFound('客户不存在');
+  const domain = domainFromAddress(customer.website || customer.email || '');
+  const normalizedName = normalizeCompanyName(customer.company || customer.name);
+  const country = normalizeCountry(customer.country);
+  let company = customer.customsCompanyId
+    ? await CustomsCompany.findOne({ _id: customer.customsCompanyId, projectId }).lean()
+    : null;
+  if (!company && (domain || normalizedName)) {
+    company = await CustomsCompany.findOne({
+      projectId,
+      $or: [
+        ...(domain ? [{ domain }] : []),
+        ...(normalizedName && country ? [{ normalizedName, country }] : []),
+      ],
+    }).lean();
+  }
+  if (!company) {
+    return {
+      matched: false,
+      customer: { id: String(customer._id), name: customer.name, company: customer.company ?? null },
+      company: null,
+      summary: null,
+      recentShipments: [],
+      topSuppliers: [],
+      match: null,
+    };
+  }
+  const detail = await getCustomsCompany(projectId, String(company._id));
+  return { matched: true, customer: { id: String(customer._id), name: customer.name, company: customer.company ?? null }, ...detail };
 }
