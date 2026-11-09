@@ -30,6 +30,7 @@ import {
   bulkSetFollowUp,
   createCustomer,
   deleteCustomer,
+  handoffCustomer,
   exportCustomers,
   getCustomer,
   importCustomers,
@@ -48,6 +49,7 @@ import { applyDraftCleanup, previewDraftCleanup } from '../services/agent/draft-
 import type { CustomerStatus } from '../constants';
 import type {
   CreateCustomerInput,
+  HandoffCustomerInput,
   ImportCustomersInput,
   ListCustomersQuery,
   UpdateCustomerInput,
@@ -85,6 +87,21 @@ export const updateCustomerHandler = asyncHandler(async (req: Request, res: Resp
   const { id } = req.params;
   const input = req.body as UpdateCustomerInput;
   const data = await updateCustomer(id, input, req.user);
+  sendSuccess(res, data);
+});
+
+export const handoffCustomerHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const input = req.body as HandoffCustomerInput;
+  const data = await handoffCustomer(id, input, req.user);
+  await recordAudit({
+    actor: req.user,
+    action: 'customer.handoff',
+    targetType: 'customer',
+    targetId: id,
+    request: req,
+    detail: { toOwnerId: input.ownerId, hasNote: Boolean(input.note?.trim()) },
+  });
   sendSuccess(res, data);
 });
 

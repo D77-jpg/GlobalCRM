@@ -32,6 +32,7 @@ export const AUDIT_ACTIONS = [
   'customer.export',
   'customer.delete',
   'customer.bulk_delete',
+  'customer.handoff',
   'project.onboarding.completed',
   'mail.suppression.add',
   'mail.suppression.remove',

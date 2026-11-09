@@ -133,7 +133,7 @@ export type FollowUpResult = (typeof FOLLOW_UP_RESULT)[number];
  * 客户创建 / 开发信 / 跟进记录都能从各自的集合派生，无需在此登记；
  * 只有「状态变化」「下一次跟进时间变化」这类字段改动需要单独记一条事件。
  */
-export const CUSTOMER_EVENT_TYPE = ['status_changed', 'followup_scheduled'] as const;
+export const CUSTOMER_EVENT_TYPE = ['status_changed', 'followup_scheduled', 'owner_changed'] as const;
 export type CustomerEventType = (typeof CUSTOMER_EVENT_TYPE)[number];
 
 /**

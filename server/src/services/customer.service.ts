@@ -5,7 +5,7 @@ import { prepareMailDeletion, purgeCustomerMail } from './mail-cleanup.service';
  * 所有数据库访问都收敛在这里，controller 只做「参数 → 调用 → 响应」。
  */
 import { Types, type AnyKeys, type FilterQuery } from 'mongoose';
-import { AgentCustomerAnalysis, AgentMailThreadAnalysis, Customer, CustomerEvent, DevelopmentLetter, FollowUp, KnowledgeFeedback, Quotation, User, type CustomerDocument, type ICustomer } from '../models';
+import { AgentCustomerAnalysis, AgentMailThreadAnalysis, Customer, CustomerEvent, DevelopmentLetter, FollowUp, KnowledgeFeedback, Project, Quotation, User, type CustomerDocument, type ICustomer } from '../models';
 import { MailMessage } from '../models/MailMessage';
 import { CUSTOMER_STATUS, type CustomerStatus, type CustomerSource } from '../constants';
 import { ApiError } from '../utils/ApiError';
@@ -21,11 +21,13 @@ import { purgeCustomerAttachments } from './attachment.service';
 import type { AuthUser } from '../types/express';
 import type {
   CreateCustomerInput,
+  HandoffCustomerInput,
   ImportCustomersInput,
   ImportRow,
   ListCustomersQuery,
   UpdateCustomerInput,
 } from '../validators/customer.validator';
+import { cancelPendingOutreachLetters } from './outreach-followup.service';
 
 const logger = createLogger('customer-service');
 
@@ -294,6 +296,86 @@ export async function updateCustomer(
   );
 
   // 重新读取以带出负责人摘要
+  return getCustomer(id, actor);
+}
+
+/**
+ * 转交跟进：管理员把客户和后续跟进一起交给另一位业务员。
+ * 转交会停止原业务员尚未发出的自动开发信，并写入时间线留痕。
+ */
+export async function handoffCustomer(
+  id: string,
+  input: HandoffCustomerInput,
+  actor?: AuthUser,
+): Promise<CustomerDto> {
+  if (!actor || !isAdmin(actor)) throw ApiError.forbidden('只有管理员可以转交客户');
+  if (!Types.ObjectId.isValid(id)) throw ApiError.badRequest('客户 ID 格式不正确');
+
+  const customer = await Customer.findOne({ _id: id, ...projectScope(actor) })
+    .select('name ownerId projectId nextFollowUpAt')
+    .lean();
+  if (!customer) throw ApiError.notFound('客户不存在或已被删除');
+
+  const project = await Project.findById(customer.projectId).select('organizationId').lean();
+  const target = await User.findOne({ _id: input.ownerId, status: 'active' })
+    .select('username displayName role projectIds organizationId')
+    .lean();
+  if (!target || target.role === 'viewer') throw ApiError.badRequest('目标业务员不存在、已停用或不可作为负责人');
+  if (target.organizationId && project?.organizationId && String(target.organizationId) !== String(project.organizationId)) {
+    throw ApiError.notFound('目标业务员不属于当前组织');
+  }
+  if (target.role !== 'admin' && !target.projectIds.some((projectId) => String(projectId) === String(customer.projectId))) {
+    throw ApiError.badRequest('目标业务员不属于当前项目');
+  }
+  if (String(customer.ownerId ?? '') === String(target._id)) {
+    throw ApiError.conflict('目标业务员已经是当前负责人');
+  }
+
+  const currentOwner = customer.ownerId
+    ? await User.findById(customer.ownerId).select('username displayName').lean()
+    : null;
+  const patch: Record<string, unknown> = { ownerId: target._id };
+  if (input.nextFollowUpAt !== undefined) patch.nextFollowUpAt = input.nextFollowUpAt;
+
+  const updated = await Customer.findOneAndUpdate(
+    { _id: id, ...projectScope(actor) },
+    { $set: patch },
+    { new: true, runValidators: true },
+  );
+  if (!updated) throw ApiError.notFound('客户不存在或已被删除');
+
+  const reason = '客户已转交，停止原业务员的后续开发信';
+  await cancelPendingOutreachLetters(customer.projectId, customer._id, reason).catch((error) => {
+    logger.warn(`转交客户时取消后续开发信失败：${(error as Error).message}`);
+  });
+
+  try {
+    await CustomerEvent.create({
+      projectId: customer.projectId,
+      customerId: customer._id,
+      type: 'owner_changed',
+      at: new Date(),
+      fromOwnerId: customer.ownerId,
+      toOwnerId: target._id,
+      fromOwnerName: currentOwner?.displayName?.trim() || currentOwner?.username || '未分配',
+      toOwnerName: target.displayName?.trim() || target.username || '未命名业务员',
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      createdBy: new Types.ObjectId(actor.id),
+    });
+  } catch (error) {
+    logger.warn(`记录客户转交事件失败：${(error as Error).message}`);
+  }
+
+  if (input.nextFollowUpAt !== undefined) {
+    await recordCustomerChanges(
+      id,
+      { nextFollowUpAt: customer.nextFollowUpAt },
+      { nextFollowUpAt: updated.nextFollowUpAt },
+      actor.id,
+      actor.projectId,
+    );
+  }
+
   return getCustomer(id, actor);
 }
 

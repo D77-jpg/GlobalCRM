@@ -9,6 +9,7 @@
  */
 import * as React from 'react';
 import {
+  ArrowRightLeft,
   CalendarClock,
   Flag,
   Mail,
@@ -49,6 +50,7 @@ const EVENT_VISUAL: Record<TimelineEventType, { icon: React.ReactNode; dotClass:
   quotation: { icon: <ReceiptText className="h-3.5 w-3.5" aria-hidden />, dotClass: 'bg-teal-600 text-white' },
   status_changed: { icon: <RefreshCw className="h-3.5 w-3.5" aria-hidden />, dotClass: 'bg-violet-500 text-white' },
   followup_scheduled: { icon: <CalendarClock className="h-3.5 w-3.5" aria-hidden />, dotClass: 'bg-amber-500 text-white' },
+  owner_changed: { icon: <ArrowRightLeft className="h-3.5 w-3.5" aria-hidden />, dotClass: 'bg-sky-600 text-white' },
 };
 
 /** 下一次跟进计划的时间文案（逾期红 / 今天琥珀 / 未来常规 / 清除） */
@@ -138,6 +140,20 @@ function EventBody({ event }: { event: TimelineEvent }): React.JSX.Element | nul
     case 'followup_scheduled': {
       const hint = scheduledText(event.nextFollowUpAt);
       return <p className={cn('mt-1 text-sm', hint.className)}>{hint.text}</p>;
+    }
+    case 'owner_changed': {
+      const change = event.ownerChange;
+      if (!change) return null;
+      return (
+        <div className="mt-1 space-y-1 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>{change.fromOwnerName || '未分配'}</span>
+            <span className="text-muted-foreground">→</span>
+            <span className="font-medium">{change.toOwnerName || '未命名业务员'}</span>
+          </div>
+          {change.note ? <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{change.note}</p> : null}
+        </div>
+      );
     }
     default:
       return null;

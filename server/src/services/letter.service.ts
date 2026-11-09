@@ -44,6 +44,7 @@ import { ApiError } from '../utils/ApiError';
 import { buildPaginated, parsePagination, sortableFields, type Paginated } from '../utils/pagination';
 import {
   buildPlaceholderValues,
+  escapeHtml,
   escapeRegExp,
   htmlToPlainText,
   renderTemplate,
@@ -168,6 +169,20 @@ export interface RenderedLetter {
   recipientName: string;
 }
 
+/** 生成邮件客户端列表里显示的隐藏前置摘要（preheader）。 */
+function buildPreheader(text: string, subject: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  const source = compact || subject.trim();
+  if (!source) return '';
+  if (source.length <= 140) return source;
+  return `${source.slice(0, 137).replace(/\s+\S*$/, '').trim()}…`;
+}
+
+function preheaderHtml(text: string): string {
+  if (!text) return '';
+  return `<div data-preheader="true" style="display:none!important;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;color:transparent;overflow:hidden;mso-hide:all">${escapeHtml(text)}</div>`;
+}
+
 /**
  * 渲染开发信（不发送、不落库），供「预览」接口与发送流程共用。
  * 正文若还没有固定结尾，这里补上——预览、草稿、实际发送看到的是同一份内容。
@@ -198,8 +213,15 @@ export async function renderLetter(
   // A plain-text composer output must stay text-only. Its visible opt-out is
   // carried in the text part and in the List-Unsubscribe header.
   const isHtmlContent = /<[a-z][\s\S]*>/i.test(content);
+  const renderedSubject = renderTemplate(subject, values, { escape: false });
+  // Preheader is a hidden, inbox-list preview only. It must not alter the
+  // visible body or the plain-text part; HTML mail gets it before the body
+  // so clients can show a useful summary before the signature/footer.
+  const bodyWithPreheader = isHtmlContent
+    ? `${preheaderHtml(buildPreheader(renderedText, renderedSubject))}${renderedHtml}`
+    : renderedHtml;
   const withCompliance = appendUnsubscribeFooter(
-    renderedHtml,
+    bodyWithPreheader,
     renderedText,
     String(project?._id ?? customer.projectId ?? ''),
     recipientEmail,
@@ -208,7 +230,7 @@ export async function renderLetter(
 
   return {
     // 主题走纯文本渲染（不转义），正文走 HTML 渲染（转义，防存储型 XSS）
-    subject: renderTemplate(subject, values, { escape: false }),
+    subject: renderedSubject,
     html: withCompliance.html,
     text: withCompliance.text,
     recipientEmail,

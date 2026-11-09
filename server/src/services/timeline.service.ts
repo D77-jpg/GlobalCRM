@@ -33,7 +33,7 @@ import { MailMessage } from '../models/MailMessage';
 const logger = createLogger('timeline-service');
 
 /** 时间线事件类型（含从其它集合派生的 created / letter / followup / quotation） */
-export type TimelineEventType = 'created' | 'letter' | 'mail_received' | 'mail_opened' | 'mail_clicked' | 'followup' | 'quotation' | 'status_changed' | 'followup_scheduled';
+export type TimelineEventType = 'created' | 'letter' | 'mail_received' | 'mail_opened' | 'mail_clicked' | 'followup' | 'quotation' | 'status_changed' | 'followup_scheduled' | 'owner_changed';
 
 export interface TimelineEvent {
   /** 前端渲染用的稳定 key */
@@ -66,6 +66,14 @@ export interface TimelineEvent {
   statusChange?: { from?: CustomerStatus; to?: CustomerStatus };
   /** type=followup_scheduled 时变更后的下一次跟进时间（null 表示被清除） */
   nextFollowUpAt?: Date | null;
+  /** type=owner_changed 时的负责人转交摘要 */
+  ownerChange?: {
+    fromOwnerId?: string;
+    fromOwnerName?: string;
+    toOwnerId?: string;
+    toOwnerName?: string;
+    note?: string;
+  };
 }
 
 export interface CustomerTimeline {
@@ -107,6 +115,11 @@ interface EventRow {
   fromStatus?: CustomerStatus;
   toStatus?: CustomerStatus;
   nextFollowUpAt?: Date | null;
+  fromOwnerId?: Types.ObjectId;
+  toOwnerId?: Types.ObjectId;
+  fromOwnerName?: string;
+  toOwnerName?: string;
+  note?: string;
 }
 interface QuotationRow {
   _id: Types.ObjectId;
@@ -309,6 +322,19 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
         type: 'followup_scheduled',
         at,
         nextFollowUpAt: event.nextFollowUpAt ? new Date(event.nextFollowUpAt) : null,
+      });
+    } else if (event.type === 'owner_changed') {
+      items.push({
+        id: `event-${String(event._id)}`,
+        type: 'owner_changed',
+        at,
+        ownerChange: {
+          fromOwnerId: event.fromOwnerId ? String(event.fromOwnerId) : undefined,
+          fromOwnerName: event.fromOwnerName,
+          toOwnerId: event.toOwnerId ? String(event.toOwnerId) : undefined,
+          toOwnerName: event.toOwnerName,
+          note: event.note,
+        },
       });
     }
   }
