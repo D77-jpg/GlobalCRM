@@ -15,7 +15,11 @@ import { queueOutreachStep } from './agent/outreach-sequence.service';
 import { hasProtectedCustomerMail } from './agent/mail-thread-analysis.service';
 import { draftHash } from './agent/knowledge-grounding';
 import { approveDraftForAutomation, resendLetter } from './letter.service';
-import { syncOutreachFollowUps } from './outreach-followup.service';
+import {
+  cancelPendingOutreachLetters,
+  hasInboundReplySince,
+  syncOutreachFollowUps,
+} from './outreach-followup.service';
 import type { OutreachStep } from './project-profile';
 
 const logger = createLogger('outreach-automation');
@@ -730,13 +734,18 @@ async function processEnrollment(
     await markEnrollment(enrollment._id, { status: 'completed', currentStep: step, lastError: null });
     return { sent: false };
   }
+  const replied = Boolean(customer.outreachRepliedAt)
+    || await hasInboundReplySince(config.projectId, customer._id, customer.outreachLastAt);
+  if (replied) {
+    await cancelPendingOutreachLetters(config.projectId, customer._id);
+  }
   if (!AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number])
-    || customer.outreachRepliedAt
+    || replied
     || customer.outreachAbandonedAt) {
     await markEnrollment(enrollment._id, {
       status: 'blocked',
       currentStep: step,
-      lastError: customer.outreachRepliedAt ? '客户已回复，自动开发已停止' : '客户已不在可开发状态',
+      lastError: replied ? '客户已回复，自动开发已停止' : '客户已不在可开发状态',
     });
     return { sent: false };
   }
