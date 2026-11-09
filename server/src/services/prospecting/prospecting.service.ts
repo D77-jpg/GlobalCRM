@@ -565,6 +565,12 @@ export async function approveProspect(actor: AuthUser, id: string) {
   if (!claimed) throw ApiError.conflict('这条线索刚刚被其他业务员领取，请刷新后再试');
   try {
     const customer = await createCustomer(prospectCustomerInput(claimed), actor, { source: 'prospecting', ownerId: ownerForCustomer });
+    if (claimed.customsCompanyId) {
+      await Customer.updateOne(
+        { _id: customer.id, projectId },
+        { $set: { customsCompanyId: claimed.customsCompanyId, customsMatchConfidence: 1, customsMatchedAt: new Date() } },
+      );
+    }
     claimed.status = 'converted';
     claimed.customerId = new Types.ObjectId(customer.id);
     claimed.convertedBy = new Types.ObjectId(actor.id);

@@ -8,6 +8,8 @@ import {
   convertCustomsCompanyToProspect,
   createCustomsSource,
   getCustomerCustomsTrade,
+  getCustomerTradeSuggestions,
+  getCustomsAttribution,
   getCustomsCompany,
   getCustomsUsage,
   importCustomsRows,
@@ -97,6 +99,11 @@ export const usageHandler = asyncHandler(async (req: Request, res: Response) => 
   sendSuccess(res, await getCustomsUsage(projectId));
 });
 
+export const attributionHandler = asyncHandler(async (req: Request, res: Response) => {
+  const projectId = requireProjectId(req.user!);
+  sendSuccess(res, await getCustomsAttribution(projectId));
+});
+
 export const convertHandler = asyncHandler(async (req: Request, res: Response) => {
   const projectId = requireProjectId(req.user!);
   const body = req.body as { ownerId?: string; notes?: string };
@@ -106,6 +113,11 @@ export const convertHandler = asyncHandler(async (req: Request, res: Response) =
 export const customerTradeHandler = asyncHandler(async (req: Request, res: Response) => {
   const projectId = requireProjectId(req.user!);
   sendSuccess(res, await getCustomerCustomsTrade(projectId, req.params.id));
+});
+
+export const customerSuggestionsHandler = asyncHandler(async (req: Request, res: Response) => {
+  const projectId = requireProjectId(req.user!);
+  sendSuccess(res, await getCustomerTradeSuggestions(projectId, req.params.id));
 });
 
 export const sourcesHandler = asyncHandler(async (req: Request, res: Response) => {

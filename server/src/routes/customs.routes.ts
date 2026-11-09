@@ -17,6 +17,8 @@ import {
   companyHandler,
   convertHandler,
   createSourceHandler,
+  attributionHandler,
+  customerSuggestionsHandler,
   customerTradeHandler,
   importHandler,
   scoreHandler,
@@ -41,12 +43,14 @@ router.post('/companies/:id/convert', validate({ params: idParamsSchema, body: c
 router.post('/companies/:id/watch', validate({ params: idParamsSchema }), watchCompanyHandler);
 router.delete('/companies/:id/watch', validate({ params: idParamsSchema }), unwatchCompanyHandler);
 router.get('/customers/:id/trade', validate({ params: idParamsSchema }), customerTradeHandler);
+router.get('/customers/:id/suggestions', validate({ params: idParamsSchema }), customerSuggestionsHandler);
 router.post('/customers/:id/watch', validate({ params: idParamsSchema }), watchCustomerHandler);
 router.delete('/customers/:id/watch', validate({ params: idParamsSchema }), unwatchCustomerHandler);
 router.get('/watchlists', watchlistsHandler);
 router.get('/alerts', validate({ query: customsAlertQuerySchema }), alertsHandler);
 router.patch('/alerts/:id', validate({ params: idParamsSchema, body: customsAlertUpdateSchema }), updateAlertHandler);
 router.get('/usage', requireRole('admin'), usageHandler);
+router.get('/attribution', requireRole('admin'), attributionHandler);
 router.get('/sources', requireRole('admin'), sourcesHandler);
 router.post('/sources', requireRole('admin'), validate({ body: customsSourceSchema }), createSourceHandler);
 router.post('/import', requireRole('admin'), validate({ body: customsImportSchema }), importHandler);
