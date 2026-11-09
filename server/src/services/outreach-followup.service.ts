@@ -7,7 +7,8 @@
  *   - 第 3 封后 14 天仍无回复 → 判定弃用（状态已流失 + 标签「三次无回复」）
  *
  * 判定「有回复」的口径：客户名下有任何一封入站邮件，时间晚于最近一封开发信。
- * 一旦有回复，跟进停表（nextFollowUpAt 清空），不再提醒。
+ * 一旦有回复，跟进停表（nextFollowUpAt 清空），并取消已经排期但尚未发出的
+ * 后续开发信，避免回复后仍然自动发送下一封。
  *
  * 到期提醒本身不需要落库：列表按 nextFollowUpAt 实时算，
  * 同时复用客户主档的「下次跟进」，客户线索池 / 客户管理的跟进视图自动联动。
@@ -35,13 +36,62 @@ export function outreachDueAt(sentAt: Date, step: number): Date {
   return new Date(sentAt.getTime() + outreachIntervalDays(step) * DAY);
 }
 
+/** 判断客户在指定时间之后是否发来入站邮件。 */
+export async function hasInboundReplySince(
+  projectId: string | mongoose.Types.ObjectId,
+  customerId: string | mongoose.Types.ObjectId,
+  since: Date | null | undefined,
+): Promise<boolean> {
+  if (!since) return false;
+  return Boolean(await MailMessage.exists({
+    projectId,
+    customerId,
+    deleted: { $ne: true },
+    sentAt: { $gt: since },
+  }));
+}
+
+/**
+ * 客户回复后，取消尚未发出的后续开发信任务。
+ * draft 保留给业务员查看和修改；queued/scheduled/retrying 已进入发送队列，
+ * 必须在到期前取消，避免回复后仍自动发出下一封。
+ */
+export async function cancelPendingOutreachLetters(
+  projectId: string | mongoose.Types.ObjectId,
+  customerId: string | mongoose.Types.ObjectId,
+  reason = '客户已回复，已停止后续开发信',
+): Promise<number> {
+  const result = await DevelopmentLetter.updateMany(
+    {
+      projectId,
+      customerId,
+      status: { $in: ['queued', 'scheduled', 'retrying'] },
+      outreachStep: { $gte: 2 },
+      // 只取消真正的三封序列后续信；普通的手动定时邮件即使计算出了
+      // outreachStep，也不能仅凭这个数字被误取消。
+      $or: [
+        { inReplyTo: { $exists: true, $ne: '' } },
+        { agentOutreachId: { $exists: true, $ne: null } },
+        { automationCampaignId: { $exists: true, $ne: null } },
+        { automationEnrollmentId: { $exists: true, $ne: null } },
+        { agentTaskId: { $exists: true, $ne: null } },
+      ],
+    },
+    {
+      $set: { status: 'cancelled', error: reason },
+      $push: { history: { at: new Date(), status: 'cancelled', error: reason } },
+    },
+  );
+  return result.modifiedCount ?? 0;
+}
+
 /**
  * 开发信真正投出去之后调用：记录第几封，并把「下次跟进」排到节奏上。
  * 已经弃用的客户重新发信时，按新一轮开发处理。
  */
 export async function scheduleOutreachFollowUp(letter: {
-  projectId: unknown;
-  customerId: unknown;
+  projectId: string | mongoose.Types.ObjectId;
+  customerId: string | mongoose.Types.ObjectId;
   outreachStep?: number;
   sentAt?: Date | null;
   createdAt?: Date;
@@ -52,14 +102,21 @@ export async function scheduleOutreachFollowUp(letter: {
     .select('outreachAbandonedAt status tags').lean();
   if (!customer) return;
 
+  // 客户可能在 SMTP 接受后、排下一封前就回复。此时不能再把
+  // outreachRepliedAt 清空，也不能重新排下一封。
+  const repliedSinceSend = await hasInboundReplySince(letter.projectId, letter.customerId, sentAt);
   const restarted = Boolean(customer.outreachAbandonedAt) || letter.outreachStep === 1;
   const step = customer.outreachAbandonedAt ? 1 : letter.outreachStep;
   const patch: Record<string, unknown> = {
     outreachStep: step,
     outreachLastAt: sentAt,
-    outreachRepliedAt: null,
-    nextFollowUpAt: outreachDueAt(sentAt, step),
+    outreachRepliedAt: repliedSinceSend ? new Date() : null,
+    nextFollowUpAt: repliedSinceSend ? null : outreachDueAt(sentAt, step),
   };
+  if (repliedSinceSend) {
+    await cancelPendingOutreachLetters(letter.projectId, letter.customerId);
+    if (customer.status === 'pending' || customer.status === 'contacted') patch.status = 'replied';
+  }
   if (restarted) patch.outreachStartedAt = sentAt;
   if (customer.outreachAbandonedAt) {
     patch.outreachAbandonedAt = null;
@@ -105,6 +162,8 @@ export async function syncOutreachFollowUps(
       const bumpStatus = customer.status === 'pending' || customer.status === 'contacted';
       if (bumpStatus) patch.status = 'replied';
       await Customer.updateOne({ _id: customer._id, projectId }, { $set: patch });
+      const cancelled = await cancelPendingOutreachLetters(projectId, customer._id);
+      if (cancelled) logger.info(`客户已回复，取消 ${cancelled} 封未发出的后续开发信`);
       if (bumpStatus) {
         await CustomerEvent.create({
           projectId,

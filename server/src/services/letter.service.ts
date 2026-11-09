@@ -12,6 +12,7 @@ import { safeMailHtml } from './mail-security';
 import { prepareTrackedHtml, trackingSummary, type TrackingSummary } from './mail-tracking.service';
 import { MailMessage } from '../models/MailMessage';
 import { resolveSenderIdentity } from './mail-account.service';
+import { hasInboundReplySince } from './outreach-followup.service';
 /**
  * 开发信业务逻辑
  * ------------------------------------------------------------------
@@ -536,6 +537,23 @@ async function persistAndSend(options: {
     : isOutreach
       ? (customer.outreachAbandonedAt ? 1 : Math.min(currentStep + 1, OUTREACH_MAX_STEPS))
       : undefined;
+
+  // 客户已经回复上一封开发信时，显式指定的后续序列只能保留为草稿查看，
+  // 不能再创建定时任务或立即发送。队列层还会在真正投递前复查一次。
+  const explicitOutreachStep = options.outreachStep
+    ? Math.min(OUTREACH_MAX_STEPS, Math.max(1, Math.trunc(options.outreachStep)))
+    : undefined;
+  if (!saveAsDraft && explicitOutreachStep && explicitOutreachStep > 1 && !options.replyToId) {
+    const previous = await DevelopmentLetter.findOne({
+      projectId: customer.projectId,
+      customerId: customer._id,
+      outreachStep: explicitOutreachStep - 1,
+      status: { $in: ['sent', 'opened'] },
+    }).select('sentAt').sort({ sentAt: -1 }).lean();
+    const replied = Boolean(customer.outreachRepliedAt)
+      || (previous?.sentAt ? await hasInboundReplySince(customer.projectId, customer._id, previous.sentAt) : false);
+    if (replied) throw ApiError.conflict('客户已回复，已停止后续开发信');
+  }
 
   // Background automation writes through findOneAndUpdate(upsert), which does
   // not run the tenant plugin's save hook. Carry the project tenant key

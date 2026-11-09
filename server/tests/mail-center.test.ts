@@ -127,6 +127,50 @@ test('03 repeat/concurrent request key sends exactly once', async () => {
 test('04 scheduled task is stored without SMTP delivery', async () => { const id = await scheduled(); const job = await models.DevelopmentLetter.findById(id); assert.equal(job?.status, 'scheduled'); assert.equal(job?.attempts, 0); await queue.processMailJob(id, accepted); assert.equal((await models.DevelopmentLetter.findById(id))?.attempts, 0); });
 test('05 due scheduled task runs through atomic claim', async () => { const id = await scheduled(); await due(id); let sends = 0; await Promise.all(Array.from({ length: 8 }, () => queue.processMailJob(id, async () => { sends++; return accepted(); }))); assert.equal(sends, 1); assert.equal((await models.DevelopmentLetter.findById(id))?.status, 'sent'); });
 test('06 cancel prevents worker from sending', async () => { const id = await scheduled(); await request('POST', `/mail/${id}/cancel`, salesToken); await due(id); let sends = 0; await queue.processMailJob(id, async () => { sends++; return accepted(); }); assert.equal(sends, 0); assert.equal((await models.DevelopmentLetter.findById(id))?.status, 'cancelled'); });
+test('06b customer reply cancels the scheduled remainder before SMTP', async () => {
+  const outreach = await import('../src/services/outreach-followup.service');
+  const day = 86_400_000;
+  const replyEmail = `reply-stop.${suffix}@example.test`;
+  const customer = await models.Customer.create({
+    projectId, ownerId: salesId, name: `Reply stop ${suffix}`, email: replyEmail,
+    status: 'contacted', source: 'manual', tags: [], outreachStep: 1,
+    outreachLastAt: new Date(Date.now() - day), nextFollowUpAt: new Date(Date.now() + day),
+  });
+  const pending = await models.DevelopmentLetter.create({
+    projectId, customerId: customer._id, recipientEmail: replyEmail, recipientName: customer.name,
+    subject: 'Scheduled outreach remainder', content: '<p>Remainder</p>', contentText: 'Remainder',
+    template: '', status: 'scheduled', channel: 'mock', outreachStep: 2,
+    scheduledAt: new Date(Date.now() + 3_600_000), nextAttemptAt: new Date(Date.now() + 3_600_000),
+    sentBy: salesId, attempts: 0, needsReview: false, effectsPending: false, history: [],
+    requestKey: `reply-stop-pending-${suffix}`, inReplyTo: '<prior-outreach@fixture.test>',
+  });
+  await mailModels.MailMessage.create({
+    projectId, customerId: customer._id, dedupKey: `reply-stop-${suffix}`, threadId: `reply-stop-${suffix}`,
+    from: replyEmail, to: ['sales@example.com'], subject: 'Re: Scheduled outreach remainder',
+    text: 'We are interested, please stop the sequence.', sentAt: new Date(), visibility: 'private',
+  });
+
+  await outreach.syncOutreachFollowUps(projectId);
+  const syncedCustomer = await models.Customer.findById(customer._id).lean();
+  assert.equal(syncedCustomer?.nextFollowUpAt, null);
+  assert.ok(syncedCustomer?.outreachRepliedAt);
+  assert.equal((await models.DevelopmentLetter.findById(pending._id))?.status, 'cancelled');
+
+  // 模拟同步之后才由旧 worker claim 的竞态任务：投递适配器也不能被调用。
+  const raced = await models.DevelopmentLetter.create({
+    projectId, customerId: customer._id, recipientEmail: replyEmail, recipientName: customer.name,
+    subject: 'Raced outreach remainder', content: '<p>Raced</p>', contentText: 'Raced',
+    template: '', status: 'scheduled', channel: 'mock', outreachStep: 3,
+    scheduledAt: new Date(Date.now() + 3_600_000), nextAttemptAt: new Date(Date.now() + 3_600_000),
+    sentBy: salesId, attempts: 0, needsReview: false, effectsPending: false, history: [],
+    requestKey: `reply-stop-raced-${suffix}`, inReplyTo: '<prior-outreach@fixture.test>',
+  });
+  await due(raced._id);
+  let called = false;
+  await queue.processMailJob(raced._id, async () => { called = true; return accepted(); });
+  assert.equal(called, false);
+  assert.equal((await models.DevelopmentLetter.findById(raced._id))?.status, 'cancelled');
+});
 test('07 transient failure backs off then succeeds', async () => { const id = await scheduled(); await due(id); await queue.processMailJob(id, async () => ({ accepted: false, channel: 'mock', durationMs: 0, retryable: true, error: 'temporary' })); let job = await models.DevelopmentLetter.findById(id); assert.equal(job?.status, 'retrying'); assert.ok(job?.nextAttemptAt && job.nextAttemptAt.getTime() > Date.now() - 100); await due(id); await queue.processMailJob(id, accepted); job = await models.DevelopmentLetter.findById(id); assert.equal(job?.status, 'sent'); assert.equal(job?.attempts, 2); });
 test('08 bounded retries stop at max attempts', async () => { const id = await scheduled(); for (let i = 0; i < 3; i++) { await due(id); await queue.processMailJob(id, async () => ({ accepted: false, channel: 'mock', durationMs: 0, retryable: true, error: 'temporary' })); } assert.equal((await models.DevelopmentLetter.findById(id))?.status, 'failed'); });
 test('09 ambiguous SMTP result is never automatically replayed', async () => { const id = await scheduled(); await due(id); await queue.processMailJob(id, async () => { throw new Error('secret-network-response'); }); const job = await models.DevelopmentLetter.findById(id); assert.equal(job?.status, 'failed'); assert.equal(job?.needsReview, true); assert.ok(!job?.error?.includes('secret-network')); await request('POST', `/letters/${id}/resend`, salesToken, {}, 409); });

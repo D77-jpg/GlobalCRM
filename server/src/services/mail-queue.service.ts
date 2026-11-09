@@ -8,7 +8,11 @@ import env from '../config/env';
 import { sendMail, type SendMailPayload, type SendMailResult } from './mailer.service';
 import { createLogger } from '../config/logger';
 import { auditMailResult, reserveMailAttempt } from './mail-account.service';
-import { scheduleOutreachFollowUp } from './outreach-followup.service';
+import {
+  cancelPendingOutreachLetters,
+  hasInboundReplySince,
+  scheduleOutreachFollowUp,
+} from './outreach-followup.service';
 import { isEmailSuppressed, suppressEmail, unsubscribeHeaders } from './mail-compliance.service';
 
 const logger = createLogger('mail-queue');
@@ -66,6 +70,26 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
       $push: { history: { at: new Date(), status: 'cancelled' } },
     });
     return;
+  }
+
+  // 开发信序列的后续邮件在真正到期发送前再查一次回复。
+  // syncOutreachFollowUps 会取消候选任务，但这里覆盖“回复刚刚到达、
+  // 定时任务已经被 worker claim”的竞态，不能只依赖客户字段是否已同步。
+  // 只拦截真正的序列后续信，避免普通定时邮件被 outreachStep 误判。
+  const sequenceFollowUp = Boolean(job.inReplyTo || job.agentOutreachId || job.automationCampaignId
+    || job.automationEnrollmentId || job.agentTaskId);
+  if (sequenceFollowUp && job.outreachStep && job.outreachStep > 1) {
+    const replied = Boolean(customer.outreachRepliedAt)
+      || await hasInboundReplySince(job.projectId, job.customerId, customer.outreachLastAt);
+    if (replied) {
+      const reason = '客户已回复，已停止后续开发信';
+      await cancelPendingOutreachLetters(job.projectId, job.customerId, reason);
+      await DevelopmentLetter.updateOne({ _id: job._id, status: 'sending' }, {
+        $set: { status: 'cancelled', error: reason },
+        $push: { history: { at: new Date(), status: 'cancelled', error: reason } },
+      });
+      return;
+    }
   }
 
   if((job.agentOutreachId||job.agentTaskId)&&await hasProtectedCustomerMail(String(job.customerId),String(job.projectId))){
