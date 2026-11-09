@@ -160,6 +160,10 @@ test('customs source and import normalize and search records', async () => {
   assert.equal(trade.matched, true);
   assert.equal(trade.company.canonicalName, 'Acme Trading Ltd.');
 
+  const suggestions = await request('GET', `/customs/customers/${customer.id}/suggestions`, salesToken);
+  assert.ok(suggestions.summary.includes('Acme Trading Ltd.'));
+  assert.ok(suggestions.suggestions.length >= 1);
+
   const watch = await request('POST', `/customs/customers/${customer.id}/watch`, salesToken, {}, 200);
   assert.equal(watch.enabled, true);
   assert.equal(String(watch.companyId), String(companies.items[0]._id));
@@ -192,6 +196,10 @@ test('customs source and import normalize and search records', async () => {
   const usage = await request('GET', '/customs/usage', adminToken);
   assert.ok(usage.search >= 1);
   assert.ok(usage.recordIngested >= 3);
+
+  const attribution = await request('GET', '/customs/attribution', adminToken);
+  assert.ok(attribution.prospects.total >= 1);
+  assert.ok(attribution.customers.total >= 1);
 });
 
 test('customs import is admin only and rejects unknown sources', async () => {

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowUpRight, BarChart3, Building2, Loader2, Ship } from 'lucide-react';
+import { ArrowUpRight, BarChart3, Building2, Loader2, Ship, Sparkles } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, toErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,11 +9,25 @@ import { formatDate, formatMoney } from '@/lib/format';
 import { formatCountry } from '@/lib/country';
 import type { CustomerCustomsTrade } from '@/types';
 
+interface CustomsSuggestions {
+  summary: string;
+  suggestions: Array<{ title: string; text: string; evidenceIds: string[] }>;
+  ai?: {
+    used: boolean;
+    model?: string;
+    recommendations?: Array<{ text: string; rationale: string }>;
+    emailDraft?: { subject: string; bodyText: string };
+    note?: string;
+  };
+}
+
 export function CustomerTradePanel({ customerId }: { customerId: string }): React.JSX.Element {
   const [data, setData] = React.useState<CustomerCustomsTrade | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [watchBusy, setWatchBusy] = React.useState(false);
+  const [suggestion, setSuggestion] = React.useState<CustomsSuggestions | null>(null);
+  const [suggestBusy, setSuggestBusy] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -68,6 +82,18 @@ export function CustomerTradePanel({ customerId }: { customerId: string }): Reac
 
   const watching = Boolean(data.watch?.enabled);
 
+  async function generateSuggestions(): Promise<void> {
+    setSuggestBusy(true);
+    try {
+      const result = await apiGet<CustomsSuggestions>(`/customs/customers/${customerId}/suggestions`);
+      setSuggestion(result);
+    } catch (reason) {
+      toast.error('跟进建议生成失败', { description: toErrorMessage(reason) });
+    } finally {
+      setSuggestBusy(false);
+    }
+  }
+
   async function toggleWatch(): Promise<void> {
     setWatchBusy(true);
     try {
@@ -100,6 +126,10 @@ export function CustomerTradePanel({ customerId }: { customerId: string }): Reac
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => void generateSuggestions()} disabled={suggestBusy}>
+            {suggestBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Sparkles className="mr-1 h-3.5 w-3.5" aria-hidden />}
+            生成跟进建议
+          </Button>
           <Button size="sm" variant={watching ? 'secondary' : 'outline'} onClick={() => void toggleWatch()} disabled={watchBusy}>
             {watchBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Ship className="mr-1 h-3.5 w-3.5" aria-hidden />}
             {watching ? '停止监控' : '监控变化'}
@@ -115,6 +145,34 @@ export function CustomerTradePanel({ customerId }: { customerId: string }): Reac
           <Metric label="累计金额" value={formatMoney(data.summary?.totalAmountUsd ?? data.company.totalAmountUsd, 'USD')} />
           <Metric label="最近记录" value={formatDate(data.summary?.lastSeenAt ?? data.company.lastSeenAt)} />
         </div>
+        {suggestion ? (
+          <div className="space-y-2 rounded-md border bg-muted/20 p-3 text-xs">
+            <p className="font-semibold">跟进建议</p>
+            <p className="text-muted-foreground">{suggestion.summary}</p>
+            {suggestion.suggestions.map((item) => (
+              <div key={item.title}>
+                <p className="font-medium">{item.title}</p>
+                <p className="mt-0.5 text-muted-foreground">{item.text}</p>
+              </div>
+            ))}
+            {suggestion.ai?.recommendations?.length ? (
+              <div className="border-t pt-2">
+                <p className="font-medium">AI 补充</p>
+                {suggestion.ai.recommendations.map((item, index) => (
+                  <p key={`${item.text}-${index}`} className="mt-1 text-muted-foreground">{item.text}</p>
+                ))}
+              </div>
+            ) : null}
+            {suggestion.ai?.emailDraft ? (
+              <details className="border-t pt-2">
+                <summary className="cursor-pointer font-medium">查看 AI 开发信草稿（需人工审核）</summary>
+                <p className="mt-2 font-medium">{suggestion.ai.emailDraft.subject}</p>
+                <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{suggestion.ai.emailDraft.bodyText}</p>
+              </details>
+            ) : null}
+            {suggestion.ai?.note ? <p className="text-[11px] text-muted-foreground">{suggestion.ai.note}</p> : null}
+          </div>
+        ) : null}
         {data.recentShipments?.length ? (
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full min-w-[620px] text-left text-xs">

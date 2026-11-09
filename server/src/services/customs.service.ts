@@ -3,9 +3,10 @@ import { Types, type FilterQuery } from 'mongoose';
 import { ApiError } from '../utils/ApiError';
 import { countryCode } from '../utils/country';
 import { domainFromAddress } from '../utils/domain';
-import { Customer } from '../models';
+import { Customer, Quotation } from '../models';
 import { Prospect } from '../models/Prospect';
 import { encryptCredential } from './credential-crypto';
+import { resolveAgentProvider } from './agent/ai-settings.service';
 import {
   CustomsAlert,
   CustomsCompany,
@@ -509,6 +510,97 @@ export async function getCustomerCustomsTrade(projectId: Types.ObjectId, custome
   return { matched: true, customer: { id: String(customer._id), name: customer.name, company: customer.company ?? null }, watch: watch ?? null, ...detail };
 }
 
+export interface CustomsSuggestionResult {
+  companyId: string;
+  summary: string;
+  suggestions: Array<{ title: string; text: string; evidenceIds: string[] }>;
+  ai: {
+    used: boolean;
+    model?: string;
+    recommendations?: Array<{ text: string; rationale: string }>;
+    emailDraft?: { subject: string; bodyText: string };
+    note?: string;
+  };
+}
+
+/** 基于海关贸易动态生成客户跟进建议；AI 不可用时返回可解释的规则建议。 */
+export async function getCustomerTradeSuggestions(projectId: Types.ObjectId, customerId: string): Promise<CustomsSuggestionResult> {
+  const trade = await getCustomerCustomsTrade(projectId, customerId);
+  if (!trade.matched || !trade.company) throw ApiError.conflict('还没有匹配到海关公司，请先在贸易情报中确认公司');
+  const company = trade.company;
+  const recent = trade.recentShipments ?? [];
+  const productNames = [...new Set(recent.map((shipment) => shipment.productDescription?.trim()).filter(Boolean))].slice(0, 5) as string[];
+  const latest = recent[0];
+  const evidenceIds = recent.slice(0, 3).map((shipment) => String(shipment._id));
+  const suggestions: CustomsSuggestionResult['suggestions'] = [
+    {
+      title: '先确认采购时间窗口',
+      text: `这家公司最近一票记录在 ${latest?.shipmentDate ? new Date(latest.shipmentDate).toISOString().slice(0, 10) : '暂无日期'}，共 ${company.shipmentCount} 票记录，累计 ${Math.round(company.totalAmountUsd).toLocaleString('en-US')} USD。先确认下一次补货或新包装计划，再决定报价节奏。`,
+      evidenceIds,
+    },
+    {
+      title: '从产品结构切入',
+      text: productNames.length
+        ? `近期产品包括：${productNames.join('、')}。开发信可以围绕同类产品的包装一致性、补货和样品对比展开。`
+        : '海关记录没有足够的产品描述，先补充产品和 HS 映射，再做针对性开发。',
+      evidenceIds,
+    },
+    {
+      title: '避免把海关记录当成采购承诺',
+      text: '海关数据只能说明历史进口行为，不能证明当前有采购需求。建议先发一封低压力确认邮件，不直接承诺价格、MOQ 或交期。',
+      evidenceIds,
+    },
+  ];
+
+  const ai: CustomsSuggestionResult['ai'] = { used: false };
+  try {
+    const provider = await resolveAgentProvider();
+    if (provider.isAvailable()) {
+      const analysis = await provider.analyzeCustomer({
+        input: {
+          customerName: String(trade.customer?.name ?? company.canonicalName),
+          customerEmail: undefined,
+          userRequest: '根据以下海关进口记录，总结客户采购画像，并给出一个不虚构事实的跟进角度。不要承诺价格、MOQ 或交期。',
+          sourceCatalog: [{
+            sourceId: `customs-${String(company._id)}`,
+            kind: 'customs',
+            label: '海关进口记录',
+            content: {
+              company: company.canonicalName,
+              country: company.country,
+              shipmentCount: company.shipmentCount,
+              totalAmountUsd: company.totalAmountUsd,
+              productNames,
+              recentShipments: recent.slice(0, 10).map((shipment) => ({
+                shipmentDate: shipment.shipmentDate,
+                productDescription: shipment.productDescription,
+                hsCode: shipment.hsCode,
+                amountUsd: shipment.amountUsd,
+                exporterName: shipment.exporterNameRaw,
+              })),
+            },
+          }],
+        },
+        safetyIdentifier: `customs:${String(projectId)}:${customerId}`,
+      });
+      ai.used = true;
+      ai.model = provider.model;
+      ai.recommendations = (analysis.recommendations ?? []).slice(0, 5).map((item) => ({ text: item.text, rationale: item.rationale }));
+      ai.emailDraft = analysis.emailDraft;
+      ai.note = 'AI 结果仅供业务员参考，发送前必须人工审核。';
+    }
+  } catch (error) {
+    ai.note = error instanceof Error ? `AI 暂不可用：${error.message}` : 'AI 暂不可用';
+  }
+
+  return {
+    companyId: String(company._id),
+    summary: `${company.canonicalName} 共有 ${company.shipmentCount} 票海关记录，累计 ${Math.round(company.totalAmountUsd).toLocaleString('en-US')} USD。`,
+    suggestions,
+    ai,
+  };
+}
+
 type ShipmentLike = {
   _id: Types.ObjectId;
   importerCompanyId: Types.ObjectId;
@@ -693,6 +785,42 @@ export async function recordCustomsUsage(
 ) {
   if (quantity <= 0) return;
   await CustomsUsage.create({ projectId, metric, quantity, userId, metadata });
+}
+
+/** 海关来源线索、客户、报价和成交的轻量归因。 */
+export async function getCustomsAttribution(projectId: Types.ObjectId) {
+  const prospects = await Prospect.find({ projectId, source: 'customs' })
+    .select('status customerId createdAt').lean();
+  const customerIds = prospects
+    .map((prospect) => prospect.customerId)
+    .filter(Boolean) as Types.ObjectId[];
+  const customers = await Customer.find({
+    projectId,
+    $or: [
+      { customsCompanyId: { $exists: true } },
+      ...(customerIds.length ? [{ _id: { $in: customerIds } }] : []),
+    ],
+  }).select('status createdAt').lean();
+  const quotations = customerIds.length
+    ? await Quotation.find({ projectId, customerId: { $in: customerIds } }).select('status totalAmount currency customerId').lean()
+    : [];
+  const prospectStatus = prospects.reduce<Record<string, number>>((acc, prospect) => {
+    acc[prospect.status] = (acc[prospect.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const customerStatus = customers.reduce<Record<string, number>>((acc, customer) => {
+    acc[customer.status] = (acc[customer.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  return {
+    prospects: { total: prospects.length, byStatus: prospectStatus, converted: prospects.filter((prospect) => prospect.status === 'converted').length },
+    customers: { total: customers.length, byStatus: customerStatus, won: customers.filter((customer) => customer.status === 'won').length },
+    quotations: {
+      total: quotations.length,
+      accepted: quotations.filter((quotation) => quotation.status === 'accepted').length,
+      value: quotations.reduce((sum, quotation) => sum + Number(quotation.totalAmount ?? 0), 0),
+    },
+  };
 }
 
 export async function getCustomsUsage(projectId: Types.ObjectId) {

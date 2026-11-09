@@ -187,6 +187,10 @@
 - 置信度
 - 是否由 AI 生成
 
+### GET `/api/customs/companies/:id/score`
+
+返回公司贸易匹配评分和评分依据。
+
 ## 4. 监控和预警
 
 ### GET `/api/customs/watchlists`
@@ -226,6 +230,10 @@
 ### PATCH `/api/customs/alerts/:id`
 
 标记已读、忽略或转为待办。
+
+### GET `/api/customs/attribution`
+
+管理员查看海关来源线索、客户、报价和成交的归因汇总。
 
 ## 5. 数据源和同步
 
