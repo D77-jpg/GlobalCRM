@@ -33,6 +33,11 @@ import { usePageTitle } from '@/hooks/use-ui';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { MailInteractionSummary } from '@/components/letters/mail-interaction-summary';
 import type { MailTrackingSummary } from '@/types';
+
+/** 开发信跟进不伪装成客户回复：标题去掉 Re:/Fwd: 前缀。 */
+function stripReplySubjectPrefix(subject: string): string {
+  return subject.replace(/^\s*(?:(?:re|fw|fwd|回复|答复|转发)\s*[:：]\s*)+/i, '').trim();
+}
 import { useUiStore } from '@/store/ui.store';
 
 interface MailItem {
@@ -219,7 +224,7 @@ export function MailPage(): React.JSX.Element {
       const customer = (raw as { customer?: Customer }).customer ?? (raw as Customer);
       let seed = {
         analysisId: '',
-        subject: /^re:/i.test(row.lastSubject || '') ? (row.lastSubject || '') : `Re: ${row.lastSubject || ''}`,
+        subject: stripReplySubjectPrefix(row.lastSubject || ''),
         content: '',
       };
       try {
