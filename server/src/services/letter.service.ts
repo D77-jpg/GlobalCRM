@@ -374,6 +374,10 @@ function toLetterDto(doc: Record<string, unknown>): LetterDto {
   const review = toReviewSummary(doc.review);
   const knowledgeReview = doc.knowledgeReview as KnowledgeReview | undefined;
   const sendBlocker = doc.status === 'draft' ? knowledgeReviewHardBlocker(knowledgeReview) : undefined;
+  const storedSubject = String(doc.subject ?? '');
+  const displaySubject = doc.status === 'draft' && Number(doc.outreachStep) > 1
+    ? (stripReplySubjectPrefix(storedSubject) || storedSubject)
+    : storedSubject;
 
   return {
     id: String((doc._id ?? doc.id ?? '').toString()),
@@ -384,7 +388,7 @@ function toLetterDto(doc: Record<string, unknown>): LetterDto {
     knowledgeReview,
     ...(sendBlocker ? { sendBlocker } : {}),
     knowledgeRechecks:doc.knowledgeRechecks as Record<string,unknown>[]|undefined,
-    subject: String(doc.subject ?? ''),
+    subject: displaySubject,
     content: String(doc.content ?? ''),
     contentText: String(doc.contentText ?? ''),
     template: String(doc.template ?? ''),
