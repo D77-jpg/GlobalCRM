@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Building2, Globe2, Loader2, Search, Ship, TrendingUp } from 'lucide-react';
+import { ArrowRight, BellRing, Building2, Globe2, Loader2, Search, Ship, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/common/page-header';
 import { EmptyState, ErrorState } from '@/components/common/empty-state';
@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { apiGet, apiPost, toErrorMessage } from '@/lib/api';
+import { apiGet, apiPatch, apiPost, toErrorMessage } from '@/lib/api';
 import { formatCountry } from '@/lib/country';
 import { formatDate, formatMoney } from '@/lib/format';
 import { usePageTitle } from '@/hooks/use-ui';
@@ -19,6 +19,20 @@ import type { CustomsCompanyDetail, CustomsCompanySummary, CustomsShipment } fro
 
 interface CompanyList {
   items: CustomsCompanySummary[];
+  total: number;
+}
+
+interface CustomsAlert {
+  _id: string;
+  type: string;
+  title: string;
+  summary: string;
+  status: string;
+  createdAt: string | Date;
+}
+
+interface AlertList {
+  items: CustomsAlert[];
   total: number;
 }
 
@@ -34,6 +48,7 @@ export function CustomsPage(): React.JSX.Element {
   const [selected, setSelected] = React.useState<CustomsCompanyDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [convertBusy, setConvertBusy] = React.useState(false);
+  const [alerts, setAlerts] = React.useState<CustomsAlert[]>([]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -54,12 +69,28 @@ export function CustomsPage(): React.JSX.Element {
 
   React.useEffect(() => { void load(); }, [load]);
 
+  React.useEffect(() => {
+    void apiGet<AlertList>('/customs/alerts?status=unread&page=1&limit=5')
+      .then((result) => setAlerts(result.items))
+      .catch(() => { /* 提醒是辅助信息，不阻断主页面 */ });
+  }, []);
+
+  async function markAlertRead(alertId: string): Promise<void> {
+    try {
+      await apiPatch(`/customs/alerts/${alertId}`, { status: 'read' });
+      setAlerts((current) => current.filter((alert) => alert._id !== alertId));
+    } catch (reason) {
+      toast.error('提醒状态更新失败', { description: toErrorMessage(reason) });
+    }
+  }
+
   async function openCompany(company: CustomsCompanySummary): Promise<void> {
     setDetailLoading(true);
     setSelected(null);
     try {
       const detail = await apiGet<CustomsCompanyDetail>(`/customs/companies/${company._id}`);
-      setSelected(detail);
+      const score = await apiGet<{ score: number; reasons: Array<{ label: string; value: string | number }>; calculatedAt?: string }>(`/customs/companies/${company._id}/score`);
+      setSelected({ ...detail, score });
     } catch (reason) {
       toast.error('公司档案读取失败', { description: toErrorMessage(reason) });
     } finally {
@@ -91,6 +122,26 @@ export function CustomsPage(): React.JSX.Element {
         title="贸易情报"
         description="按产品和市场发现进口商，查看公司采购画像，并把高匹配公司加入潜客池。"
       />
+
+      {alerts.length ? (
+        <Card className="border-amber-200/70 bg-amber-50/30 dark:border-amber-400/20 dark:bg-amber-400/5">
+          <CardContent className="space-y-2 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex items-center gap-2 text-sm font-semibold"><BellRing className="h-4 w-4 text-amber-600" aria-hidden />贸易提醒</p>
+              <Badge variant="outline">{alerts.length} 条未读</Badge>
+            </div>
+            {alerts.map((alert) => (
+              <div key={alert._id} className="flex items-start justify-between gap-3 rounded-md bg-background/70 p-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-medium">{alert.title}</p>
+                  <p className="mt-0.5 line-clamp-2 text-muted-foreground">{alert.summary}</p>
+                </div>
+                <Button size="sm" variant="ghost" className="shrink-0" onClick={() => void markAlertRead(alert._id)}>标为已读</Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_220px_auto]">
@@ -211,11 +262,17 @@ function CompanyDetail({ detail, onConvert, convertBusy }: { detail: CustomsComp
             <Building2 className="h-4 w-4" aria-hidden />
             {formatCountry(company.country)} {company.domain ? `· ${company.domain}` : ''}
           </p>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             <Metric label="进口票数" value={String(summary.shipmentCount)} />
             <Metric label="累计金额" value={formatMoney(summary.totalAmountUsd, 'USD')} />
             <Metric label="最近记录" value={formatDate(summary.lastSeenAt)} />
+            <Metric label="匹配评分" value={detail.score ? `${detail.score.score}/100` : '暂无'} />
           </div>
+          {detail.score?.reasons?.length ? (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              评分依据：{detail.score.reasons.map((reason) => `${reason.label} ${reason.value}`).join(' · ')}
+            </p>
+          ) : null}
         </div>
         <Button onClick={onConvert} disabled={convertBusy}>
           {convertBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <TrendingUp className="mr-1.5 h-4 w-4" aria-hidden />}

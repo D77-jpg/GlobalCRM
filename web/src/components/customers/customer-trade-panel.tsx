@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, BarChart3, Building2, Loader2, Ship } from 'lucide-react';
-import { apiGet, toErrorMessage } from '@/lib/api';
+import { apiDelete, apiGet, apiPost, toErrorMessage } from '@/lib/api';
+import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { formatDate, formatMoney } from '@/lib/format';
@@ -12,6 +13,7 @@ export function CustomerTradePanel({ customerId }: { customerId: string }): Reac
   const [data, setData] = React.useState<CustomerCustomsTrade | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
+  const [watchBusy, setWatchBusy] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -64,6 +66,27 @@ export function CustomerTradePanel({ customerId }: { customerId: string }): Reac
     );
   }
 
+  const watching = Boolean(data.watch?.enabled);
+
+  async function toggleWatch(): Promise<void> {
+    setWatchBusy(true);
+    try {
+      if (watching) {
+        const next = await apiDelete<{ enabled?: boolean }>(`/customs/customers/${customerId}/watch`);
+        setData((current) => current ? { ...current, watch: next } : current);
+        toast.success('已停止监控该客户的贸易变化');
+      } else {
+        const next = await apiPost<{ enabled?: boolean }>(`/customs/customers/${customerId}/watch`, {});
+        setData((current) => current ? { ...current, watch: next } : current);
+        toast.success('已开始监控该客户的贸易变化');
+      }
+    } catch (reason) {
+      toast.error('监控状态更新失败', { description: toErrorMessage(reason) });
+    } finally {
+      setWatchBusy(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0 pb-3">
@@ -76,9 +99,15 @@ export function CustomerTradePanel({ customerId }: { customerId: string }): Reac
             海关数据匹配：{data.company.canonicalName} · 数据截至 {formatDate(data.summary?.lastSeenAt)}
           </CardDescription>
         </div>
-        <Button asChild size="sm" variant="outline">
-          <Link to="/customs">查看完整公司档案 <ArrowUpRight className="ml-1 h-3.5 w-3.5" /></Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant={watching ? 'secondary' : 'outline'} onClick={() => void toggleWatch()} disabled={watchBusy}>
+            {watchBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : <Ship className="mr-1 h-3.5 w-3.5" aria-hidden />}
+            {watching ? '停止监控' : '监控变化'}
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/customs">查看完整公司档案 <ArrowUpRight className="ml-1 h-3.5 w-3.5" /></Link>
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">

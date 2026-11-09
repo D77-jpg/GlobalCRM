@@ -8,6 +8,11 @@ export type CustomsCompanyStatus = 'active' | 'merged' | 'ignored';
 export type CustomsMatchType = 'customer' | 'prospect';
 export type CustomsMatchMethod = 'domain' | 'vat' | 'eori' | 'name_country' | 'address' | 'fuzzy' | 'manual';
 export type CustomsMatchStatus = 'suggested' | 'confirmed' | 'rejected';
+export type CustomsWatchType = 'company' | 'customer' | 'market';
+export type CustomsAlertType = 'new_shipment' | 'new_buyer' | 'supplier_change' | 'volume_drop' | 'new_product';
+export type CustomsAlertSeverity = 'info' | 'warning' | 'critical';
+export type CustomsAlertStatus = 'unread' | 'read' | 'dismissed' | 'converted';
+export type CustomsUsageMetric = 'search' | 'company_view' | 'export' | 'record_ingested';
 
 export interface ICustomsSource {
   projectId: Types.ObjectId;
@@ -96,6 +101,67 @@ export interface ICustomsMatch {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface ICustomsWatch {
+  projectId: Types.ObjectId;
+  watchType: CustomsWatchType;
+  companyId?: Types.ObjectId;
+  customerId?: Types.ObjectId;
+  country?: string;
+  hsCode?: string;
+  rules?: Record<string, unknown>;
+  enabled: boolean;
+  createdBy?: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ICustomsAlert {
+  projectId: Types.ObjectId;
+  watchId?: Types.ObjectId;
+  companyId?: Types.ObjectId;
+  customerId?: Types.ObjectId;
+  type: CustomsAlertType;
+  severity: CustomsAlertSeverity;
+  title: string;
+  summary: string;
+  evidence?: Array<Record<string, unknown>>;
+  status: CustomsAlertStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ICustomsScore {
+  projectId: Types.ObjectId;
+  companyId: Types.ObjectId;
+  customerId?: Types.ObjectId;
+  score: number;
+  reasons: Array<{ label: string; value: string | number }>;
+  calculatedAt: Date;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ICustomsUsage {
+  projectId: Types.ObjectId;
+  metric: CustomsUsageMetric;
+  quantity: number;
+  sourceId?: Types.ObjectId;
+  userId?: Types.ObjectId;
+  metadata?: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type CustomsWatchDocument = HydratedDocument<ICustomsWatch>;
+export type CustomsWatchModel = Model<ICustomsWatch>;
+export type CustomsAlertDocument = HydratedDocument<ICustomsAlert>;
+export type CustomsAlertModel = Model<ICustomsAlert>;
+export type CustomsScoreDocument = HydratedDocument<ICustomsScore>;
+export type CustomsScoreModel = Model<ICustomsScore>;
+export type CustomsUsageDocument = HydratedDocument<ICustomsUsage>;
+export type CustomsUsageModel = Model<ICustomsUsage>;
 
 export type CustomsSourceDocument = HydratedDocument<ICustomsSource>;
 export type CustomsSourceModel = Model<ICustomsSource>;
@@ -205,8 +271,71 @@ const CustomsMatchSchema = new Schema<ICustomsMatch>({
 CustomsMatchSchema.index({ projectId: 1, companyId: 1, crmType: 1, crmId: 1 }, { unique: true });
 CustomsMatchSchema.index({ projectId: 1, crmType: 1, crmId: 1, status: 1 });
 
+const CustomsWatchSchema = new Schema<ICustomsWatch>({
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
+  watchType: { type: String, enum: ['company', 'customer', 'market'], required: true, index: true },
+  companyId: { type: Schema.Types.ObjectId, ref: 'CustomsCompany', index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', index: true },
+  country: { type: String, trim: true, uppercase: true, maxlength: 2 },
+  hsCode: { type: String, trim: true, maxlength: 6 },
+  rules: { type: Schema.Types.Mixed },
+  enabled: { type: Boolean, default: true, index: true },
+  createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
+}, { timestamps: true, versionKey: false });
+CustomsWatchSchema.index({ projectId: 1, watchType: 1, enabled: 1 });
+CustomsWatchSchema.index({ projectId: 1, customerId: 1, enabled: 1 });
+CustomsWatchSchema.index({ projectId: 1, companyId: 1, enabled: 1 });
+
+const CustomsAlertSchema = new Schema<ICustomsAlert>({
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
+  watchId: { type: Schema.Types.ObjectId, ref: 'CustomsWatch', index: true },
+  companyId: { type: Schema.Types.ObjectId, ref: 'CustomsCompany', index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', index: true },
+  type: { type: String, enum: ['new_shipment', 'new_buyer', 'supplier_change', 'volume_drop', 'new_product'], required: true, index: true },
+  severity: { type: String, enum: ['info', 'warning', 'critical'], default: 'info' },
+  title: { type: String, required: true, trim: true, maxlength: 300 },
+  summary: { type: String, required: true, trim: true, maxlength: 2000 },
+  evidence: { type: [Schema.Types.Mixed], default: [] },
+  status: { type: String, enum: ['unread', 'read', 'dismissed', 'converted'], default: 'unread', index: true },
+}, { timestamps: true, versionKey: false });
+CustomsAlertSchema.index({ projectId: 1, status: 1, createdAt: -1 });
+CustomsAlertSchema.index({ projectId: 1, customerId: 1, createdAt: -1 });
+CustomsAlertSchema.index({ projectId: 1, companyId: 1, createdAt: -1 });
+
+const CustomsScoreReasonSchema = new Schema({
+  label: { type: String, required: true, trim: true, maxlength: 200 },
+  value: { type: Schema.Types.Mixed, required: true },
+}, { _id: false });
+
+const CustomsScoreSchema = new Schema<ICustomsScore>({
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
+  companyId: { type: Schema.Types.ObjectId, ref: 'CustomsCompany', required: true, index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'Customer', index: true },
+  score: { type: Number, required: true, min: 0, max: 100 },
+  reasons: { type: [CustomsScoreReasonSchema], default: [] },
+  calculatedAt: { type: Date, required: true },
+  version: { type: Number, default: 1 },
+}, { timestamps: true, versionKey: false });
+CustomsScoreSchema.index({ projectId: 1, companyId: 1, calculatedAt: -1 });
+CustomsScoreSchema.index({ projectId: 1, customerId: 1, calculatedAt: -1 });
+
+const CustomsUsageSchema = new Schema<ICustomsUsage>({
+  projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
+  metric: { type: String, enum: ['search', 'company_view', 'export', 'record_ingested'], required: true, index: true },
+  quantity: { type: Number, required: true, min: 0 },
+  sourceId: { type: Schema.Types.ObjectId, ref: 'CustomsSource' },
+  userId: { type: Schema.Types.ObjectId, ref: 'User' },
+  metadata: { type: Schema.Types.Mixed },
+}, { timestamps: true, versionKey: false });
+CustomsUsageSchema.index({ projectId: 1, metric: 1, createdAt: -1 });
+CustomsUsageSchema.index({ projectId: 1, userId: 1, createdAt: -1 });
+
 export const CustomsSource = model<ICustomsSource, CustomsSourceModel>('CustomsSource', CustomsSourceSchema);
 export const CustomsCompany = model<ICustomsCompany, CustomsCompanyModel>('CustomsCompany', CustomsCompanySchema);
 export const CustomsShipment = model<ICustomsShipment, CustomsShipmentModel>('CustomsShipment', CustomsShipmentSchema);
 export const CustomsMatch = model<ICustomsMatch, CustomsMatchModel>('CustomsMatch', CustomsMatchSchema);
-export const customsModels = [CustomsSource, CustomsCompany, CustomsShipment, CustomsMatch];
+export const CustomsWatch = model<ICustomsWatch, CustomsWatchModel>('CustomsWatch', CustomsWatchSchema);
+export const CustomsAlert = model<ICustomsAlert, CustomsAlertModel>('CustomsAlert', CustomsAlertSchema);
+export const CustomsScore = model<ICustomsScore, CustomsScoreModel>('CustomsScore', CustomsScoreSchema);
+export const CustomsUsage = model<ICustomsUsage, CustomsUsageModel>('CustomsUsage', CustomsUsageSchema);
+export const customsModels = [CustomsSource, CustomsCompany, CustomsShipment, CustomsMatch, CustomsWatch, CustomsAlert, CustomsScore, CustomsUsage];
