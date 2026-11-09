@@ -461,11 +461,13 @@ export interface CustomsCompanyDetail {
   recentShipments: CustomsShipment[];
   topSuppliers: Array<{ _id: string; shipments: number; amountUsd: number; company?: CustomsCompanySummary | null }>;
   match?: unknown;
+  score?: { score: number; reasons: Array<{ label: string; value: string | number }>; calculatedAt?: string };
 }
 
 export interface CustomerCustomsTrade extends Partial<CustomsCompanyDetail> {
   matched: boolean;
   customer?: { id: string; name: string; company?: string | null };
+  watch?: { _id?: string; enabled?: boolean } | null;
 }
 
 /* ---------------------------- 开发信 ---------------------------- */

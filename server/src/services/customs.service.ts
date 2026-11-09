@@ -7,12 +7,17 @@ import { Customer } from '../models';
 import { Prospect } from '../models/Prospect';
 import { encryptCredential } from './credential-crypto';
 import {
+  CustomsAlert,
   CustomsCompany,
   CustomsMatch,
+  CustomsScore,
   CustomsShipment,
   CustomsSource,
+  CustomsUsage,
+  CustomsWatch,
   type ICustomsCompany,
   type ICustomsShipment,
+  type CustomsAlertStatus,
 } from '../models/Customs';
 
 const MAX_IMPORT_ROWS = 5000;
@@ -257,7 +262,7 @@ export async function importCustomsRows(
       const exporter = hasValue(row.exporterName) && exporterCountry
         ? await upsertCompany(projectId, new Types.ObjectId(sourceId), String(row.exporterName), exporterCountry, 'exporter', shipmentDate, amountUsd)
         : undefined;
-      await CustomsShipment.create({
+      const shipment = await CustomsShipment.create({
         projectId,
         sourceId: new Types.ObjectId(sourceId),
         sourceRecordId,
@@ -286,6 +291,7 @@ export async function importCustomsRows(
         raw: row.raw,
         fingerprint,
       });
+      await createAlertsForShipment(projectId, shipment);
       result.written += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : '导入失败';
@@ -499,5 +505,212 @@ export async function getCustomerCustomsTrade(projectId: Types.ObjectId, custome
     };
   }
   const detail = await getCustomsCompany(projectId, String(company._id));
-  return { matched: true, customer: { id: String(customer._id), name: customer.name, company: customer.company ?? null }, ...detail };
+  const watch = await CustomsWatch.findOne({ projectId, customerId: customer._id, enabled: true }).lean();
+  return { matched: true, customer: { id: String(customer._id), name: customer.name, company: customer.company ?? null }, watch: watch ?? null, ...detail };
+}
+
+type ShipmentLike = {
+  _id: Types.ObjectId;
+  importerCompanyId: Types.ObjectId;
+  exporterCompanyId?: Types.ObjectId;
+  importerNameRaw: string;
+  exporterNameRaw?: string;
+  productDescription?: string;
+  amountUsd?: number;
+  shipmentDate: Date;
+};
+
+/** 导入新提单时，为已监控的公司生成新进口提醒。 */
+export async function createAlertsForShipment(projectId: Types.ObjectId, shipment: ShipmentLike): Promise<number> {
+  const companyIds = [shipment.importerCompanyId, shipment.exporterCompanyId].filter(Boolean) as Types.ObjectId[];
+  if (!companyIds.length) return 0;
+  const watches = await CustomsWatch.find({
+    projectId,
+    enabled: true,
+    companyId: { $in: companyIds },
+  }).lean();
+  let created = 0;
+  for (const watch of watches) {
+    const evidenceId = String(shipment._id);
+    const exists = await CustomsAlert.findOne({
+      projectId,
+      watchId: watch._id,
+      'evidence.shipmentId': evidenceId,
+    }).lean();
+    if (exists) continue;
+    await CustomsAlert.create({
+      projectId,
+      watchId: watch._id,
+      companyId: watch.companyId,
+      customerId: watch.customerId,
+      type: 'new_shipment',
+      severity: 'info',
+      title: `新进口记录：${shipment.importerNameRaw}`,
+      summary: `${shipment.shipmentDate.toISOString().slice(0, 10)} 新增一票${shipment.productDescription ? `“${shipment.productDescription}”` : '海关记录'}，金额 ${Math.round(shipment.amountUsd ?? 0).toLocaleString('en-US')} USD。`,
+      evidence: [{
+        shipmentId: evidenceId,
+        importerName: shipment.importerNameRaw,
+        exporterName: shipment.exporterNameRaw ?? null,
+        amountUsd: shipment.amountUsd ?? 0,
+        shipmentDate: shipment.shipmentDate,
+      }],
+      status: 'unread',
+    });
+    created += 1;
+  }
+  return created;
+}
+
+export async function listCustomsWatchlists(projectId: Types.ObjectId) {
+  return CustomsWatch.find({ projectId }).sort({ createdAt: -1 }).lean();
+}
+
+export async function watchCustomsCompany(projectId: Types.ObjectId, actorId: Types.ObjectId, companyId: string) {
+  if (!Types.ObjectId.isValid(companyId)) throw ApiError.badRequest('公司 ID 无效');
+  const company = await CustomsCompany.findOne({ _id: companyId, projectId, status: 'active' }).lean();
+  if (!company) throw ApiError.notFound('海关公司不存在');
+  const existing = await CustomsWatch.findOne({ projectId, watchType: 'company', companyId: company._id });
+  if (existing) {
+    existing.enabled = true;
+    await existing.save();
+    return existing.toObject();
+  }
+  return (await CustomsWatch.create({
+    projectId, watchType: 'company', companyId: company._id, enabled: true, createdBy: actorId,
+  })).toObject();
+}
+
+export async function unwatchCustomsCompany(projectId: Types.ObjectId, companyId: string) {
+  const watch = await CustomsWatch.findOneAndUpdate(
+    { projectId, watchType: 'company', companyId },
+    { $set: { enabled: false } },
+    { new: true },
+  ).lean();
+  if (!watch) throw ApiError.notFound('监控记录不存在');
+  return watch;
+}
+
+async function findCompanyForCustomer(projectId: Types.ObjectId, customer: { customsCompanyId?: Types.ObjectId; website?: string; email?: string; company?: string; name: string; country?: string }) {
+  if (customer.customsCompanyId) {
+    const linked = await CustomsCompany.findOne({ _id: customer.customsCompanyId, projectId }).lean();
+    if (linked) return linked;
+  }
+  const domain = domainFromAddress(customer.website || customer.email || '');
+  const normalizedName = normalizeCompanyName(customer.company || customer.name);
+  const country = normalizeCountry(customer.country);
+  if (!domain && !normalizedName) return null;
+  return CustomsCompany.findOne({
+    projectId,
+    $or: [
+      ...(domain ? [{ domain }] : []),
+      ...(normalizedName && country ? [{ normalizedName, country }] : []),
+    ],
+  }).lean();
+}
+
+export async function watchCustomsCustomer(projectId: Types.ObjectId, actorId: Types.ObjectId, customerId: string) {
+  if (!Types.ObjectId.isValid(customerId)) throw ApiError.badRequest('客户 ID 无效');
+  const customer = await Customer.findOne({ _id: customerId, projectId }).lean();
+  if (!customer) throw ApiError.notFound('客户不存在');
+  const company = await findCompanyForCustomer(projectId, customer);
+  if (!company) throw ApiError.conflict('还没有匹配到海关公司，请先在贸易情报中确认公司');
+  const existing = await CustomsWatch.findOne({ projectId, watchType: 'customer', customerId: customer._id });
+  const watch = existing ?? new CustomsWatch({ projectId, watchType: 'customer', customerId: customer._id, createdBy: actorId });
+  watch.companyId = company._id;
+  watch.enabled = true;
+  await watch.save();
+  await Customer.updateOne(
+    { _id: customer._id, projectId },
+    { $set: { customsCompanyId: company._id, customsMatchConfidence: 0.8, customsMatchedAt: new Date() } },
+  );
+  return watch.toObject();
+}
+
+export async function unwatchCustomsCustomer(projectId: Types.ObjectId, customerId: string) {
+  const watch = await CustomsWatch.findOneAndUpdate(
+    { projectId, watchType: 'customer', customerId },
+    { $set: { enabled: false } },
+    { new: true },
+  ).lean();
+  if (!watch) throw ApiError.notFound('监控记录不存在');
+  return watch;
+}
+
+export async function listCustomsAlerts(projectId: Types.ObjectId, filters: { status?: CustomsAlertStatus; type?: string; customerId?: string; page: number; limit: number }) {
+  const query: FilterQuery<Record<string, unknown>> = { projectId };
+  if (filters.status) query.status = filters.status;
+  if (filters.type) query.type = filters.type;
+  if (filters.customerId) query.customerId = filters.customerId;
+  const [items, total] = await Promise.all([
+    CustomsAlert.find(query).sort({ createdAt: -1 }).skip((filters.page - 1) * filters.limit).limit(filters.limit).lean(),
+    CustomsAlert.countDocuments(query),
+  ]);
+  return { items, total, page: filters.page, limit: filters.limit };
+}
+
+export async function updateCustomsAlert(projectId: Types.ObjectId, alertId: string, status: CustomsAlertStatus) {
+  if (!Types.ObjectId.isValid(alertId)) throw ApiError.badRequest('提醒 ID 无效');
+  const alert = await CustomsAlert.findOneAndUpdate(
+    { _id: alertId, projectId },
+    { $set: { status } },
+    { new: true },
+  ).lean();
+  if (!alert) throw ApiError.notFound('提醒不存在');
+  return alert;
+}
+
+export async function scoreCustomsCompany(projectId: Types.ObjectId, companyId: string) {
+  if (!Types.ObjectId.isValid(companyId)) throw ApiError.badRequest('公司 ID 无效');
+  const company = await CustomsCompany.findOne({ _id: companyId, projectId, status: 'active' }).lean();
+  if (!company) throw ApiError.notFound('海关公司不存在');
+  const daysSince = company.lastSeenAt ? Math.floor((Date.now() - new Date(company.lastSeenAt).getTime()) / 86_400_000) : 9999;
+  const reasons = [
+    { label: '海关记录数', value: `${company.shipmentCount} 票` },
+    { label: '累计金额', value: `${Math.round(company.totalAmountUsd)} USD` },
+    { label: '最近记录', value: company.lastSeenAt ? new Date(company.lastSeenAt).toISOString().slice(0, 10) : '无' },
+  ];
+  let score = 10;
+  score += Math.min(30, company.shipmentCount * 3);
+  score += Math.min(35, Math.log10(company.totalAmountUsd + 1) * 7);
+  if (daysSince <= 90) score += 20;
+  else if (daysSince <= 365) score += 10;
+  score = Math.min(100, Math.round(score));
+  const calculatedAt = new Date();
+  await CustomsScore.findOneAndUpdate(
+    { projectId, companyId: company._id },
+    { $set: { score, reasons, calculatedAt, version: 1 } },
+    { upsert: true, new: true },
+  );
+  return { score, reasons, calculatedAt: calculatedAt.toISOString() };
+}
+
+export async function recordCustomsUsage(
+  projectId: Types.ObjectId,
+  metric: 'search' | 'company_view' | 'export' | 'record_ingested',
+  quantity = 1,
+  userId?: Types.ObjectId,
+  metadata?: Record<string, unknown>,
+) {
+  if (quantity <= 0) return;
+  await CustomsUsage.create({ projectId, metric, quantity, userId, metadata });
+}
+
+export async function getCustomsUsage(projectId: Types.ObjectId) {
+  const start = new Date();
+  start.setUTCDate(1);
+  start.setUTCHours(0, 0, 0, 0);
+  const rows = await CustomsUsage.aggregate([
+    { $match: { projectId, createdAt: { $gte: start } } },
+    { $group: { _id: '$metric', quantity: { $sum: '$quantity' } } },
+  ]);
+  const usage: Record<string, number> = { search: 0, company_view: 0, export: 0, record_ingested: 0 };
+  for (const row of rows) usage[String(row._id)] = Number(row.quantity ?? 0);
+  return {
+    period: start.toISOString().slice(0, 7),
+    search: usage.search,
+    companyView: usage.company_view,
+    export: usage.export,
+    recordIngested: usage.record_ingested,
+    limits: { search: 10000, companyView: 5000, export: 1000, recordIngested: 1000000 },
+  };
 }

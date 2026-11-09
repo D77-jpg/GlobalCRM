@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { objectIdSchema, paginationQuerySchema } from './common';
+import { objectIdSchema, optionalObjectIdSchema, paginationQuerySchema } from './common';
 
 const optionalDate = z.coerce.date().optional();
 const optionalCountry = z.string().trim().min(2).max(80).optional();
@@ -39,6 +39,16 @@ export const customsImportSchema = z.object({
 export const customsConvertSchema = z.object({
   ownerId: objectIdSchema.optional(),
   notes: z.string().trim().max(2000).optional(),
+});
+
+export const customsAlertQuerySchema = paginationQuerySchema.extend({
+  status: z.enum(['unread', 'read', 'dismissed', 'converted']).optional(),
+  type: z.enum(['new_shipment', 'new_buyer', 'supplier_change', 'volume_drop', 'new_product']).optional(),
+  customerId: optionalObjectIdSchema,
+});
+
+export const customsAlertUpdateSchema = z.object({
+  status: z.enum(['unread', 'read', 'dismissed', 'converted']),
 });
 
 export const customsSourceSchema = z.object({

@@ -159,6 +159,39 @@ test('customs source and import normalize and search records', async () => {
   const trade = await request('GET', `/customs/customers/${customer.id}/trade`, salesToken);
   assert.equal(trade.matched, true);
   assert.equal(trade.company.canonicalName, 'Acme Trading Ltd.');
+
+  const watch = await request('POST', `/customs/customers/${customer.id}/watch`, salesToken, {}, 200);
+  assert.equal(watch.enabled, true);
+  assert.equal(String(watch.companyId), String(companies.items[0]._id));
+
+  const extra = await request('POST', '/customs/import', adminToken, {
+    sourceId,
+    rows: [{
+      sourceRecordId: `fixture-${suffix}-3`,
+      importerName: 'Acme Trading Ltd.',
+      importerCountry: 'US',
+      exporterName: 'Genesis Bags Co., Ltd.',
+      exporterCountry: 'CN',
+      hsCode: '420222',
+      productDescription: 'New season packaging',
+      amountUsd: 4200,
+      shipmentDate: '2026-11-08',
+    }],
+  }, 200);
+  assert.equal(extra.written, 1);
+  const alerts = await request('GET', '/customs/alerts?status=unread&page=1&limit=10', salesToken);
+  assert.ok(alerts.total >= 1);
+  const alert = alerts.items[0];
+  const marked = await request('PATCH', `/customs/alerts/${alert._id}`, salesToken, { status: 'read' }, 200);
+  assert.equal(marked.status, 'read');
+
+  const score = await request('GET', `/customs/companies/${companies.items[0]._id}/score`, salesToken);
+  assert.ok(score.score > 0);
+  assert.ok(Array.isArray(score.reasons));
+
+  const usage = await request('GET', '/customs/usage', adminToken);
+  assert.ok(usage.search >= 1);
+  assert.ok(usage.recordIngested >= 3);
 });
 
 test('customs import is admin only and rejects unknown sources', async () => {
