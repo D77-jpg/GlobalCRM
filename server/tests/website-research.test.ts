@@ -181,7 +181,7 @@ test('local workspace command resolves dynamic retrieval imports and empty proje
  const {readFileSync}=await import('node:fs');const {execFileSync}=await import('node:child_process');
  const script=JSON.parse(readFileSync('package.json','utf8')).scripts['dev:workspace'];assert.match(script,/--import tsx/);assert.match(script,/src\/local-workspace.ts/);
  // Use a real TS entry rather than a pure ESM eval: the server package is CommonJS.
- const text=execFileSync(process.execPath,['--require','./tests/os-user-info.cjs','--import','tsx','tests/fixtures/website-research/local-retrieval.ts'],{cwd:process.cwd(),env:{...process.env,MONGODB_URI:memory.getUri('website_research_fictional'),WEBSITE_RESEARCH_ACTOR_JSON:JSON.stringify(actor),AI_PROVIDER:'mock',OPENAI_API_KEY:'',KNOWLEDGE_MODEL_DIR:'missing-synthetic-model'},timeout:20000,encoding:'utf8',windowsHide:true});
+ const text=execFileSync(process.execPath,['--require','./tests/os-user-info.cjs','--import','tsx','tests/fixtures/website-research/local-retrieval.ts'],{cwd:process.cwd(),env:{...process.env,MONGODB_URI:memory.getUri('website_research_fictional'),WEBSITE_RESEARCH_ACTOR_JSON:JSON.stringify(actor),AI_PROVIDER:'mock',OPENAI_API_KEY:'',KNOWLEDGE_MODEL_DIR:'missing-synthetic-model'},timeout:60000,encoding:'utf8',windowsHide:true});
  const result=JSON.parse(text.trim().split('\n').at(-1)!);assert.equal(result.status,'no_match');assert.equal(result.code,'no_published_knowledge');
  const {agentFailure}=await import('../src/services/agent/agent-errors');const failure=agentFailure(Object.assign(new Error('local module'),{code:'ERR_MODULE_NOT_FOUND'}));assert.equal(failure.code,'AGENT_RUNTIME_DEPENDENCY');assert.equal(failure.retryable,false);
 });

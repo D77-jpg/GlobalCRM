@@ -88,6 +88,9 @@ test('customs source and import normalize and search records', async () => {
   }, 201);
   sourceId = source.id;
   assert.deepEqual(source.coverageCountries, ['US', 'DE']);
+  const sourceTest = await request('POST', `/customs/sources/${sourceId}/test`, adminToken, {}, 200);
+  assert.equal(sourceTest.ok, true);
+  assert.equal(sourceTest.adapter, 'csv');
 
   const rows = [
     {

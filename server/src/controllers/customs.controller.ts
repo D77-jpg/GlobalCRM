@@ -20,6 +20,7 @@ import {
   recordCustomsUsage,
   scoreCustomsCompany,
   searchCustomsShipments,
+  testCustomsSource,
   unwatchCustomsCompany,
   unwatchCustomsCustomer,
   updateCustomsAlert,
@@ -129,6 +130,11 @@ export const createSourceHandler = asyncHandler(async (req: Request, res: Respon
   const projectId = requireProjectId(req.user!);
   const body = req.body as CustomsSourceInput;
   sendSuccess(res, await createCustomsSource(projectId, new Types.ObjectId(req.user!.id), body), 201);
+});
+
+export const testSourceHandler = asyncHandler(async (req: Request, res: Response) => {
+  const projectId = requireProjectId(req.user!);
+  sendSuccess(res, await testCustomsSource(projectId, req.params.id));
 });
 
 export const importHandler = asyncHandler(async (req: Request, res: Response) => {
