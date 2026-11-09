@@ -24,6 +24,7 @@ import {
   scoreHandler,
   searchHandler,
   sourcesHandler,
+  testSourceHandler,
   unwatchCompanyHandler,
   unwatchCustomerHandler,
   updateAlertHandler,
@@ -53,6 +54,7 @@ router.get('/usage', requireRole('admin'), usageHandler);
 router.get('/attribution', requireRole('admin'), attributionHandler);
 router.get('/sources', requireRole('admin'), sourcesHandler);
 router.post('/sources', requireRole('admin'), validate({ body: customsSourceSchema }), createSourceHandler);
+router.post('/sources/:id/test', requireRole('admin'), validate({ params: idParamsSchema }), testSourceHandler);
 router.post('/import', requireRole('admin'), validate({ body: customsImportSchema }), importHandler);
 
 export default router;

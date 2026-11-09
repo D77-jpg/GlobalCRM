@@ -7,6 +7,7 @@ import { Customer, Quotation } from '../models';
 import { Prospect } from '../models/Prospect';
 import { encryptCredential } from './credential-crypto';
 import { resolveAgentProvider } from './agent/ai-settings.service';
+import { resolveCustomsProviderAdapter } from './customs/providers';
 import {
   CustomsAlert,
   CustomsCompany,
@@ -108,6 +109,15 @@ export async function createCustomsSource(
     createdBy,
   });
   return sourceDto(source.toObject() as unknown as Record<string, unknown>);
+}
+
+export async function testCustomsSource(projectId: Types.ObjectId, sourceId: string) {
+  if (!Types.ObjectId.isValid(sourceId)) throw ApiError.badRequest('数据源 ID 无效');
+  const source = await CustomsSource.findOne({ _id: sourceId, projectId }).lean();
+  if (!source) throw ApiError.notFound('数据源不存在');
+  const adapter = resolveCustomsProviderAdapter(source);
+  const result = await adapter.test(source);
+  return { sourceId, provider: source.provider, kind: source.kind, adapter: adapter.key, ...result };
 }
 
 export interface CustomsSearchFilters {
