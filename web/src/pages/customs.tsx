@@ -7,13 +7,15 @@ import { EmptyState, ErrorState } from '@/components/common/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { apiGet, apiPatch, apiPost, toErrorMessage } from '@/lib/api';
 import { formatCountry } from '@/lib/country';
 import { formatDate, formatMoney } from '@/lib/format';
 import { usePageTitle } from '@/hooks/use-ui';
+import { useAuthStore, selectIsAdmin } from '@/store/auth.store';
 import { ROUTES } from '@/constants';
 import type { CustomsCompanyDetail, CustomsCompanySummary, CustomsShipment } from '@/types';
 
@@ -36,9 +38,18 @@ interface AlertList {
   total: number;
 }
 
+interface CustomsSourceOption {
+  id: string;
+  name: string;
+  provider: string;
+  kind: string;
+  status: string;
+}
+
 export function CustomsPage(): React.JSX.Element {
   usePageTitle('贸易情报');
   const navigate = useNavigate();
+  const isAdmin = useAuthStore(selectIsAdmin);
   const [query, setQuery] = React.useState('');
   const [country, setCountry] = React.useState('');
   const [companies, setCompanies] = React.useState<CustomsCompanySummary[]>([]);
@@ -49,6 +60,11 @@ export function CustomsPage(): React.JSX.Element {
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [convertBusy, setConvertBusy] = React.useState(false);
   const [alerts, setAlerts] = React.useState<CustomsAlert[]>([]);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [sources, setSources] = React.useState<CustomsSourceOption[]>([]);
+  const [sourceId, setSourceId] = React.useState('');
+  const [importText, setImportText] = React.useState('');
+  const [importBusy, setImportBusy] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -98,6 +114,65 @@ export function CustomsPage(): React.JSX.Element {
     }
   }
 
+  async function openImport(): Promise<void> {
+    setImportOpen(true);
+    try {
+      const result = await apiGet<CustomsSourceOption[]>('/customs/sources');
+      setSources(result);
+      setSourceId((current) => current || result[0]?.id || '');
+    } catch (reason) {
+      toast.error('数据源读取失败', { description: toErrorMessage(reason) });
+    }
+  }
+
+  async function createCsvSource(): Promise<void> {
+    try {
+      const source = await apiPost<CustomsSourceOption>('/customs/sources', {
+        name: `CSV 导入 ${new Date().toISOString().slice(0, 10)}`,
+        provider: `csv-${Date.now()}`,
+        kind: 'csv',
+        coverageCountries: ['US'],
+      });
+      setSources((current) => [source, ...current]);
+      setSourceId(source.id);
+      toast.success('CSV 数据源已创建');
+    } catch (reason) {
+      toast.error('数据源创建失败', { description: toErrorMessage(reason) });
+    }
+  }
+
+  async function submitImport(): Promise<void> {
+    if (!sourceId) {
+      toast.error('请先选择或创建数据源');
+      return;
+    }
+    let rows: unknown;
+    try {
+      rows = JSON.parse(importText);
+    } catch {
+      toast.error('导入内容不是有效 JSON');
+      return;
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      toast.error('导入内容必须是至少包含一条记录的数组');
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const result = await apiPost<{ written: number; skipped: number; errors: Array<{ message: string }> }>('/customs/import', { sourceId, rows });
+      toast.success(`导入完成：写入 ${result.written} 条，跳过 ${result.skipped} 条`, {
+        description: result.errors.length ? `有 ${result.errors.length} 条失败，请检查格式` : undefined,
+      });
+      setImportOpen(false);
+      setImportText('');
+      await load();
+    } catch (reason) {
+      toast.error('导入失败', { description: toErrorMessage(reason) });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function convert(): Promise<void> {
     if (!selected?.company?._id) return;
     setConvertBusy(true);
@@ -121,6 +196,7 @@ export function CustomsPage(): React.JSX.Element {
       <PageHeader
         title="贸易情报"
         description="按产品和市场发现进口商，查看公司采购画像，并把高匹配公司加入潜客池。"
+        actions={isAdmin ? <Button size="sm" variant="outline" onClick={() => void openImport()}>导入海关数据</Button> : undefined}
       />
 
       {alerts.length ? (
@@ -217,6 +293,48 @@ export function CustomsPage(): React.JSX.Element {
               <CompanyDetail detail={selected} onConvert={() => void convert()} convertBusy={convertBusy} />
             )}
           </DialogBody>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>导入海关数据</DialogTitle>
+            <DialogDescription>粘贴供应商导出的 JSON 数组。字段可包含 importerName、importerCountry、exporterName、hsCode、productDescription、amountUsd 和 shipmentDate。</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>数据源</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="h-9 min-w-[220px] rounded-md border bg-background px-3 text-sm"
+                  value={sourceId}
+                  onChange={(event) => setSourceId(event.target.value)}
+                >
+                  <option value="">选择数据源</option>
+                  {sources.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.provider}</option>)}
+                </select>
+                <Button type="button" size="sm" variant="outline" onClick={() => void createCsvSource()}>新建 CSV 数据源</Button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="customs-import-json">JSON 数据</Label>
+              <Textarea
+                id="customs-import-json"
+                className="min-h-56 font-mono text-xs"
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                placeholder={'[\n  {"importerName":"Acme","importerCountry":"US","hsCode":"420222","amountUsd":12000,"shipmentDate":"2026-11-01"}\n]'}
+              />
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setImportOpen(false)} disabled={importBusy}>取消</Button>
+            <Button type="button" onClick={() => void submitImport()} disabled={importBusy}>
+              {importBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : null}
+              开始导入
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
