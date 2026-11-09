@@ -1,8 +1,8 @@
 # 海关数据接口清单
 
-**状态：** 设计基线  
-**前缀：** `/api/customs`  
-**认证：** CRM 用户会话，和现有业务接口一致  
+**状态：** 设计基线
+**前缀：** `/api/customs`
+**认证：** CRM 用户会话，和现有业务接口一致
 **关联文档：** `docs/customs-data-plan.md`、`docs/customs-data-dictionary.md`
 
 ## 1. 通用约定
