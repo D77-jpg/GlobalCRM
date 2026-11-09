@@ -13,7 +13,7 @@ import {
   hasInboundReplySince,
   scheduleOutreachFollowUp,
 } from './outreach-followup.service';
-import { isEmailSuppressed, suppressEmail, unsubscribeHeaders } from './mail-compliance.service';
+import { appendUnsubscribeFooter, isEmailSuppressed, suppressEmail, unsubscribeHeaders } from './mail-compliance.service';
 
 const logger = createLogger('mail-queue');
 export const newMessageId = () => `<${randomUUID()}@crm.genesis.local>`;
@@ -111,9 +111,19 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
   } else {
     try {
       if (accountId && senderUserId) await reserveMailAttempt(accountId, String(job.projectId), senderUserId);
+      // 兼容升级前创建的旧任务：即使正文生成时还没有合规尾部，
+      // 真正投递前也补上可见退订链接和纯文本退订说明。
+      const html = job.deliveryContent || job.content;
+      const withUnsubscribe = appendUnsubscribeFooter(
+        html,
+        job.contentText,
+        String(job.projectId),
+        job.recipientEmail,
+        /<[a-z][\s\S]*>/i.test(html),
+      );
       result = await deliver({ projectId: String(job.projectId), mailAccountId: accountId, senderUserId, from: job.senderAddress,
         to: job.recipientEmail, toName: job.recipientName, subject: job.subject,
-        html: job.deliveryContent || job.content, text: job.contentText, messageId: job.messageId,
+        html: withUnsubscribe.html, text: withUnsubscribe.text, messageId: job.messageId,
         inReplyTo: job.inReplyTo, references: job.references,
         headers: unsubscribeHeaders(String(job.projectId), job.recipientEmail) });
     } catch (error) {

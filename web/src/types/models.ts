@@ -700,7 +700,7 @@ export interface DeleteQuotationResult {
 /* ---------------------------- 客户时间线 ---------------------------- */
 
 /** 时间线事件类型：客户创建 / 开发信 / 跟进 / 报价 / 状态变化 / 下一次跟进时间变化 */
-export type TimelineEventType = 'created' | 'letter' | 'mail_received' | 'mail_opened' | 'mail_clicked' | 'followup' | 'quotation' | 'status_changed' | 'followup_scheduled';
+export type TimelineEventType = 'created' | 'letter' | 'mail_received' | 'mail_opened' | 'mail_clicked' | 'followup' | 'quotation' | 'status_changed' | 'followup_scheduled' | 'owner_changed';
 
 export interface TimelineEvent {
   /** 渲染用的稳定 key */
@@ -732,6 +732,14 @@ export interface TimelineEvent {
   statusChange?: { from?: CustomerStatus; to?: CustomerStatus };
   /** type=followup_scheduled：变更后的下一次跟进时间（null 表示被清除） */
   nextFollowUpAt?: string | Date | null;
+  /** type=owner_changed：负责人转交 */
+  ownerChange?: {
+    fromOwnerId?: string;
+    fromOwnerName?: string;
+    toOwnerId?: string;
+    toOwnerName?: string;
+    note?: string;
+  };
 }
 
 export interface CustomerTimeline {

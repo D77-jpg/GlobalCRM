@@ -267,6 +267,15 @@ export const bulkSetFollowUpSchema = z.object({
     .transform((v) => (v === '' || v === null ? null : v)),
 });
 
+/** 转交跟进：负责人必填，备注用于时间线留痕。 */
+export const handoffCustomerSchema = z.object({
+  ownerId: objectIdSchema,
+  note: optionalText(500),
+  nextFollowUpAt: nextFollowUpInputSchema,
+}).strict();
+
+export type HandoffCustomerInput = z.infer<typeof handoffCustomerSchema>;
+
 /**
  * Excel 导入：单行数据的「严格」校验规则。
  *

@@ -20,6 +20,7 @@ import type { AgentCustomerAnalysis } from '@/types';
 import type { AgentTask } from '@/components/agent/agent-tasks';
 import {
   Activity,
+  ArrowRightLeft,
   BadgeDollarSign,
   Boxes,
   Building2,
@@ -74,6 +75,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/separator';
 import { EditableInfoRow } from '@/components/customers/editable-info-row';
 import { CustomerActivity } from '@/components/customers/customer-activity';
+import { CustomerHandoffDialog } from '@/components/customers/customer-handoff-dialog';
 import { CustomerAttachments } from '@/components/customers/customer-attachments';
 import { CustomerQuotations } from '@/components/customers/customer-quotations';
 import { SendLetterDialog } from '@/components/letters/send-letter-dialog';
@@ -290,6 +292,7 @@ export function CustomerDetailPage(): React.JSX.Element {
   const [sendOpen, setSendOpen] = React.useState(false);
   const [sequenceOpen, setSequenceOpen] = React.useState(false);
   const [cleanupOpen, setCleanupOpen] = React.useState(false);
+  const [handoffOpen, setHandoffOpen] = React.useState(false);
   const [quickGenerating, setQuickGenerating] = React.useState(false);
   const [composeDraft, setComposeDraft] = React.useState<{ analysisId: string; subject: string; content: string; outreachStep?: number } | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -615,6 +618,12 @@ export function CustomerDetailPage(): React.JSX.Element {
         }
         actions={
           <>
+            {isAdmin ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setHandoffOpen(true)}>
+                <ArrowRightLeft className="h-4 w-4" aria-hidden />
+                转交跟进
+              </Button>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" size="sm" disabled={quickGenerating}>
@@ -1117,6 +1126,17 @@ export function CustomerDetailPage(): React.JSX.Element {
       <CustomerAttachments customerId={customer.id} />
 
       {/* ---------------------------- 弹窗 ---------------------------- */}
+
+      <CustomerHandoffDialog
+        open={handoffOpen}
+        customer={customer}
+        owners={owners}
+        onOpenChange={setHandoffOpen}
+        onCompleted={() => {
+          void reloadCustomer();
+          void useFollowUpStore.getState().fetchTimeline(customer.id);
+        }}
+      />
 
       <DraftCleanupDialog
         open={cleanupOpen}

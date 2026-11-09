@@ -16,6 +16,7 @@ import {
   bulkOutreachSequenceSchema,
   bulkDraftCleanupSchema,
   createCustomerSchema,
+  handoffCustomerSchema,
   idParamsSchema,
   duplicateCheckQuerySchema,
   importCustomersSchema,
@@ -43,6 +44,7 @@ import {
   createCustomerHandler,
   deleteCustomerHandler,
   downloadTemplateHandler,
+  handoffCustomerHandler,
   exportCustomersHandler,
   getCustomerHandler,
   checkDuplicatesHandler,
@@ -124,6 +126,8 @@ router.post('/bulk/draft-cleanup/preview', validate({ body: bulkDraftCleanupSche
 router.post('/bulk/draft-cleanup', validate({ body: bulkDraftCleanupSchema }), bulkDraftCleanupHandler);
 
 /* ---------- 单条操作 ---------- */
+// 转交跟进：管理员把客户和后续跟进交给另一位业务员，并停止原自动开发。
+router.post('/:id/handoff', requireRole('admin'), validate({ params: idParamsSchema, body: handoffCustomerSchema }), handoffCustomerHandler);
 router.get('/:id', validate({ params: idParamsSchema }), getCustomerHandler);
 router.put('/:id', validate({ params: idParamsSchema, body: updateCustomerSchema }), updateCustomerHandler);
 router.delete('/:id', validate({ params: idParamsSchema }), deleteCustomerHandler);

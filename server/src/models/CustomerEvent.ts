@@ -20,7 +20,7 @@ export interface ICustomerEvent {
   projectId: Types.ObjectId;
   /** 所属客户 */
   customerId: Types.ObjectId;
-  /** 事件类型：status_changed 状态变化 / followup_scheduled 下一次跟进时间变化 */
+  /** 事件类型：status_changed 状态变化 / followup_scheduled 下一次跟进时间变化 / owner_changed 负责人转交 */
   type: CustomerEventType;
   /** 事件发生时间（用于时间线排序，索引） */
   at: Date;
@@ -30,6 +30,13 @@ export interface ICustomerEvent {
   toStatus?: CustomerStatus;
   /** followup_scheduled：变更后的下一次跟进时间（null 表示被清除） */
   nextFollowUpAt?: Date | null;
+  /** owner_changed：转交前后的负责人快照。 */
+  fromOwnerId?: Types.ObjectId;
+  toOwnerId?: Types.ObjectId;
+  fromOwnerName?: string;
+  toOwnerName?: string;
+  /** 转交说明，仅用于内部时间线。 */
+  note?: string;
   /** 触发人（引用 User）；单用户环境下可留空 */
   createdBy?: Types.ObjectId;
   createdAt: Date;
@@ -61,6 +68,11 @@ const CustomerEventSchema = new Schema<ICustomerEvent>(
     fromStatus: { type: String },
     toStatus: { type: String },
     nextFollowUpAt: { type: Date, default: null },
+    fromOwnerId: { type: Schema.Types.ObjectId, ref: 'User' },
+    toOwnerId: { type: Schema.Types.ObjectId, ref: 'User' },
+    fromOwnerName: { type: String, trim: true, maxlength: 120 },
+    toOwnerName: { type: String, trim: true, maxlength: 120 },
+    note: { type: String, trim: true, maxlength: 500 },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   {

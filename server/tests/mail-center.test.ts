@@ -115,9 +115,33 @@ test('01 JWT is required', async () => { await request('GET', '/mail', '', undef
 test('02 immediate SMTP/mock send uses durable task and legacy result', async () => {
   const result = await request('POST', '/letters', salesToken, { customerId, subject: 'V2.1 proposal', content: '<p>Hello {{name}}</p>', requestKey: randomUUID() }, 201);
   assert.equal(result.delivered, true); assert.equal(result.channel, 'mock'); assert.equal(result.letter.status, 'sent');
+  assert.match(result.letter.content, /data-preheader="true"/);
+  assert.match(result.letter.content, /data-compliance="unsubscribe"/);
+  assert.match(result.letter.contentText, /Unsubscribe:/);
   sentId = result.letter.id; sentMessageId = result.letter.messageId; threadId = result.letter.threadId;
   const job = await models.DevelopmentLetter.findById(sentId); assert.equal(job?.attempts, 1); assert.deepEqual(job?.history.map(h => h.status), ['queued', 'sending', 'sent']);
 });
+test('P3 handoff transfers ownership, records timeline and is admin-only', async () => {
+  const fixtureEmail = `handoff.${suffix}@example.test`;
+  const created = await request('POST', '/customers', adminToken, {
+    name: `Handoff fixture ${suffix}`,
+    email: fixtureEmail,
+    ownerId: salesId,
+  }, 201);
+  const transferred = await request('POST', `/customers/${created.id}/handoff`, adminToken, {
+    ownerId: otherId,
+    note: '客户已回复，请接手报价和后续沟通。',
+  }, 200);
+  assert.equal(transferred.ownerId, otherId);
+  assert.equal(transferred.owner?.id, otherId);
+  const timeline = await request('GET', `/customers/${created.id}/timeline`, adminToken);
+  const event = timeline.items.find((item: { type: string }) => item.type === 'owner_changed');
+  assert.equal(event?.ownerChange?.toOwnerId, otherId);
+  assert.equal(event?.ownerChange?.note, '客户已回复，请接手报价和后续沟通。');
+
+  await request('POST', `/customers/${created.id}/handoff`, salesToken, { ownerId: salesId }, 403);
+});
+
 test('03 repeat/concurrent request key sends exactly once', async () => {
   const key = randomUUID(); const payload = { customerId, subject: 'Idempotent', content: '<p>One</p>', requestKey: key };
   const results = await Promise.all(Array.from({ length: 5 }, () => request('POST', '/letters', salesToken, payload, 201)));
@@ -483,7 +507,8 @@ test('62 tracking preparation failure never blocks normal SMTP/mock delivery', a
     const id = await scheduled({ subject: 'Tracking fallback', content: '<p>Still deliver</p>' });
     await due(id);
     await queue.processMailJob(id, async payload => {
-      assert.ok(payload.html.startsWith('<p>Still deliver</p>'));
+      assert.match(payload.html, /data-preheader="true"/);
+      assert.ok(payload.html.includes('<p>Still deliver</p>'));
       assert.ok(payload.html.includes('Gold Supplier on Alibaba.com since 2014'));
       return { accepted: true, channel: 'smtp', durationMs: 0 };
     });

@@ -196,6 +196,7 @@ export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
   quotation: '报价单',
   status_changed: '状态变化',
   followup_scheduled: '跟进计划',
+  owner_changed: '负责人转交',
 };
 
 /* ---------------------------- 开发信模板分类 ---------------------------- */
