@@ -14,6 +14,7 @@ import {
   scheduleOutreachFollowUp,
 } from './outreach-followup.service';
 import { appendUnsubscribeFooter, isEmailSuppressed, suppressEmail, unsubscribeHeaders } from './mail-compliance.service';
+import { stripReplySubjectPrefix } from '../utils/text';
 
 const logger = createLogger('mail-queue');
 export const newMessageId = () => `<${randomUUID()}@crm.genesis.local>`;
@@ -121,8 +122,11 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
         job.recipientEmail,
         /<[a-z][\s\S]*>/i.test(html),
       );
+      const deliverySubject = job.outreachStep && job.outreachStep > 1
+        ? (stripReplySubjectPrefix(job.subject) || job.subject)
+        : job.subject;
       result = await deliver({ projectId: String(job.projectId), mailAccountId: accountId, senderUserId, from: job.senderAddress,
-        to: job.recipientEmail, toName: job.recipientName, subject: job.subject,
+        to: job.recipientEmail, toName: job.recipientName, subject: deliverySubject,
         html: withUnsubscribe.html, text: withUnsubscribe.text, messageId: job.messageId,
         inReplyTo: job.inReplyTo, references: job.references,
         headers: unsubscribeHeaders(String(job.projectId), job.recipientEmail) });

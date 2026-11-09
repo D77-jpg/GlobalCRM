@@ -48,6 +48,7 @@ import {
   escapeRegExp,
   htmlToPlainText,
   renderTemplate,
+  stripReplySubjectPrefix,
   type PlaceholderValues,
 } from '../utils/text';
 import { OUTREACH_MAX_STEPS } from '../constants';
@@ -373,6 +374,10 @@ function toLetterDto(doc: Record<string, unknown>): LetterDto {
   const review = toReviewSummary(doc.review);
   const knowledgeReview = doc.knowledgeReview as KnowledgeReview | undefined;
   const sendBlocker = doc.status === 'draft' ? knowledgeReviewHardBlocker(knowledgeReview) : undefined;
+  const storedSubject = String(doc.subject ?? '');
+  const displaySubject = doc.status === 'draft' && Number(doc.outreachStep) > 1
+    ? (stripReplySubjectPrefix(storedSubject) || storedSubject)
+    : storedSubject;
 
   return {
     id: String((doc._id ?? doc.id ?? '').toString()),
@@ -383,7 +388,7 @@ function toLetterDto(doc: Record<string, unknown>): LetterDto {
     knowledgeReview,
     ...(sendBlocker ? { sendBlocker } : {}),
     knowledgeRechecks:doc.knowledgeRechecks as Record<string,unknown>[]|undefined,
-    subject: String(doc.subject ?? ''),
+    subject: displaySubject,
     content: String(doc.content ?? ''),
     contentText: String(doc.contentText ?? ''),
     template: String(doc.template ?? ''),
@@ -866,7 +871,7 @@ export async function sendLetter(input: SendLetterInput, actor?: AuthUser): Prom
       messageId: { $exists: true, $ne: '' },
     }).sort({ sentAt: -1 });
     if (!previous?.messageId) throw ApiError.conflict(`请先发送第 ${input.outreachStep - 1} 封开发信，再发送第 ${input.outreachStep} 封`);
-    subject = /^re:/i.test(subject) ? subject : `Re: ${previous.subject}`;
+    subject = stripReplySubjectPrefix(subject) || stripReplySubjectPrefix(previous.subject);
     threadId = previous.threadId;
     inReplyTo = previous.messageId;
     references = [...(previous.references ?? []), previous.messageId];
@@ -958,7 +963,7 @@ export async function resendLetter(
       messageId: { $exists: true, $ne: '' },
     }).sort({ sentAt: -1 });
     if (!previous?.messageId) throw ApiError.conflict(`请先发送第 ${original.outreachStep - 1} 封开发信，再发送第 ${original.outreachStep} 封`);
-    if (!/^re:/i.test(subjectTemplate)) subjectTemplate = `Re: ${previous.subject}`;
+    subjectTemplate = stripReplySubjectPrefix(subjectTemplate) || stripReplySubjectPrefix(previous.subject);
     threadId = previous.threadId;
     inReplyTo = previous.messageId;
     references = [...(previous.references ?? []), previous.messageId];

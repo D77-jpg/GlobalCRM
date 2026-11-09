@@ -13,6 +13,17 @@ export function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * 去掉邮件主题前的 Re:/Fwd: 等回复前缀。
+ * 开发信第 2/3 封仍然通过 In-Reply-To/References 接同一线程，
+ * 但标题不需要伪装成一封回复。
+ */
+export function stripReplySubjectPrefix(subject: string): string {
+  return String(subject ?? '')
+    .replace(/^\s*(?:(?:re|fw|fwd|回复|答复|转发)\s*[:：]\s*)+/i, '')
+    .trim();
+}
+
 /** HTML 实体 → 字符 */
 const ENTITY_MAP: Record<string, string> = {
   amp: '&',

@@ -6,6 +6,7 @@ import { getCustomerByIdOrThrow } from './customer.service';
 import { resolveAgentProvider } from './agent/ai-settings.service';
 import { projectPromptContext, resolveProjectSalesProfile, type ProjectSalesProfile } from './project-profile';
 import { OUTREACH_MAX_STEPS } from '../constants';
+import { stripReplySubjectPrefix } from '../utils/text';
 
 const EXCERPT_LENGTH = 700;
 const log = createLogger('follow-up-draft');
@@ -89,7 +90,7 @@ function templateDraft(input: {
   senderName: string; companyName: string; previousText: string; profile: ProjectSalesProfile;
 }): { subject: string; paragraphs: string[] } {
   const date = new Date(input.previousSentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const subject = /^re:/i.test(input.previousSubject) ? input.previousSubject : `Re: ${input.previousSubject}`;
+  const subject = stripReplySubjectPrefix(input.previousSubject);
   const hook = firstSentence(input.previousText);
   const paragraphs = [
     `Dear ${input.customerName},`,
@@ -175,7 +176,7 @@ export async function draftFollowUpLetter(customerId: string, actor: AuthUser): 
     const paragraphs = stripSignature(result.bodyText).split(/\n{2,}/).map((line) => line.trim()).filter(Boolean);
     const text = paragraphs.join('\n\n');
     return {
-      subject: /^re:/i.test(result.subject) ? result.subject : `Re: ${result.subject || previousSubject}`,
+      subject: stripReplySubjectPrefix(result.subject || previousSubject),
       content: toHtml(paragraphs),
       text,
       step,

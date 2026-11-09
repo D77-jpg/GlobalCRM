@@ -1056,6 +1056,7 @@ test('开发信序列：第 2/3 封按上一封的 Message-ID 接入同一线程
     outreachStep: 2, requestKey: `thread-sequence-second-${suffix}`,
   }, 201);
   assert.equal(second.letter.outreachStep, 2);
+  assert.equal(second.letter.subject, 'Thread sequence first');
   const secondDoc = await models.DevelopmentLetter.findById(second.letter.id).lean();
   assert.equal(secondDoc?.inReplyTo, first.letter.messageId);
   assert.equal(secondDoc?.threadId, first.letter.threadId);
@@ -1065,6 +1066,7 @@ test('开发信序列：第 2/3 封按上一封的 Message-ID 接入同一线程
     outreachStep: 3, requestKey: `thread-sequence-third-${suffix}`,
   }, 201);
   assert.equal(third.letter.outreachStep, 3);
+  assert.equal(third.letter.subject, 'Thread sequence first');
   const thirdDoc = await models.DevelopmentLetter.findById(third.letter.id).lean();
   assert.equal(thirdDoc?.inReplyTo, secondDoc?.messageId);
   assert.equal(thirdDoc?.threadId, first.letter.threadId);
@@ -1137,7 +1139,7 @@ test('89 未完成逐项核验的模型原稿需要人工核对，审核通过�
 
 test('跟进草稿：按上一封生成第 2 封，不带签名；没发过信的客户报错', async () => {
   const draft = await request('POST', '/letters/follow-up-draft', salesToken, { customerId }, 200, '');
-  assert.match(String(draft.subject), /^re:\s/i);
+  assert.ok(!/^re:\s/i.test(String(draft.subject)), '跟进草稿标题不应伪装成 Re 回复');
   assert.ok(Number(draft.step) >= 2);
   assert.ok(String(draft.text).length > 80);
   assert.ok(!/best regards|sincerely/i.test(String(draft.text)), '草稿不应自带签名，弹窗会追加标准签名');
