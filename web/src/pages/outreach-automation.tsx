@@ -66,13 +66,30 @@ function formatWindow(config: OutreachAutomationConfig): string {
   return `${config.windowStart}–${config.windowEnd}`;
 }
 
+function blockedStatus(reason: string): { label: string; detail: string; variant: 'warning' | 'muted' | 'developed' } {
+  if (reason.includes('已回复')) {
+    return { label: '客户已回复', detail: '已停止自动发送，转人工跟进', variant: 'developed' };
+  }
+  if (reason.includes('退订') || reason.includes('退信') || reason.includes('拒绝')) {
+    return { label: '已退订/拒收', detail: '已停止发送，避免继续打扰', variant: 'warning' };
+  }
+  if (reason.includes('已删除') || reason.includes('归属已变化')) {
+    return { label: '归属待确认', detail: '客户已删除或负责人已变更', variant: 'warning' };
+  }
+  if (reason.includes('不在可开发状态')) {
+    return { label: '已转人工', detail: '客户状态已变化，自动开发停止', variant: 'muted' };
+  }
+  return { label: '已停止', detail: reason || '不再继续发送', variant: 'muted' };
+}
+
 function phaseBadge(
   row: OutreachAutomationQueueRow,
   windowOpen: boolean,
-): { label: string; variant: 'outline' | 'warning' | 'failed' | 'muted' | 'developed' } {
+): { label: string; variant: 'outline' | 'warning' | 'failed' | 'muted' | 'developed'; detail?: string } {
   if (!windowOpen && ['due', 'ready', 'generating', 'sending'].includes(row.phase)) {
     return { label: '等待发送时段', variant: 'outline' };
   }
+  if (row.phase === 'blocked') return blockedStatus(row.lastError ?? '');
   const meta = PHASE_META[row.phase];
   return { label: meta.label(row.nextStep), variant: meta.variant };
 }
@@ -96,8 +113,14 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
       return '恢复后继续下一封';
     case 'failed':
       return '请查看原因后恢复';
-    case 'blocked':
-      return '已停止营销联系';
+    case 'blocked': {
+      const status = blockedStatus(row.lastError ?? '');
+      if (status.label === '客户已回复') return '查看客户并继续跟进';
+      if (status.label === '归属待确认') return '请确认负责人后重新加入';
+      if (status.label === '已退订/拒收') return '停止发送，保留客户记录';
+      if (status.label === '已转人工') return '请人工确认客户状态';
+      return '已停止发送';
+    }
     case 'completed':
     default:
       return '—';
@@ -126,7 +149,13 @@ function StepProgress({ row }: { row: OutreachAutomationQueueRow }): React.JSX.E
         <span className="text-xs tabular-nums text-muted-foreground">已发 {row.actualStep}/3 封</span>
       </div>
       <p className="text-[11px] leading-4 text-muted-foreground">
-        {row.actualStep >= 3 ? '三封已完成' : `下一封：第 ${row.nextStep} 封`}
+        {row.phase === 'blocked'
+          ? '自动开发已结束'
+          : row.phase === 'failed'
+            ? `第 ${row.nextStep} 封待处理`
+            : row.actualStep >= 3
+              ? '三封已完成'
+              : `下一封：第 ${row.nextStep} 封`}
       </p>
     </div>
   );
@@ -148,25 +177,26 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const [startConfirmOpen, setStartConfirmOpen] = React.useState(false);
   const [error, setError] = React.useState('');
   const dirtyRef = React.useRef(false);
+  const ownerTouchedRef = React.useRef(false);
 
   const query = ownerId ? `?userId=${encodeURIComponent(ownerId)}` : '';
   const scoped = React.useCallback((path: string) => `${path}${query}`, [query]);
 
   React.useEffect(() => {
     if (!isAdmin) return;
+    ownerTouchedRef.current = false;
     let active = true;
     void apiGet<UserDto[]>('/users').then((users) => {
       if (!active) return;
       const activeUsers = users.filter((user) => user.status === 'active'
         && (user.role === 'admin' || !activeProjectId || user.projectIds.includes(activeProjectId)));
       setOwners(activeUsers);
-      setOwnerId((current) => (
-        activeUsers.some((user) => user.id === current)
-          ? current
-          : activeUsers.find((user) => user.role !== 'admin')?.id
-            || activeUsers.find((user) => user.id === currentUserId)?.id
-            || ''
-      ));
+      setOwnerId((current) => {
+        if (ownerTouchedRef.current && activeUsers.some((user) => user.id === current)) return current;
+        return activeUsers.find((user) => user.id === currentUserId)?.id
+          || activeUsers.find((user) => user.role !== 'admin')?.id
+          || '';
+      });
     }).catch((caught) => {
       if (active) setError(toErrorMessage(caught, '业务员列表加载失败'));
     });
@@ -426,7 +456,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 {isAdmin ? (
                   <div className="space-y-1.5 border-b pb-3">
                     <Label htmlFor="auto-owner">执行账号</Label>
-                    <Select value={ownerId} onValueChange={setOwnerId} disabled={busy || owners.length === 0}>
+                    <Select value={ownerId} onValueChange={(value) => { ownerTouchedRef.current = true; setOwnerId(value); }} disabled={busy || owners.length === 0}>
                       <SelectTrigger id="auto-owner"><SelectValue placeholder="选择业务员" /></SelectTrigger>
                       <SelectContent>
                         {owners.map((owner) => (
@@ -536,7 +566,15 @@ export function OutreachAutomationPage(): React.JSX.Element {
                               </TableCell>
                               <TableCell>
                                 <Badge variant={status.variant}>{status.label}</Badge>
-                                {row.lastError ? <p className="mt-1 max-w-[14rem] text-[11px] leading-4 text-destructive">{row.lastError}</p> : null}
+                                {status.detail ? (
+                                  <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${status.variant === 'warning' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
+                                    {status.detail}
+                                  </p>
+                                ) : row.lastError ? (
+                                  <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${row.phase === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                                    {row.lastError}
+                                  </p>
+                                ) : null}
                               </TableCell>
                               <TableCell className="min-w-[12rem] text-xs text-muted-foreground">
                                 {nextActionLabel(row, overview.windowOpen, formatWindow(overview.config))}
