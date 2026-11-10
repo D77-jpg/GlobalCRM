@@ -141,7 +141,11 @@ function UserRow({
           {user.twoFactorEnabled ? <Badge variant="outline">2FA</Badge> : null}
         </div>
         <span className="block truncate text-xs text-muted-foreground">
-          @{user.username}{user.email ? ` · ${user.email}` : ' · 未绑定邮箱'}
+          @{user.username}
+          {user.mailbox
+            ? ` · 发件邮箱 ${user.mailbox.email}${user.mailbox.status === 'disabled' ? '（已停用）' : user.mailbox.verificationStatus === 'verified' ? '（已验证）' : '（未验证）'}`
+            : ' · 未配置发件邮箱'}
+          {user.email ? ` · 账号邮箱 ${user.email}` : ''}
         </span>
       </div>
 

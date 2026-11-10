@@ -1035,6 +1035,12 @@ export interface UserDto {
   displayName: string;
   /** Account email used for password reset and email OTP 2FA. */
   email?: string;
+  /** 当前项目的个人发件邮箱，与账号通知邮箱分开。 */
+  mailbox?: {
+    email: string;
+    status: 'active' | 'disabled';
+    verificationStatus: 'unverified' | 'verified' | 'failed';
+  };
   /** Require an email OTP after the password step. */
   twoFactorEnabled: boolean;
   role: UserRole;
