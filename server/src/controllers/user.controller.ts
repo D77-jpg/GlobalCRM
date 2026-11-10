@@ -20,8 +20,10 @@ import type {
   UpdateUserInput,
 } from '../validators/user.validator';
 
-export const listUsersHandler = asyncHandler(async (_req: Request, res: Response) => {
-  const data = await listUsers();
+export const listUsersHandler = asyncHandler(async (req: Request, res: Response) => {
+  const header = req.headers['x-project-id'];
+  const projectId = typeof header === 'string' && /^[a-f\d]{24}$/i.test(header) ? header : undefined;
+  const data = await listUsers(projectId);
   sendSuccess(res, data);
 });
 

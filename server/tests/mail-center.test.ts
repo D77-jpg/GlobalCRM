@@ -676,6 +676,11 @@ test('72 admin assigns an encrypted per-user mailbox and credentials never leave
   const current = await request('GET', '/mail-accounts/current', salesToken);
   assert.equal(current.account.id, saved.id);
   assert.equal(current.account.credentialCiphertext, undefined);
+  const users = await request('GET', '/users', adminToken);
+  const listedSales = users.find((user: { id: string }) => user.id === salesId);
+  assert.equal(listedSales.mailbox.email, personalMailbox);
+  assert.equal(listedSales.mailbox.verificationStatus, 'unverified');
+  assert.equal(listedSales.mailbox.credentialCiphertext, undefined);
 });
 
 test('73 user mailboxes are project scoped and cross-project configuration is rejected', async () => {

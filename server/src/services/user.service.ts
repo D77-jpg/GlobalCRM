@@ -15,11 +15,18 @@ import type { CreateUserInput, UpdateUserInput } from '../validators/user.valida
 const logger = createLogger('user-service');
 
 /** 对外输出的用户 DTO：id 为字符串，绝不含 passwordHash */
+export interface UserMailboxSummary {
+  email: string;
+  status: 'active' | 'disabled';
+  verificationStatus: 'unverified' | 'verified' | 'failed';
+}
+
 export interface UserDto {
   id: string;
   username: string;
   displayName: string;
   email?: string;
+  mailbox?: UserMailboxSummary;
   twoFactorEnabled: boolean;
   role: UserRole;
   organizationId?: string;
@@ -36,11 +43,12 @@ export interface UserDto {
  * lean() 结果转 DTO：_id → id。
  * passwordHash 在模型层 select:false，默认查询（含 lean）不会返回，故 rest 已是安全的对外字段。
  */
-function toUserDto(doc: Record<string, unknown>): UserDto {
+function toUserDto(doc: Record<string, unknown>, mailbox?: UserMailboxSummary): UserDto {
   const { _id, ...rest } = doc as Record<string, unknown> & { _id: Types.ObjectId };
   // 旧数据可能没有 status 字段，统一回退为 active
   return { ...rest, id: _id.toString(), status: (rest.status as UserStatus) ?? 'active',
     email: (rest.email as string | undefined) || undefined,
+    ...(mailbox ? { mailbox } : {}),
     organizationId: rest.organizationId ? String(rest.organizationId) : undefined,
     isPlatformAdmin: Boolean(rest.isPlatformAdmin),
     twoFactorEnabled: Boolean(rest.twoFactorEnabled),
@@ -60,9 +68,24 @@ async function resolveProjectIds(values?: string[]): Promise<Types.ObjectId[]> {
 }
 
 /** 全部用户（管理员 + 业务员），按创建时间升序；用户管理列表与负责人下拉均可复用 */
-export async function listUsers(): Promise<UserDto[]> {
+export async function listUsers(projectId?: string): Promise<UserDto[]> {
   const docs = await User.find({}).sort({ createdAt: 1 }).lean();
-  return (docs as unknown as Record<string, unknown>[]).map(toUserDto);
+  const userIds = docs.map((doc) => doc._id);
+  const accounts = projectId && Types.ObjectId.isValid(projectId) && userIds.length
+    ? await UserMailAccount.find({
+      projectId: new Types.ObjectId(projectId),
+      userId: { $in: userIds },
+    }).select('userId email status verificationStatus').lean()
+    : [];
+  const mailboxByUser = new Map(accounts.map((account) => [String(account.userId), account]));
+  return (docs as unknown as Record<string, unknown>[]).map((doc) => {
+    const account = mailboxByUser.get(String(doc._id));
+    return toUserDto(doc, account ? {
+      email: account.email,
+      status: account.status,
+      verificationStatus: account.verificationStatus,
+    } : undefined);
+  });
 }
 
 /** 创建用户：用户名查重 → bcrypt 加密 → 落库 */
