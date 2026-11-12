@@ -24,9 +24,11 @@ export interface CustomerActivityProps {
   customerId: string;
   /** 跟进新增 / 删除后，客户主档的 nextFollowUpAt 可能变化，通知详情页刷新档案 */
   onCustomerChanged?: () => void;
+  /** 从时间线打开对应开发信的详情 */
+  onViewLetter?: (letterId: string) => void;
 }
 
-export function CustomerActivity({ customerId, onCustomerChanged }: CustomerActivityProps): React.JSX.Element {
+export function CustomerActivity({ customerId, onCustomerChanged, onViewLetter }: CustomerActivityProps): React.JSX.Element {
   const followUps = useFollowUpStore((state) => state.followUps);
   const timeline = useFollowUpStore((state) => state.timeline);
   const loadingFollowUps = useFollowUpStore((state) => state.loadingFollowUps);
@@ -130,6 +132,7 @@ export function CustomerActivity({ customerId, onCustomerChanged }: CustomerActi
                 items={timeline?.items ?? []}
                 loading={loadingTimeline}
                 lastContactAt={timeline?.lastContactAt ?? null}
+                onViewLetter={onViewLetter}
               />
             </TabsContent>
           </Tabs>

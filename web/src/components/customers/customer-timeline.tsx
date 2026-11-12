@@ -21,6 +21,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { EmptyState, InlineLoader } from '@/components/common/empty-state';
 import { CustomerReplyMailButton } from '@/components/customers/customer-reply-mail-button';
 import { CustomerStatusBadge, LetterStatusBadge, QuotationStatusBadge } from '@/components/common/status-badge';
@@ -39,6 +40,7 @@ export interface CustomerTimelineProps {
   items: TimelineEvent[];
   loading: boolean;
   lastContactAt?: string | Date | null;
+  onViewLetter?: (letterId: string) => void;
 }
 
 /** 每种事件的图标 + 主色，做「明显但简洁」的区分 */
@@ -66,7 +68,15 @@ function scheduledText(value?: string | Date | null): { text: string; className:
 }
 
 /** 单个事件的正文描述 */
-function EventBody({ event, customerId }: { event: TimelineEvent; customerId: string }): React.JSX.Element | null {
+function EventBody({
+  event,
+  customerId,
+  onViewLetter,
+}: {
+  event: TimelineEvent;
+  customerId: string;
+  onViewLetter?: (letterId: string) => void;
+}): React.JSX.Element | null {
   switch (event.type) {
     case 'mail_received': return <a className="text-sm text-primary underline" href={'/mail?id=' + event.mail?.id}>{event.mail?.subject} · {event.mail?.from}</a>;
     case 'mail_opened':
@@ -89,6 +99,18 @@ function EventBody({ event, customerId }: { event: TimelineEvent; customerId: st
           <span className="text-xs text-muted-foreground">
             {MAIL_CHANNEL_LABEL[letter.channel] ?? letter.channel}
           </span>
+          {onViewLetter ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-primary"
+              onClick={() => onViewLetter(letter.id)}
+            >
+              <Eye className="h-3.5 w-3.5" aria-hidden />
+              查看开发信
+            </Button>
+          ) : null}
         </div>
       );
     }
@@ -177,7 +199,7 @@ function EventBody({ event, customerId }: { event: TimelineEvent; customerId: st
   }
 }
 
-export function CustomerTimeline({ customerId, items, loading, lastContactAt }: CustomerTimelineProps): React.JSX.Element {
+export function CustomerTimeline({ customerId, items, loading, lastContactAt, onViewLetter }: CustomerTimelineProps): React.JSX.Element {
   if (loading && items.length === 0) {
     return <InlineLoader label="正在加载客户动态…" />;
   }
@@ -213,7 +235,7 @@ export function CustomerTimeline({ customerId, items, loading, lastContactAt }: 
                 <span className="text-sm font-medium">{TIMELINE_EVENT_LABEL[event.type] ?? event.type}</span>
                 <span className="text-xs text-muted-foreground">{formatDateTime(event.at)}</span>
               </div>
-              <EventBody event={event} customerId={customerId} />
+              <EventBody event={event} customerId={customerId} onViewLetter={onViewLetter} />
             </li>
           );
         })}

@@ -341,6 +341,21 @@ export function CustomerDetailPage(): React.JSX.Element {
   },[customer?.id,knowledgeDraftId,setSearchParams]);
   const [viewTarget, setViewTarget] = React.useState<DevelopmentLetter | null>(null);
   const [viewOpen, setViewOpen] = React.useState(false);
+  const openLetterById = React.useCallback(async (letterId: string) => {
+    const cached = lettersQuery.data?.items.find((letter) => letter.id === letterId);
+    if (cached) {
+      setViewTarget(cached);
+      setViewOpen(true);
+      return;
+    }
+    try {
+      const letter = await apiGet<DevelopmentLetter>(`/letters/${letterId}`);
+      setViewTarget(letter);
+      setViewOpen(true);
+    } catch (caught) {
+      toast.error('开发信无法打开', { description: toErrorMessage(caught, '请检查权限或稍后重试') });
+    }
+  }, [lettersQuery.data?.items]);
   const [deleteLetterTarget, setDeleteLetterTarget] = React.useState<DevelopmentLetter | null>(null);
   const [deleteCustomerOpen, setDeleteCustomerOpen] = React.useState(false);
   // 常用联系资料和跟进安排保持可见，补充档案的展开状态按浏览器记住
@@ -1057,7 +1072,7 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       <GlobalSiteInquiries customerId={customer.id} onDraft={()=>{void reloadLetters();void refreshDrafts();}} />
       <CustomerTradePanel customerId={customer.id} />
-      <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} />
+      <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} onViewLetter={openLetterById} />
 
       {/* ---------------------------- 报价单 ---------------------------- */}
 
