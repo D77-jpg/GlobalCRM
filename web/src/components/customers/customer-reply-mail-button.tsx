@@ -112,9 +112,9 @@ export function CustomerReplyMailButton({
     <>
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         size="sm"
-        className="h-7 gap-1.5 px-2 text-xs"
+        className="h-7 gap-1.5 px-2 text-xs text-primary"
         onClick={() => {
           setOpen(true);
           void load();
