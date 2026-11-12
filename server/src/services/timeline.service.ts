@@ -63,7 +63,18 @@ export interface TimelineEvent {
     currency: QuotationCurrency;
   };
   /** type=status_changed 时的状态变化 */
-  statusChange?: { from?: CustomerStatus; to?: CustomerStatus };
+  statusChange?: {
+    from?: CustomerStatus;
+    to?: CustomerStatus;
+    /** 客户回复导致本次状态变化时，关联到具体来信及对应开发信阶段 */
+    replyMail?: {
+      id: string;
+      subject: string;
+      from: string;
+      sentAt: Date;
+      sourceLabel: string;
+    };
+  };
   /** type=followup_scheduled 时变更后的下一次跟进时间（null 表示被清除） */
   nextFollowUpAt?: Date | null;
   /** type=owner_changed 时的负责人转交摘要 */
@@ -90,6 +101,9 @@ interface LetterRow {
   channel: MailChannel;
   sentAt?: Date | null;
   createdAt: Date;
+  threadId?: string;
+  messageId?: string;
+  outreachStep?: number;
   tracking?: {
     openedAt?: Date | null;
     openCount?: number;
@@ -107,6 +121,15 @@ interface FollowUpRow {
   content: string;
   followUpAt: Date;
   nextFollowUpAt?: Date | null;
+}
+interface ReceivedMailRow {
+  _id: Types.ObjectId;
+  subject: string;
+  from: string;
+  sentAt: Date;
+  threadId?: string;
+  inReplyTo?: string;
+  messageId?: string;
 }
 interface EventRow {
   _id: Types.ObjectId;
@@ -307,7 +330,49 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
   const eventRows = events as unknown as EventRow[];
   const quotationRows = quotations as unknown as QuotationRow[];
 
+  const mailScope = !actor
+    ? { _id: { $exists: false } }
+    : isProjectManager(actor)
+      ? {}
+      : privateMailScope(actor);
+  const rawReceived = await MailMessage.find({
+    customerId: oid,
+    ...projectScope(actor),
+    ...mailScope,
+    deleted: { $ne: true },
+  })
+    .sort({ sentAt: -1 })
+    .limit(limit)
+    .select('_id subject from sentAt threadId inReplyTo messageId')
+    .lean() as unknown as ReceivedMailRow[];
+
+  // Mail sync occasionally stores the same inbound message under two ids.
+  // Keep the timeline and the status-change reply action on one copy only.
+  const seenReceivedKeys = new Set<string>();
+  const received = rawReceived.filter((mail) => {
+    const key = mail.messageId
+      ? String(mail.messageId)
+      : `${String(mail.threadId || '')}|${mail.subject || ''}|${new Date(mail.sentAt).getTime()}`;
+    if (seenReceivedKeys.has(key)) return false;
+    seenReceivedKeys.add(key);
+    return true;
+  });
+
   const items: TimelineEvent[] = [];
+  const attachedReplyMailIds = new Set<string>();
+  const normalizeMessageId = (value?: string): string => String(value || '').replace(/[<>]/g, '').trim().toLowerCase();
+  const findSourceLabel = (mail: ReceivedMailRow): string => {
+    const inReplyTo = normalizeMessageId(mail.inReplyTo);
+    const replyLetter = letterRows
+      .filter((letter) => letter.status === 'sent' || letter.status === 'opened')
+      .sort((a, b) => (b.outreachStep ?? 0) - (a.outreachStep ?? 0))
+      .find((letter) => (
+        (mail.threadId && letter.threadId && mail.threadId === letter.threadId)
+        || (letter.messageId && inReplyTo.includes(normalizeMessageId(letter.messageId)))
+      ));
+    if (replyLetter) return `第${replyLetter.outreachStep ?? 1}封开发信`;
+    return '后续跟进回复';
+  };
 
   const createdAt = (customer as unknown as { createdAt?: Date }).createdAt;
   if (createdAt) {
@@ -391,11 +456,35 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
   for (const event of eventRows) {
     const at = new Date(event.at);
     if (event.type === 'status_changed') {
+      let replyMail: {
+        id: string;
+        subject: string;
+        from: string;
+        sentAt: Date;
+        sourceLabel: string;
+      } | undefined;
+      if (event.toStatus === 'replied') {
+        const eventMs = at.getTime();
+        const candidate = received.find((mail) => {
+          const sentAt = new Date(mail.sentAt).getTime();
+          return sentAt <= eventMs + 5 * 60 * 1000 && sentAt >= eventMs - 7 * 24 * 60 * 60 * 1000;
+        });
+        if (candidate) {
+          replyMail = {
+            id: String(candidate._id),
+            subject: candidate.subject,
+            from: candidate.from,
+            sentAt: new Date(candidate.sentAt),
+            sourceLabel: findSourceLabel(candidate),
+          };
+          attachedReplyMailIds.add(String(candidate._id));
+        }
+      }
       items.push({
         id: `event-${String(event._id)}`,
         type: 'status_changed',
         at,
-        statusChange: { from: event.fromStatus, to: event.toStatus },
+        statusChange: { from: event.fromStatus, to: event.toStatus, ...(replyMail ? { replyMail } : {}) },
       });
     } else if (event.type === 'followup_scheduled') {
       items.push({
@@ -422,9 +511,15 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
 
   items.sort((a, b) => b.at.getTime() - a.at.getTime());
 
-  const received = await MailMessage.find({ customerId: oid, ...projectScope(actor), ...(actor?privateMailScope(actor):{_id:{$exists:false}}), deleted:{$ne:true} }).sort({ sentAt: -1 }).limit(limit).select('_id subject from sentAt');
-  for (const mail of received) items.push({ id: `mail-${mail._id}`, type: 'mail_received', at: mail.sentAt,
-    mail: { id: String(mail._id), subject: mail.subject, from: mail.from } });
+  for (const mail of received) {
+    if (attachedReplyMailIds.has(String(mail._id))) continue;
+    items.push({
+      id: `mail-${mail._id}`,
+      type: 'mail_received',
+      at: mail.sentAt,
+      mail: { id: String(mail._id), subject: mail.subject, from: mail.from },
+    });
+  }
   items.sort((a, b) => b.at.getTime() - a.at.getTime());
 
   // 最近一次联系 = 已发送开发信 或 跟进记录 的最新时间

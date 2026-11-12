@@ -39,13 +39,16 @@ function mailSrcdoc(html: string): string {
 export interface CustomerReplyMailButtonProps {
   customerId: string;
   status: string;
+  /** Open a specific reply from the timeline, instead of the latest reply list. */
+  mailId?: string;
+  label?: string;
 }
 
 /**
  * 客户详情页的快捷入口：客户已回复时，不必先去邮件中心筛选，
  * 直接在这里打开最近几封客户来信。
  */
-export function CustomerReplyMailButton({ customerId, status }: CustomerReplyMailButtonProps): React.JSX.Element | null {
+export function CustomerReplyMailButton({ customerId, status, mailId, label }: CustomerReplyMailButtonProps): React.JSX.Element | null {
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -57,7 +60,7 @@ export function CustomerReplyMailButton({ customerId, status }: CustomerReplyMai
     setLoading(true);
     setError('');
     try {
-      const data = await apiGet<ReplyMailResponse>(`/customers/${customerId}/reply-mails`);
+      const data = await apiGet<ReplyMailResponse>(`/customers/${customerId}/reply-mails?limit=20`);
       if (request === requestRef.current) setItems(data.items ?? []);
     } catch (caught) {
       if (request === requestRef.current) {
@@ -70,6 +73,8 @@ export function CustomerReplyMailButton({ customerId, status }: CustomerReplyMai
   }, [customerId]);
 
   if (status !== 'replied') return null;
+
+  const visibleItems = mailId ? items.filter((mail) => mail.id === mailId) : items;
 
   return (
     <>
@@ -84,7 +89,7 @@ export function CustomerReplyMailButton({ customerId, status }: CustomerReplyMai
         }}
       >
         <MailOpen className="h-3.5 w-3.5" aria-hidden />
-        查看回复邮件
+        {label || '查看回复邮件'}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -109,10 +114,12 @@ export function CustomerReplyMailButton({ customerId, status }: CustomerReplyMai
                   重试
                 </Button>
               </div>
-            ) : items.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">暂时没有找到该客户的回复邮件。</p>
+            ) : visibleItems.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {mailId ? '没有找到这条时间线关联的回复邮件。' : '暂时没有找到该客户的回复邮件。'}
+              </p>
             ) : (
-              items.map((mail) => (
+              visibleItems.map((mail) => (
                 <article key={mail.id} className="space-y-3 rounded-xl border border-border/70 bg-surface/40 p-3 sm:p-4">
                   <header className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">

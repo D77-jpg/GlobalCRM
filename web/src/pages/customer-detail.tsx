@@ -1057,7 +1057,7 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       <GlobalSiteInquiries customerId={customer.id} onDraft={()=>{void reloadLetters();void refreshDrafts();}} />
       <CustomerTradePanel customerId={customer.id} />
-      <CustomerActivity customerId={customer.id} customerStatus={customer.status} onCustomerChanged={() => void reloadCustomer()} />
+      <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} />
 
       {/* ---------------------------- 报价单 ---------------------------- */}
 

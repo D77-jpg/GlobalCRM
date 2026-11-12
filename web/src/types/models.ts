@@ -789,7 +789,17 @@ export interface TimelineEvent {
     currency: QuotationCurrency;
   };
   /** type=status_changed */
-  statusChange?: { from?: CustomerStatus; to?: CustomerStatus };
+  statusChange?: {
+    from?: CustomerStatus;
+    to?: CustomerStatus;
+    replyMail?: {
+      id: string;
+      subject: string;
+      from: string;
+      sentAt: string | Date;
+      sourceLabel: string;
+    };
+  };
   /** type=followup_scheduled：变更后的下一次跟进时间（null 表示被清除） */
   nextFollowUpAt?: string | Date | null;
   /** type=owner_changed：负责人转交 */

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState, InlineLoader } from '@/components/common/empty-state';
+import { CustomerReplyMailButton } from '@/components/customers/customer-reply-mail-button';
 import { CustomerStatusBadge, LetterStatusBadge, QuotationStatusBadge } from '@/components/common/status-badge';
 import {
   FOLLOW_UP_METHOD_LABEL,
@@ -34,6 +35,7 @@ import { cn } from '@/lib/utils';
 import type { TimelineEvent, TimelineEventType } from '@/types';
 
 export interface CustomerTimelineProps {
+  customerId: string;
   items: TimelineEvent[];
   loading: boolean;
   lastContactAt?: string | Date | null;
@@ -64,7 +66,7 @@ function scheduledText(value?: string | Date | null): { text: string; className:
 }
 
 /** 单个事件的正文描述 */
-function EventBody({ event }: { event: TimelineEvent }): React.JSX.Element | null {
+function EventBody({ event, customerId }: { event: TimelineEvent; customerId: string }): React.JSX.Element | null {
   switch (event.type) {
     case 'mail_received': return <a className="text-sm text-primary underline" href={'/mail?id=' + event.mail?.id}>{event.mail?.subject} · {event.mail?.from}</a>;
     case 'mail_opened':
@@ -126,14 +128,29 @@ function EventBody({ event }: { event: TimelineEvent }): React.JSX.Element | nul
     case 'status_changed': {
       const change = event.statusChange;
       return (
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
-          {change?.from ? <CustomerStatusBadge status={change.from} showDot={false} /> : <span className="text-muted-foreground">（原状态）</span>}
-          <span className="text-muted-foreground">→</span>
-          {change?.to ? (
-            <CustomerStatusBadge status={change.to} showDot={false} />
-          ) : (
-            <span className="text-muted-foreground">（新状态）</span>
-          )}
+        <div className="mt-1 space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {change?.from ? <CustomerStatusBadge status={change.from} showDot={false} /> : <span className="text-muted-foreground">（原状态）</span>}
+            <span className="text-muted-foreground">→</span>
+            {change?.to ? (
+              <CustomerStatusBadge status={change.to} showDot={false} />
+            ) : (
+              <span className="text-muted-foreground">（新状态）</span>
+            )}
+          </div>
+          {change?.replyMail ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/35 px-2 py-1.5">
+              <span className="text-xs text-muted-foreground">
+                客户回复 · 对应{change.replyMail.sourceLabel}
+              </span>
+              <CustomerReplyMailButton
+                customerId={customerId}
+                status="replied"
+                mailId={change.replyMail.id}
+                label="查看这封回复"
+              />
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -160,7 +177,7 @@ function EventBody({ event }: { event: TimelineEvent }): React.JSX.Element | nul
   }
 }
 
-export function CustomerTimeline({ items, loading, lastContactAt }: CustomerTimelineProps): React.JSX.Element {
+export function CustomerTimeline({ customerId, items, loading, lastContactAt }: CustomerTimelineProps): React.JSX.Element {
   if (loading && items.length === 0) {
     return <InlineLoader label="正在加载客户动态…" />;
   }
@@ -196,7 +213,7 @@ export function CustomerTimeline({ items, loading, lastContactAt }: CustomerTime
                 <span className="text-sm font-medium">{TIMELINE_EVENT_LABEL[event.type] ?? event.type}</span>
                 <span className="text-xs text-muted-foreground">{formatDateTime(event.at)}</span>
               </div>
-              <EventBody event={event} />
+              <EventBody event={event} customerId={customerId} />
             </li>
           );
         })}
