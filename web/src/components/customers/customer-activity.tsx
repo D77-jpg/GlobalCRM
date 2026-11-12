@@ -16,19 +16,17 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FollowUpDialog } from '@/components/customers/follow-up-dialog';
 import { FollowUpList } from '@/components/customers/follow-up-list';
-import { CustomerReplyMailButton } from '@/components/customers/customer-reply-mail-button';
 import { CustomerTimeline } from '@/components/customers/customer-timeline';
 import { useFollowUpStore } from '@/store/followup.store';
-import type { CustomerStatus, FollowUp } from '@/types';
+import type { FollowUp } from '@/types';
 
 export interface CustomerActivityProps {
   customerId: string;
-  customerStatus?: CustomerStatus;
   /** 跟进新增 / 删除后，客户主档的 nextFollowUpAt 可能变化，通知详情页刷新档案 */
   onCustomerChanged?: () => void;
 }
 
-export function CustomerActivity({ customerId, customerStatus, onCustomerChanged }: CustomerActivityProps): React.JSX.Element {
+export function CustomerActivity({ customerId, onCustomerChanged }: CustomerActivityProps): React.JSX.Element {
   const followUps = useFollowUpStore((state) => state.followUps);
   const timeline = useFollowUpStore((state) => state.timeline);
   const loadingFollowUps = useFollowUpStore((state) => state.loadingFollowUps);
@@ -94,15 +92,10 @@ export function CustomerActivity({ customerId, customerStatus, onCustomerChanged
             <Activity className="h-4 w-4 text-muted-foreground" aria-hidden />
             跟进与动态
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            {customerStatus ? (
-              <CustomerReplyMailButton customerId={customerId} status={customerStatus} />
-            ) : null}
-            <Button type="button" size="sm" onClick={openCreate}>
-              <NotebookPen className="h-4 w-4" aria-hidden />
-              新增跟进
-            </Button>
-          </div>
+          <Button type="button" size="sm" onClick={openCreate}>
+            <NotebookPen className="h-4 w-4" aria-hidden />
+            新增跟进
+          </Button>
         </CardHeader>
 
         <CardContent>
@@ -133,6 +126,7 @@ export function CustomerActivity({ customerId, customerStatus, onCustomerChanged
 
             <TabsContent value="timeline">
               <CustomerTimeline
+                customerId={customerId}
                 items={timeline?.items ?? []}
                 loading={loadingTimeline}
                 lastContactAt={timeline?.lastContactAt ?? null}

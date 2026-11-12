@@ -58,6 +58,6 @@ export const getCustomerTimelineHandler = asyncHandler(async (req: Request, res:
 /** GET /api/customers/:id/reply-mails —— 客户详情页快速查看客户回复 */
 export const getCustomerReplyMailsHandler = asyncHandler(async (req: Request, res: Response) => {
   await getCustomerByIdOrThrow(req.params.id, req.user);
-  const data = await getCustomerReplyMails(req.params.id, req.user, 5);
+  const data = await getCustomerReplyMails(req.params.id, req.user, 20);
   sendSuccess(res, { items: data });
 });
