@@ -235,6 +235,7 @@ export interface CustomerReplyMail {
   text: string;
   html: string;
   threadId?: string;
+  messageId?: string;
   mailboxUserId?: string;
   read: boolean;
 }
@@ -300,6 +301,7 @@ export async function getCustomerReplyMails(
       text: String(mail.text || ''),
       html: String(mail.html || ''),
       threadId: mail.threadId ? String(mail.threadId) : undefined,
+      messageId: mail.messageId ? String(mail.messageId) : undefined,
       mailboxUserId: mail.mailboxUserId ? String(mail.mailboxUserId) : undefined,
       read: actor ? readBy.includes(actor.id) : false,
     };
