@@ -25,7 +25,7 @@ import type {
   QuotationStatus,
 } from '../constants';
 import { ApiError } from '../utils/ApiError';
-import { projectScope, customerScope } from '../utils/access';
+import { projectScope, customerScope, isProjectManager } from '../utils/access';
 import { createLogger } from '../config/logger';
 import type { AuthUser } from '../types/express';
 
@@ -202,6 +202,75 @@ export async function recordCustomerChanges(
 }
 
 /** 聚合某客户的完整时间线（按时间倒序） */
+export interface CustomerReplyMail {
+  id: string;
+  subject: string;
+  from: string;
+  fromName?: string;
+  to: string[];
+  sentAt: Date;
+  text: string;
+  html: string;
+  threadId?: string;
+  mailboxUserId?: string;
+  read: boolean;
+}
+
+/**
+ * 客户详情页的「查看回复邮件」专用读取口。
+ *
+ * 普通业务员仍只能看自己邮箱里的来信；项目管理员/系统管理员可以查看
+ * 该项目下该客户的回复邮件，避免管理员只能看到「已回复」状态却打不开邮件。
+ * 只读取已经关联到该客户的入站 MailMessage，不改动邮件中心原有的列表权限。
+ */
+export async function getCustomerReplyMails(
+  customerId: string,
+  actor?: AuthUser,
+  limit = 5,
+): Promise<CustomerReplyMail[]> {
+  if (!Types.ObjectId.isValid(customerId)) {
+    throw ApiError.badRequest('客户 ID 格式不正确');
+  }
+  const oid = new Types.ObjectId(customerId);
+  const customer = await Customer.findOne({ _id: oid, ...customerScope(actor) }).select('_id').lean();
+  if (!customer) {
+    throw ApiError.notFound('客户不存在或无权访问');
+  }
+
+  const mailScope = !actor
+    ? { _id: { $exists: false } }
+    : isProjectManager(actor)
+      ? {}
+      : privateMailScope(actor);
+  const mails = await MailMessage.find({
+    customerId: oid,
+    ...projectScope(actor),
+    ...mailScope,
+    deleted: { $ne: true },
+  })
+    .sort({ sentAt: -1 })
+    .limit(Math.min(Math.max(limit, 1), 20))
+    .lean();
+
+  return (mails as unknown as Array<Record<string, unknown>>).map((mail) => {
+    const to = Array.isArray(mail.to) ? mail.to.map(String) : [];
+    const readBy = Array.isArray(mail.readBy) ? mail.readBy.map(String) : [];
+    return {
+      id: String(mail._id),
+      subject: String(mail.subject || ''),
+      from: String(mail.from || ''),
+      fromName: mail.fromName ? String(mail.fromName) : undefined,
+      to,
+      sentAt: new Date(mail.sentAt as Date),
+      text: String(mail.text || ''),
+      html: String(mail.html || ''),
+      threadId: mail.threadId ? String(mail.threadId) : undefined,
+      mailboxUserId: mail.mailboxUserId ? String(mail.mailboxUserId) : undefined,
+      read: actor ? readBy.includes(actor.id) : false,
+    };
+  });
+}
+
 export async function getCustomerTimeline(customerId: string, limit = 200, actor?: AuthUser): Promise<CustomerTimeline> {
   if (!Types.ObjectId.isValid(customerId)) {
     throw ApiError.badRequest('客户 ID 格式不正确');
