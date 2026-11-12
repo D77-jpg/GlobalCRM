@@ -75,7 +75,6 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/separator';
 import { EditableInfoRow } from '@/components/customers/editable-info-row';
 import { CustomerActivity } from '@/components/customers/customer-activity';
-import { CustomerReplyMailButton } from '@/components/customers/customer-reply-mail-button';
 import { CustomerHandoffDialog } from '@/components/customers/customer-handoff-dialog';
 import { CustomerAttachments } from '@/components/customers/customer-attachments';
 import { CustomerQuotations } from '@/components/customers/customer-quotations';
@@ -600,7 +599,6 @@ export function CustomerDetailPage(): React.JSX.Element {
             </span>
             <EditableCustomerName name={customer.name} onSave={saveName} />
             <CustomerStatusBadge status={customer.status} className="hidden sm:inline-flex" />
-            <CustomerReplyMailButton customerId={customer.id} status={customer.status} />
           </span>
         }
         description={
@@ -1059,7 +1057,7 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       <GlobalSiteInquiries customerId={customer.id} onDraft={()=>{void reloadLetters();void refreshDrafts();}} />
       <CustomerTradePanel customerId={customer.id} />
-      <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} />
+      <CustomerActivity customerId={customer.id} customerStatus={customer.status} onCustomerChanged={() => void reloadCustomer()} />
 
       {/* ---------------------------- 报价单 ---------------------------- */}
 
