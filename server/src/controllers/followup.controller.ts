@@ -11,7 +11,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/pagination';
 import { createFollowUp, deleteFollowUp, listFollowUps, updateFollowUp } from '../services/followup.service';
-import { getCustomerTimeline } from '../services/timeline.service';
+import { getCustomerReplyMails, getCustomerTimeline } from '../services/timeline.service';
 import { getCustomerByIdOrThrow } from '../services/customer.service';
 import type { CreateFollowUpInput, ListFollowUpsQuery, UpdateFollowUpInput } from '../validators/followup.validator';
 
@@ -53,4 +53,11 @@ export const getCustomerTimelineHandler = asyncHandler(async (req: Request, res:
   await getCustomerByIdOrThrow(req.params.id, req.user);
   const data = await getCustomerTimeline(req.params.id, 200, req.user);
   sendSuccess(res, data);
+});
+
+/** GET /api/customers/:id/reply-mails —— 客户详情页快速查看客户回复 */
+export const getCustomerReplyMailsHandler = asyncHandler(async (req: Request, res: Response) => {
+  await getCustomerByIdOrThrow(req.params.id, req.user);
+  const data = await getCustomerReplyMails(req.params.id, req.user, 5);
+  sendSuccess(res, { items: data });
 });
