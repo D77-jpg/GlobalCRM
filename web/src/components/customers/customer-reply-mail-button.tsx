@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Mail, MailOpen } from 'lucide-react';
+import { Clock, Hash, Mail, MailOpen, User } from 'lucide-react';
 import { apiGet, toErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { Button } from '@/components/ui/button';
@@ -23,10 +23,30 @@ interface ReplyMail {
   text: string;
   html: string;
   threadId?: string;
+  messageId?: string;
 }
 
 interface ReplyMailResponse {
   items: ReplyMail[];
+}
+
+/** A compact meta row, matching the existing sent-letter detail dialog. */
+function MetaRow({
+  icon,
+  label,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <span className="mt-0.5 shrink-0 text-muted-foreground">{icon}</span>
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 flex-1 break-words font-medium">{children}</dd>
+    </div>
+  );
 }
 
 /**
@@ -46,13 +66,20 @@ export interface CustomerReplyMailButtonProps {
   /** Open a specific reply from the timeline, instead of the latest reply list. */
   mailId?: string;
   label?: string;
+  /** The outbound stage this reply belongs to, e.g. 第1封开发信. */
+  sourceLabel?: string;
 }
 
 /**
- * 客户详情页的快捷入口：客户已回复时，不必先去邮件中心筛选，
- * 直接在这里打开最近几封客户来信。
+ * 客户详情页的快捷入口：客户已回复时，不离开时间线即可打开对应来信。
  */
-export function CustomerReplyMailButton({ customerId, status, mailId, label }: CustomerReplyMailButtonProps): React.JSX.Element | null {
+export function CustomerReplyMailButton({
+  customerId,
+  status,
+  mailId,
+  label,
+  sourceLabel,
+}: CustomerReplyMailButtonProps): React.JSX.Element | null {
   const [open, setOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -79,6 +106,7 @@ export function CustomerReplyMailButton({ customerId, status, mailId, label }: C
   if (status !== 'replied') return null;
 
   const visibleItems = mailId ? items.filter((mail) => mail.id === mailId) : items;
+  const firstMail = visibleItems[0];
 
   return (
     <>
@@ -97,14 +125,16 @@ export function CustomerReplyMailButton({ customerId, status, mailId, label }: C
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-4xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-primary" aria-hidden />
-              客户回复邮件
+            <DialogTitle className="flex items-start gap-2 pr-6">
+              <Mail className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="min-w-0 break-words">{firstMail?.subject || '客户回复邮件'}</span>
             </DialogTitle>
-            <DialogDescription>
-              展示与该客户关联的最近来信；打开后可直接阅读正文。
+            <DialogDescription className="flex flex-wrap items-center gap-2">
+              <span className="chip chip-mint">客户回复</span>
+              {sourceLabel ? <span>对应{sourceLabel}</span> : null}
+              {firstMail ? <span>· 收到于 {formatDateTime(firstMail.sentAt)}</span> : null}
             </DialogDescription>
           </DialogHeader>
 
@@ -123,28 +153,41 @@ export function CustomerReplyMailButton({ customerId, status, mailId, label }: C
                 {mailId ? '没有找到这条时间线关联的回复邮件。' : '暂时没有找到该客户的回复邮件。'}
               </p>
             ) : (
-              visibleItems.map((mail) => (
-                <article key={mail.id} className="space-y-3 rounded-xl border border-border/70 bg-surface/40 p-3 sm:p-4">
-                  <header className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold">{mail.subject || '（无主题）'}</p>
-                      <p className="mt-1 break-all text-xs text-muted-foreground">
-                        {mail.fromName && mail.fromName !== mail.from
-                          ? `${mail.fromName} <${mail.from}>`
-                          : mail.from} · {formatDateTime(mail.sentAt)}
-                      </p>
+              visibleItems.map((mail) => {
+                const replyText = customerReplyText(mail.text) || '（客户未填写正文，仅引用了原邮件）';
+                return (
+                  <div key={mail.id} className="space-y-4">
+                    <dl className="grid gap-2 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+                      <MetaRow icon={<User className="h-3.5 w-3.5" aria-hidden />} label="发件人：">
+                        {mail.fromName || '—'}
+                      </MetaRow>
+                      <MetaRow icon={<Mail className="h-3.5 w-3.5" aria-hidden />} label="邮箱：">
+                        <a href={`mailto:${mail.from}`} className="text-primary underline-offset-2 hover:underline">
+                          {mail.from || '—'}
+                        </a>
+                      </MetaRow>
+                      <MetaRow icon={<Clock className="h-3.5 w-3.5" aria-hidden />} label="收到时间：">
+                        {formatDateTime(mail.sentAt)}
+                      </MetaRow>
+                      <MetaRow icon={<Hash className="h-3.5 w-3.5" aria-hidden />} label="Message-ID：">
+                        <span className="break-all font-mono text-2xs">{mail.messageId || '—'}</span>
+                      </MetaRow>
+                    </dl>
+
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-muted-foreground">客户回复正文</p>
+                        <span className="chip chip-muted">已省略引用原邮件</span>
+                      </div>
+                      <div className="mail-preview rounded-md border bg-background p-4">
+                        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+                          {replyText}
+                        </p>
+                      </div>
                     </div>
-                    <span className="chip chip-mint">客户来信</span>
-                  </header>
-                  <div className="rounded-md border border-border bg-white px-4 py-3">
-                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">客户回复正文</p>
-                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
-                      {customerReplyText(mail.text) || '（客户未填写正文，仅引用了原邮件）'}
-                    </p>
-                    <p className="mt-2 text-[11px] text-muted-foreground">已省略下方引用的原邮件</p>
                   </div>
-                </article>
-              ))
+                );
+              })
             )}
           </DialogBody>
 

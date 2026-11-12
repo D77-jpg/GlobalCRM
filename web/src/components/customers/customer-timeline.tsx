@@ -169,6 +169,7 @@ function EventBody({
                 customerId={customerId}
                 status="replied"
                 mailId={change.replyMail.id}
+                sourceLabel={change.replyMail.sourceLabel}
                 label="查看这封回复"
               />
             </div>
