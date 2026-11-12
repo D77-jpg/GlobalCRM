@@ -29,11 +29,15 @@ interface ReplyMailResponse {
   items: ReplyMail[];
 }
 
-/** Keep the same restrictive iframe policy as the mail center. */
-function mailSrcdoc(html: string): string {
-  const csp = "default-src 'none'; img-src http: https: data: cid:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
-  const style = 'body{margin:0;padding:16px;font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere;color:#202124;background:#fff}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}a{color:#6d4aff}';
-  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${style}</style>${html}`;
+/**
+ * Inbound mail commonly contains the entire outgoing thread below the
+ * customer's actual sentence. Show only the fresh part; the quoted history is
+ * already available in the mail center if someone really needs it.
+ */
+function customerReplyText(text: string): string {
+  const quotedMarker = text.search(/\n\s*(?:On|在).+?(?:wrote|写道)\s*[:：]\s*\n/i);
+  const fresh = quotedMarker >= 0 ? text.slice(0, quotedMarker) : text;
+  return fresh.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export interface CustomerReplyMailButtonProps {
@@ -130,19 +134,13 @@ export function CustomerReplyMailButton({ customerId, status, mailId, label }: C
                     </div>
                     <span className="chip chip-mint">客户来信</span>
                   </header>
-                  {mail.html ? (
-                    <iframe
-                      title={`客户回复：${mail.subject || '（无主题）'}`}
-                      sandbox="allow-popups allow-popups-to-escape-sandbox"
-                      referrerPolicy="no-referrer"
-                      className="min-h-56 w-full rounded-md border border-border bg-white"
-                      srcDoc={mailSrcdoc(mail.html)}
-                    />
-                  ) : (
-                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                      {mail.text || '（无正文）'}
+                  <div className="rounded-md border border-border bg-white px-4 py-3">
+                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">客户回复正文</p>
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+                      {customerReplyText(mail.text) || '（客户未填写正文，仅引用了原邮件）'}
                     </p>
-                  )}
+                    <p className="mt-2 text-[11px] text-muted-foreground">已省略下方引用的原邮件</p>
+                  </div>
                 </article>
               ))
             )}
