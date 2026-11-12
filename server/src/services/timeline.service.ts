@@ -252,7 +252,19 @@ export async function getCustomerReplyMails(
     .limit(Math.min(Math.max(limit, 1), 20))
     .lean();
 
-  return (mails as unknown as Array<Record<string, unknown>>).map((mail) => {
+  const seen = new Set<string>();
+  return (mails as unknown as Array<Record<string, unknown>>)
+    .filter((mail) => {
+      // Mail sync can briefly hold the same message under two ids; don't show
+      // duplicate reply cards in the customer detail drawer.
+      const key = mail.messageId
+        ? String(mail.messageId)
+        : `${String(mail.threadId || '')}|${String(mail.subject || '')}|${new Date(mail.sentAt as Date).getTime()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((mail) => {
     const to = Array.isArray(mail.to) ? mail.to.map(String) : [];
     const readBy = Array.isArray(mail.readBy) ? mail.readBy.map(String) : [];
     return {
