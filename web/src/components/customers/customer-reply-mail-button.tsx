@@ -129,7 +129,9 @@ export function CustomerReplyMailButton({ customerId, status, mailId, label }: C
                     <div className="min-w-0">
                       <p className="break-words text-sm font-semibold">{mail.subject || '（无主题）'}</p>
                       <p className="mt-1 break-all text-xs text-muted-foreground">
-                        {mail.fromName || mail.from} · {formatDateTime(mail.sentAt)}
+                        {mail.fromName && mail.fromName !== mail.from
+                          ? `${mail.fromName} <${mail.from}>`
+                          : mail.from} · {formatDateTime(mail.sentAt)}
                       </p>
                     </div>
                     <span className="chip chip-mint">客户来信</span>
