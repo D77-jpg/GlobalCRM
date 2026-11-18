@@ -11,7 +11,7 @@ import { Customer, DevelopmentLetter, Project, User } from '../models';
 import { Prospect } from '../models/Prospect';
 import { attachmentAllowed, mailError, normalizeSubject, safeMailHtml } from './mail-security';
 import { createLogger } from '../config/logger';
-import { htmlToPlainText } from '../utils/text';
+import { freshReplyText, htmlToPlainText } from '../utils/text';
 import { getProjectMailConfig } from './project-mail-config.service';
 import { getPersonalImapConfig, listPersonalImapConfigs, type PersonalImapConfig } from './mail-account.service';
 import { suppressEmail } from './mail-compliance.service';
@@ -157,35 +157,42 @@ function failedRecipients(headers: Map<string, unknown>, text: string): string[]
   return [...new Set((source.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []).map((email) => email.toLowerCase()))].slice(0, 20);
 }
 
-async function applyInboundCompliance(input: {
-  projectId: string;
+function inboundCompliance(input: {
   from: string;
   subject: string;
   text: string;
   headers: Map<string, unknown>;
-}): Promise<void> {
+}): { reason: 'hard_bounce' | 'unsubscribe' | 'complaint'; recipients: string[] } | undefined {
   const subject = input.subject.toLowerCase();
   const body = input.text.toLowerCase();
   const bounce = /mailer-daemon|postmaster|mail delivery (?:failed|subsystem)/i.test(input.from)
     || /undeliverable|delivery status notification|mail delivery failed|returned mail|退信|无法投递|投递失败/i.test(`${subject}\n${body}`);
   if (bounce) {
-    for (const email of failedRecipients(input.headers, input.text)) {
-      await suppressEmail({ projectId: input.projectId, email, reason: 'hard_bounce', source: 'inbound', note: 'Bounce report received', global: true });
-    }
-    return;
+    const recipients = failedRecipients(input.headers, input.text);
+    return recipients.length ? { reason: 'hard_bounce', recipients } : undefined;
   }
   if (/unsubscribe|remove me|stop emailing|do not contact|opt[ -]?out|退订|取消订阅|不要再发|停止联系/i.test(`${subject}\n${body}`) && input.from) {
-    await suppressEmail({ projectId: input.projectId, email: input.from, reason: 'unsubscribe', source: 'inbound', note: 'Unsubscribe request received by email', global: true });
+    return { reason: 'unsubscribe', recipients: [input.from] };
   }
   if (/feedback-report|abuse report|complaint/i.test(`${subject}\n${body}`)) {
     // ARF complaints are sent by the provider, not by the customer. Prefer the
     // reported recipient headers; only fall back to From for direct complaints.
     const reported = failedRecipients(input.headers, input.text);
-    const targets = reported.length ? reported : (input.from ? [input.from] : []);
-    for (const email of targets) {
-      await suppressEmail({ projectId: input.projectId, email, reason: 'complaint', source: 'inbound', note: 'Complaint report received', global: true });
-    }
+    const recipients = reported.length ? reported : (input.from ? [input.from] : []);
+    return recipients.length ? { reason: 'complaint', recipients } : undefined;
   }
+}
+
+async function finishInboundCompliance(doc: InstanceType<typeof MailMessage>): Promise<InstanceType<typeof MailMessage>> {
+  const work = doc.pendingCompliance;
+  if (!work) return doc;
+  const reason = work.reason as 'hard_bounce' | 'unsubscribe' | 'complaint';
+  for (const email of work.recipients) {
+    await suppressEmail({ projectId: String(doc.projectId), email, reason, source: 'inbound', global: true });
+  }
+  await MailMessage.updateOne({ _id: doc._id, projectId: doc.projectId }, { $unset: { pendingCompliance: 1 } });
+  doc.pendingCompliance = undefined;
+  return doc;
 }
 
 export async function importMail(source: Buffer, account?: string, projectId?: string, mailbox?: {
@@ -199,13 +206,19 @@ export async function importMail(source: Buffer, account?: string, projectId?: s
   if (!from) throw new Error('MAIL_MISSING_SENDER');
   const messageId = parsed.messageId?.trim().slice(0, 998);
   const dedupKey = createHash('sha256').update(`${accountKey}|${messageId || createHash('sha256').update(source).digest('hex')}`).digest('hex');
-  const exists = await MailMessage.findOne({ projectId: scopedProjectId, dedupKey });
-  if (exists) return exists;
+  const findExisting = () => MailMessage.findOne({ projectId: scopedProjectId, dedupKey }).select('+pendingCompliance');
+  const exists = await findExisting();
+  if (exists) return finishInboundCompliance(exists);
+  const pendingCompliance = inboundCompliance({
+    from, subject: parsed.subject || '', text: freshReplyText(parsed.text, parsed.html || ''),
+    headers: parsed.headers as unknown as Map<string, unknown>,
+  });
   const { customerId, prospectId } = await matchMailOwner(scopedProjectId, from, mailbox?.userId);
   const references = (Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []).slice(-50);
   const threadId = await findThread(customerId, parsed.subject || '', [...references, parsed.inReplyTo || ''], from, scopedProjectId, mailbox?.mailAccountId);
   const savedFiles: string[] = [];
   const attachments: { name: string; mimeType: string; size: number; filename?: string; blocked?: string }[] = [];
+  let doc: InstanceType<typeof MailMessage>;
   try {
     const mailDir = path.join(env.UPLOAD_DIR, 'mail', scopedProjectId);
     await fs.mkdir(mailDir, { recursive: true });
@@ -223,27 +236,19 @@ export async function importMail(source: Buffer, account?: string, projectId?: s
       attachments.push({ ...meta, filename });
     }
     const sentAt = parsed.date && Number.isFinite(parsed.date.getTime()) ? parsed.date : new Date();
-    const doc = await MailMessage.create({
+    doc = await MailMessage.create({
     prospectId, visibility: mailbox ? 'private' : 'project_shared', projectId: scopedProjectId, dedupKey, customerId, threadId, messageId, inReplyTo: parsed.inReplyTo,
       ...(mailbox ? { mailAccountId: mailbox.mailAccountId, mailboxUserId: mailbox.userId, mailboxAddress: mailbox.address } : {}),
       references, subject: (parsed.subject || '').slice(0, 998), normalizedSubject: normalizeSubject(parsed.subject || ''),
       from, fromName: parsed.from?.value[0]?.name, to: addresses(parsed.to), cc: addresses(parsed.cc),
-      html: safeMailHtml(parsed.html || ''), text: parsed.text || htmlToPlainText(safeMailHtml(parsed.html || '')), sentAt, attachments });
-    // Persist compliance state before returning so a later queue run sees it.
-    await applyInboundCompliance({
-      projectId: scopedProjectId,
-      from,
-      subject: parsed.subject || '',
-      text: parsed.text || htmlToPlainText(safeMailHtml(parsed.html || '')),
-      headers: parsed.headers as unknown as Map<string, unknown>,
-    });
-    // Incoming timeline events are derived from MailMessage in the EXISTING service.
-    return doc;
+      html: safeMailHtml(parsed.html || ''), text: parsed.text || htmlToPlainText(safeMailHtml(parsed.html || '')), sentAt, attachments, pendingCompliance });
   } catch (error) {
     await Promise.all(savedFiles.map(p => fs.unlink(p).catch(() => undefined)));
-    if ((error as { code?: number }).code === 11000) return (await MailMessage.findOne({ projectId: scopedProjectId, dedupKey }))!;
-    throw error;
+    const existing = (error as { code?: number }).code === 11000 ? await findExisting() : null;
+    if (!existing) throw error;
+    doc = existing;
   }
+  return finishInboundCompliance(doc);
 }
 
 const syncing = new Set<string>();
@@ -452,6 +457,12 @@ export async function syncPersonalInbox(projectId: string, userId: string, clien
 export async function syncInbox(projectIdOrClient?: string | ClientFactory, clientFactory?: ClientFactory): Promise<void> {
   const makeClient = typeof projectIdOrClient === 'function' ? projectIdOrClient : clientFactory ?? (options => new ImapFlow(options));
   const requestedId = typeof projectIdOrClient === 'string' ? projectIdOrClient : undefined;
+  const pending = await MailMessage.find({ pendingCompliance: { $exists: true }, ...(requestedId ? { projectId: requestedId } : {}) })
+    .sort({ _id: 1 }).limit(50).select('projectId +pendingCompliance');
+  for (const message of pending) {
+    try { await finishInboundCompliance(message); }
+    catch { logger.warn('来信合规处理尚未完成，下轮重试'); }
+  }
   if (requestedId) {
     const projectId = await resolveProjectId(requestedId);
     await syncProject(projectId, makeClient);

@@ -184,13 +184,13 @@ function playbookGuidance(profile: ProjectPromptContext): string {
 
 function outreachWritingRules(profile: ProjectPromptContext): string {
   return [
-    `你代表的是${profile.identity}。${profile.offerSummary} 邮件主题、正文和结尾问题只能围绕${profile.outreachFocus}；不要询问或评价${profile.avoidTopics}。`,
-    `开发信按三段式写：正文 3 段、50–90 英文词（最多 110 词），每段 1–3 句；称呼和签名不计。称呼用客户的名字（First Name，如 Dear Diane,），不要连姓一起写；没有联系人姓名时写 Dear {客户公司名} team,（例如 Dear ScentSational team,），禁止 Dear there / Dear Sir or Madam / Dear Customer / Dear All 这类空称呼，也不要编造人名。第一段用 1–2 句：一个有来源的客户产品/系列事实（官网事实自然表达，不要固定写成 Your website shows...），再加一个与该产品相关的${profile.insightLabel}（例如${profile.insightExamples}）；不要猜客户现在用什么产品，也不要暗示对方没有采购，更不要编造网站内容；官网事实只写一个短句、只提一个产品/系列，引用原文时保留型号/编号，不要用 and 拼接多个产品名，也不要改写原文；如果 website source 有 productHint，优先逐字使用 productHint。第二段用 2–3 句：第 1 句只说明我们是谁；第 2 句只写一个与客户产品相关的结果；第 3 句只写一个证明点（例如${profile.proofExamples}）；不要把身份、结果、证明点塞进同一句；只讲一个产品/服务方向，不要罗列全部品类、认证、产能、年份，不要描述内部流程。第三段只给一个低负担下一步（例如${profile.ctaExamples}），用一个明确问题收尾；问题必须围绕${profile.outreachFocus}，不能涉及${profile.avoidTopics}。收尾用自然的低压力问题，可用 Would... / Is... / Want me to... 等不同句式，不要每封都用 Could you please...；签名和落款由系统追加，不要改。每个事实句只承载一个可核验的能力点；每句独立核对，某一句证据不足时只删该句，不拖累同段其他句子。正文里每个具体细节都必须能在 knowledgeContext 原文中找到，不要自行补充知识里没写的细节。禁止只写“官网描述 + 一句提问”这类一两句的空稿；若相关知识不足，就在缺口里说明，而不是用泛化句子凑数。主题 3–7 个词，用真实产品/系列名，不要 Re:/Fwd:/Urgent；主题也必须落在${profile.subjectFocus}，不能写成其他行业。`,
-    `首封开发信尤其不要写 MOQ、价格、交期、认证、产能、生产线数量或成立年份；不要把“could fit / likely needs / probably”这类推测写成客户需求。第二段只保留身份句和一个有依据的能力点，第三段只问一个低负担问题。证明点必须逐字使用 knowledgeContext 里的已批准措辞；例如原文写 physical sample before ordering，不能扩写成 every order is confirmed by a physical sample；没有完整条件就删掉该句。`,
-    `第一段的官网事实和采购场景洞察必须拆成两句：第一句只写官网可逐字核对的产品/系列名，不能解释这个产品“代表什么”或客户如何使用；第二句只写行业共性观察。两句之间必须用句号，不能用分号、破折号或 and 串成一句；洞察句不要出现 warranty/质保、价格、MOQ、交期、认证、免费、库存等承诺词，也不要写数字。第二段的能力句不得把知识库里的“工厂能力包括包胶、装配”扩写成“为客户的私标产品做包胶装配”；只有原文明确写了客户专属结果时才写，否则删掉该句，不要改写成更泛的承诺。`,
-    `开发信的说服力来自“具体”而不是形容词堆砌：第一段用行业里普遍成立的关键点，不猜客户现状；第二段只给一个证明点，不写内部流程和风险免责；第三段的 CTA 必须是当前项目确实能交付的资料或动作，不能同时索取 Logo、数量、尺寸、预算、地址和电话。不要使用 considered、restrained、coherent、deliberate、elevate、worth considering 这类 AI 高频词，语气要像真人写给一个具体的人。`,
-    `knowledgeContext 里若有开发信范本/主题库/三段式结构（如行业解决方案、开发信知识库），参考它的段落结构、信息密度和句式，但不要照抄客户名、数字或未经核实的内容；范本只是表达参考，不是事实来源。若销售规则/模板与本提示的自然表达要求冲突，事实约束优先，但固定句式以本提示为准，不要照抄 Your website shows... 或 Could you please...。`,
-    `客户官网 kind=website 是客户自述，不是独立核实结果或我方政策。提及官网事实时自然说明来源，单独一段；禁止使用固定的 “Your website shows...” 句式，可写 “Your site lists...” / “I saw ... on your site” 等自然表达；不要在该段夹入我方公司、能力或采购推断。正文不要重复 seller 的署名，审核后由系统追加。普通首封信不抄写内部未批准政策的清单。收尾使用简短、自然的低压力问题（可用 Would... / Is... / Want me to...）；禁止每封都用固定的 “Could you please...” 句式，且问题只围绕${profile.outreachFocus}，不附加推测。`,
+    `你代表的是${profile.identity}。${profile.offerSummary} 围绕${profile.outreachFocus}写信，避开${profile.avoidTopics}。`,
+    '英文正文以 80–120 词和三个短段为目标，称呼和系统签名另计。信息少时可以更短。已知姓名用名字，只有公司名用 Dear [Company] team，避免编造人名。',
+    '第一段从一条能核实的客户观察切入，只写一个产品或系列。保留准确的名称、型号和单位。用自然承接把它带到一个待确认的合作场景，官网细节单独成句。避免机械使用 Your website shows。资料少时直接说明与已知行业相关的来意，通用邮箱可请对方转给负责人。',
+    '第二段讲清我们是谁和一项买家读完就能理解的帮助，用已发布知识中的一条证明。按联系人明确职位调整表达，品牌方侧重产品体验，采购侧重规格、补货和一致性。不要从官网信息推断采购意向，也不要把能力扩写成客户专属承诺。',
+    '第三段只问一个低门槛问题，客户几秒能答。可提出项目已授权的下一步。首封正文省略未经证实的报价、交期、MOQ、认证、产能和免费承诺。签名由 CRM 追加。',
+    ...(profile.approvedActions?.length ? [`项目许可的沟通动作：${profile.approvedActions.join('；')}。只用与当前客户匹配的一项，能力与商务条件仍须有已发布证据。`] : []),
+    '主题围绕同一个方向，3–7 个词。有可信产品名可以用，没有就用实际讨论主题。避免 Re:/Fwd:、先导性群发客套话和重复表述。Playbook 只提供表达方向，证据来自客户资料和本项目确认的知识。',
   ].join('\n') + playbookGuidance(profile);
 }
 
@@ -558,13 +558,12 @@ export class OpenAIResponsesProvider implements AgentProvider {
     if (!this.config.apiKey) throw new AgentProviderError('OPENAI_NOT_CONFIGURED');
     const profile = promptProfile(request.input.projectProfile);
     const instructions = [
-      `你为${profile.identity}写开发信跟进邮件（第 2 封或第 3 封）。上一封信客户没有回复。`,
-      '写作要求：英文；60–90 词；3 个短段落；不要重复自我介绍、不要重述上一封的完整内容；语气自然、不卑不亢、不催促。',
-      '开头必须承接上一封：用一句 Following up on my email of <上一封日期> about <上一封主题>，日期取 previous.sentAt。',
-      `正文只做三件事：一句承接、一个具体的下一步（例如${profile.ctaExamples}）、一个很容易回答的问题；只能围绕${profile.outreachFocus}，不要转向${profile.avoidTopics}。`,
-      '严禁编造或新增事实：不得出现价格、MOQ、交期、认证、客户案例、产能等具体数据，除非出现在 allowedFacts 里；allowedFacts 为空时不要写任何数据，也不写折扣、保证、免费等承诺。',
-      '不写签名、不写落款公司名、不写占位符（如 {{name}}）、不写日期、不写 Dear Sir/Madam。称呼只用名字：Dear <customer.salutation>，名字后面不要再带姓。',
-      '主题直接用 Re: <上一封主题>；若上一封已以 Re: 开头就不要再叠加。',
+      outreachSequenceRules(profile, request.input.step, [{
+        step: request.input.step - 1, subject: request.input.previous.subject, bodyText: request.input.previous.excerpt,
+      }]),
+      '英文，不写签名或占位符。可自然承接上封，避免固定地引用发信日期。',
+      '只能使用 allowedFacts 中已有依据的事实。第三封保持礼貌收尾，避免新增能力或承诺。',
+      '使用已给出的称呼，主题沿用同一线程的前一封。',
     ].join('\n');
     const { body, status } = await this.postModel({
       model: this.config.model,

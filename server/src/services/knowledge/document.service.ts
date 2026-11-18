@@ -588,8 +588,10 @@ export async function processKnowledgeDocument(parsingId?: string): Promise<void
     await currentActor(parsing.projectId, parsing.requestedBy);
     if (abort.signal.aborted || !await KnowledgeParsing.exists(fence)) throw new ParserError('cancelled', '任务已停止');
     const artifactHash = digest(JSON.stringify(result));
+    const project = await Project.findById(parsing.projectId).select('organizationId').lean();
+    const organization = project?.organizationId ? { organizationId: project.organizationId } : {};
     await KnowledgeChunk.bulkWrite(result.chunks.map(c => ({ updateOne: { filter: { _id: digest(doc.id + ':' + parsing.id + ':' + artifactHash + ':' + c.ordinal + ':' + c.contentHash) },
-      update: { $setOnInsert: { ...c, projectId: parsing.projectId, documentId: doc._id, parsingRevisionId: parsing._id, artifactHash } }, upsert: true } })));
+      update: { $setOnInsert: { ...c, ...organization, projectId: parsing.projectId, documentId: doc._id, parsingRevisionId: parsing._id, artifactHash } }, upsert: true } })));
     // No artifact body on job: chunks are bounded separate documents, not a 16MB Mongo document.
     const { chunks, ...artifact } = result;
     await KnowledgeParsing.updateOne(fence, { $set: { state: result.state, stage: '等待审核', done: chunks.length, total: chunks.length,

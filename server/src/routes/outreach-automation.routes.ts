@@ -9,12 +9,14 @@ import {
   pauseOutreachAutomation,
   resumeOutreachAutomation,
   saveOutreachAutomationConfig,
+  getOutreachResults,
   startOutreachAutomation,
 } from '../services/outreach-automation.service';
 
 const router = Router();
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'ID 格式不正确');
 const configInput = z.object({
+  rolloutMode: z.enum(['shadow', 'pilot', 'active']).optional(),
   expectedVersion: z.number().int().min(0),
   dailyLimit: z.number().int().min(1).max(20),
   perDomainLimit: z.number().int().min(1).max(10),
@@ -30,6 +32,9 @@ const targetUserId = (req: Request): string | undefined =>
 
 router.get('/', asyncHandler(async (req, res) => {
   sendSuccess(res, await getOutreachAutomationOverview(req.user!, targetUserId(req)));
+}));
+router.get('/results', asyncHandler(async (req, res) => {
+  sendSuccess(res, await getOutreachResults(req.user!, targetUserId(req)));
 }));
 
 router.put('/', validate({ body: configInput }), asyncHandler(async (req, res) => {

@@ -25,6 +25,13 @@ const schema = new Schema({
   cc: { type: [String], default: [] },
   html: { type: String, default: '' },
   text: { type: String, default: '' },
+  pendingCompliance: {
+    type: new Schema({
+      reason: { type: String, enum: ['hard_bounce', 'unsubscribe', 'complaint'], required: true },
+      recipients: { type: [String], required: true },
+    }, { _id: false }),
+    select: false,
+  },
   sentAt: { type: Date, required: true },
   readBy: { type: [String], default: [] },
   attachments: [{
@@ -36,6 +43,7 @@ schema.index({ projectId: 1, dedupKey: 1 }, { unique: true });
 schema.index({ projectId: 1, customerId: 1, sentAt: -1 });
 schema.index({ projectId: 1, mailboxUserId: 1, sentAt: -1 });
 schema.index({ projectId: 1, threadId: 1, sentAt: 1 });
+schema.index({ pendingCompliance: 1 }, { sparse: true });
 export const MailMessage = model('MailMessage', schema);
 
 // Durable mailbox cursor and renewable lease; never stores authentication data.

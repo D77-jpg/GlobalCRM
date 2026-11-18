@@ -50,6 +50,7 @@ jobs:
           npm run test:agent
           npm run test:prospecting
           npm run test:outreach-automation
+          npm run test:outreach-quality
           npm run test:oauth
           npm run test:security
           npm run test:health
@@ -112,6 +113,52 @@ jobs:
           node --test scripts/mongo-backup.test.cjs scripts/docker-runtime.test.cjs
       - name: Compose validates using placeholder configuration only
         run: docker compose --env-file production.env.example config --quiet
+      - name: Verify fresh production Compose and transaction-backed migrations
+        run: |
+          set -euo pipefail
+          fixture="$(mktemp)"
+          project="crm-outreach-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mongo_password="$(openssl rand -hex 24)"
+          cat > "$fixture" <<EOF
+          APP_ENV=production
+          MONGO_ROOT_USERNAME=fixtureadmin
+          MONGO_ROOT_PASSWORD=$mongo_password
+          MONGODB_URI=mongodb://fixtureadmin:$mongo_password@mongo:27017/cdlm?authSource=admin&replicaSet=rs0
+          JWT_SECRET=$(openssl rand -hex 48)
+          ADMIN_PASSWORD=$(openssl rand -hex 24)
+          MAIL_CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 48)
+          TRACKING_BASE_URL=https://crm.example.test
+          CORS_ORIGIN=https://crm.example.test
+          MAIL_TRANSPORT=mock
+          IMAP_ENABLED=false
+          GLOBALCRM_HTTP_PORT=18080
+          EOF
+          compose() { docker compose -p "$project" --env-file "$fixture" "$@"; }
+          trap 'compose down --volumes --remove-orphans; rm -f "$fixture"' EXIT
+          compose up --build --wait --wait-timeout 180
+          curl --fail --silent http://127.0.0.1:18080/api/health >/dev/null
+          compose exec -T server node <<'JS'
+          const assert = require('node:assert/strict');
+          const { access } = require('node:fs/promises');
+          const mongoose = require('mongoose');
+          (async () => {
+            await mongoose.connect(process.env.MONGODB_URI, { autoIndex: false });
+            try {
+              const indexes = await mongoose.connection.collection('authsessions').indexes();
+              assert.ok(indexes.some(i => i.expireAfterSeconds === 0));
+              const migrated = await mongoose.connection.collection('projectplaybooks').countDocuments({ 'activePackage.release': 'legacy-1.0.0' });
+              assert.equal(migrated, 3);
+              await mongoose.connection.createCollection('compose_smoke_fixture');
+              await mongoose.connection.transaction(async session => {
+                await mongoose.connection.collection('compose_smoke_fixture').insertOne({ fictional: true }, { session });
+              });
+              await access('/app/semantic/model.json');
+              await access('/app/parsers/runtime-lock.json');
+            } finally {
+              await mongoose.disconnect();
+            }
+          })().catch(() => { process.exitCode = 1; });
+          JS
 
   web:
     runs-on: windows-latest

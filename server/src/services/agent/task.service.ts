@@ -34,13 +34,16 @@ import type { AgentProvider } from './provider';
 import { agentToolSchemas } from './tool-registry';
 import { customerSearchArgs, searchAgentCustomers } from './customer-search';
 import { agentSafetyIdentifier, reserveAgentQuota, settleAgentQuota } from './runtime-guard';
+import { runWithTenant } from '../../models/tenant-context';
+import { previousOutreachDrafts } from './outreach-history';
 
 const scope = (actor: AuthUser) => ({projectId: requireProjectId(actor), userId: new Types.ObjectId(actor.id)});
 const validId = (id: string) => { if (!/^[a-f\d]{24}$/i.test(id)) throw ApiError.notFound('任务不存在或无权访问'); return id; };
 // Revalidate background authority against current DB state, never a long-lived JWT or upgraded role.
 export async function taskActor(task: Pick<IAgentTask,'projectId'|'userId'|'actorRole'>): Promise<AuthUser> {
  const [user, project] = await Promise.all([User.findById(task.userId), Project.findById(task.projectId)]);
- if (!user || user.status === 'disabled' || !project || project.status !== 'active'
+ if (!user || user.status === 'disabled' || user.role === 'viewer' || !project || project.status !== 'active'
+  || (project.organizationId && String(project.organizationId) !== String(user.organizationId))
   || (user.role !== 'admin' && !user.projectIds.some(p => String(p) === String(task.projectId)))) throw ApiError.notFound('任务权限已失效');
  return {id: user.id, username: user.username, displayName: user.displayName,
   role: task.actorRole === 'admin' && user.role === 'admin' ? 'admin' : 'user', projectId: String(task.projectId)};
@@ -159,6 +162,9 @@ export async function processAgentTask(id?: string, providerOverride?: AgentProv
  const task = await AgentTask.findOneAndUpdate({attempts:{$lt:5},... (id ? {_id: validId(id)} : {}), $or:[{status:'queued'},{status:'running',leaseUntil:{$lt:new Date()}}]},
   {$set:{status:'running',leaseToken:token,leaseUntil:new Date(Date.now()+90_000)},$inc:{version:1,attempts:1}}, {new:true,sort:{createdAt:1}});
  if (!task) return;
+ const project = await Project.findById(task.projectId).select('organizationId').lean();
+ const organizationId = project?.organizationId?.toString();
+ const run = async () => {
  const fence = {_id:task._id,status:'running',leaseToken:token};
  const deadline=setTimeout(()=>{void AgentTask.updateOne(fence,{$set:{status:'failed',error:{code:'TASK_WORKFLOW_LIMIT',message:'本次处理超过180秒，已保存结果保留，请缩小范围后新建任务。',retryable:false}},$unset:{leaseToken:1,leaseUntil:1},$inc:{version:1}}).catch(()=>undefined);},180000);deadline.unref();
  const heartbeat = setInterval(() => { void AgentTask.updateOne(fence,{$set:{leaseUntil:new Date(Date.now()+90_000)}}).catch(() => undefined); },10_000);
@@ -224,9 +230,8 @@ export async function processAgentTask(id?: string, providerOverride?: AgentProv
   const epochSuffix=(task.workflowEpoch??0)?'-e'+task.workflowEpoch:'';
   if (!task.completedSteps.includes('analyze_customer')) {
    await step('analyze_customer','正在读取客户档案、时间线、邮件与报价，生成有依据的英文草稿。');
-   const previousOutreach=task.outreachStep&&task.outreachStep>1
-    ?(await DevelopmentLetter.find({projectId:task.projectId,customerId:task.customerId,outreachStep:{$lt:task.outreachStep},status:{$in:['draft','sent','opened']}}).sort({outreachStep:1}).select('outreachStep subject contentText').lean())
-      .map(item=>({step:Number(item.outreachStep),subject:String(item.subject??''),bodyText:String(item.contentText??'').slice(0,1800)}))
+   const previousOutreach=task.outreachStep&&task.customerId
+    ?await previousOutreachDrafts(String(task.projectId),String(task.customerId),task.outreachStep,true)
     :undefined;
    const analysis=await createCustomerAnalysis({customerId:String(task.customerId),idempotencyKey:`task-analysis-${task.id}${epochSuffix}`},actor,{firstOutreach:task.kind==='first_outreach',userRequest:task.goal,provider:providerOverride,knowledgeIds:task.knowledgeIds.map(String),taskId:task.id,workflow,taskKind:task.kind,customerResearch:research,outreachStep:task.outreachStep,previousOutreach});
    await check(); await change({analysisId:new Types.ObjectId(analysis.id),contextSummary:analysis.facts.filter(f=>f.sourceIds.some(id=>/^(?:profile|timeline|mail-in|mail-out|website|followup|attachment):/.test(id))).map(f=>f.text).join('；').slice(0,1500)},'分析与草稿内容已持久保存。','analyze_customer');
@@ -239,7 +244,7 @@ export async function processAgentTask(id?: string, providerOverride?: AgentProv
    if(!draft) {
     const analysis=await getCustomerAnalysis(String(task.analysisId),actor);
     actor=await check();
-    const project=await Project.findById(task.projectId).select('code slug name companyName industry website mailFrom senderName').lean();
+    const project=await Project.findById(task.projectId).select('code slug name companyName industry website mailFrom senderName brandProfile').lean();
     const signature=resolveProjectSalesProfile(project).signature;
     const saved=await sendLetter({customerId:String(task.customerId),subject:analysis.emailDraft.subject,
      content:renderLetterContent(analysis.emailDraft.bodyText, await resolveSignerName({projectId:task.projectId,ownerId:(await Customer.findById(task.customerId).select('ownerId').lean())?.ownerId,actorId:actor.id}),signature),
@@ -267,6 +272,9 @@ export async function processAgentTask(id?: string, providerOverride?: AgentProv
    await AgentTask.updateOne(fence,{$set:{status:'failed',error:failure},$inc:{version:1},$push:{events:{$each:[{at:new Date(),message:failure.message,step:task.currentStep}],$slice:-100}}});
   }
  } finally { clearTimeout(deadline);clearInterval(heartbeat); await AgentTask.updateOne({_id:task._id,leaseToken:token,status:{$ne:'running'}},{$unset:{leaseToken:1,leaseUntil:1}}); }
+ };
+ if (organizationId) return runWithTenant({ organizationId, source: 'agent-task-worker' }, run);
+ return run();
 }
 let worker: ReturnType<typeof setInterval>|undefined;
 let busy=false;

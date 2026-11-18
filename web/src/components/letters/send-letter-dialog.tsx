@@ -64,7 +64,7 @@ import { PlaceholderBar } from './placeholder-bar';
 import { sendLetterSchema, type SendLetterFormValues } from '@/lib/validators';
 import { buildPlaceholderValues, findMissingPlaceholders, renderTemplate } from '@/lib/placeholder';
 import { apiGet, apiPost, toErrorMessage } from '@/lib/api';
-import { createClientId, readStorage, writeStorage } from '@/lib/utils';
+import { createClientId, removeStorage } from '@/lib/utils';
 import { useDebouncedValue } from '@/hooks/use-debounce';
 import { useSaveShortcut } from '@/hooks/use-ui';
 import { useLetterStore } from '@/store/letter.store';
@@ -96,21 +96,6 @@ export interface SendLetterDialogProps {
   onSent?: (result: SendLetterResult) => void;
   /** 审核结论（通过 / 不通过 / 撤销）写入后回调，父级据此刷新待审核草稿列表 */
   onReviewed?: (letter: DevelopmentLetter) => void;
-}
-
-/** 记住上次用过的模板，连续给多个客户发信时不用重写 */
-interface SavedTemplate {
-  subject: string;
-  content: string;
-}
-
-function loadSavedTemplate(signature: ReturnType<typeof letterSignatureForProject>): SavedTemplate | null {
-  const saved = readStorage<SavedTemplate | null>(STORAGE_KEYS.lastTemplate, null);
-  if (!saved || typeof saved.subject !== 'string' || typeof saved.content !== 'string') return null;
-  // 本地“上次模板”是跨项目保存的；不要把它带入另一个项目，尤其不能带 Genesis 包装正文。
-  const foreignMarkers = ['Gold Supplier on Alibaba.com since 2014', 'Wholesale · OEM · ODM · Private Label'];
-  if (foreignMarkers.some((marker) => saved.content.includes(marker)) && !saved.content.includes(signature.marker)) return null;
-  return saved;
 }
 
 /** 模板选择器的占位值（Radix Select 不接受空字符串；选中即回填表单，不持久化选中态） */
@@ -248,6 +233,7 @@ export function SendLetterDialog({
   const bodyRef = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
     if (!open) return;
+    removeStorage(STORAGE_KEYS.lastTemplate);
     // Reopen must start at the tab bar, not midway through the form.
     const frame = window.requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: 0 }));
     return () => window.cancelAnimationFrame(frame);
@@ -311,10 +297,9 @@ export function SendLetterDialog({
     setAppliedTemplateId(null);
     requestKey.current = createClientId();
 
-    // 优先级：重发的原信 > 上次使用的模板 > 内置默认模板
     const source = letter
       ? { subject: letter.subject, content: letter.template || letter.content }
-      : initialDraft ?? (loadSavedTemplate(signature) ?? defaultTemplate);
+      : initialDraft ?? defaultTemplate;
 
     // 固定结尾直接写进正文，审核时看到的就是客户会收到的完整内容（回复不预填，避免光标落在签名后）
     const signerName = authUser?.displayName || senderStatus?.account?.displayName || '';
@@ -486,9 +471,6 @@ export function SendLetterDialog({
           if (!asDraft && scheduledAt && new Date(scheduledAt).getTime() <= Date.now()) throw new Error('定时时间必须晚于当前时间');
           const result = await dispatchLetter(values, asDraft);
 
-          // 记住模板，便于连续发信
-          writeStorage(STORAGE_KEYS.lastTemplate, { subject: values.subject, content: values.content });
-
           if (asDraft) {
             // 内容落库后审核基线随之更新；后端会清掉失效的通过结论
             setReview(result.letter.review ?? null);
@@ -595,7 +577,6 @@ export function SendLetterDialog({
           if (scheduledAt && new Date(scheduledAt).getTime() <= Date.now()) throw new Error('定时时间必须晚于当前时间');
 
           const result = await dispatchLetter(values, false);
-          writeStorage(STORAGE_KEYS.lastTemplate, { subject: values.subject, content: values.content });
           notifyLetterResult(result, false);
           onSent?.(result);
           onOpenChange(false);
@@ -988,6 +969,22 @@ export function SendLetterDialog({
 
           {/* ---------------- 右栏：依据核对 → 审核结论 → 发送设置 ---------------- */}
           <aside className="min-w-0 space-y-4 lg:sticky lg:top-0">
+            {letter?.knowledgeReview?.context.playbook?.selectionReason ? (
+              <section className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
+                <h3 className="font-semibold">开发切入点</h3>
+                <p className="break-words text-muted-foreground">{letter.knowledgeReview.context.playbook.selectionReason}</p>
+                {letter.knowledgeReview.context.playbook.alternatives?.length ? (
+                  <details className="space-y-1 text-muted-foreground">
+                    <summary className="cursor-pointer font-medium text-foreground">备选角度</summary>
+                    <ul className="space-y-1 pl-4">
+                      {letter.knowledgeReview.context.playbook.alternatives.map(option => (
+                        <li key={option.code} className="list-disc break-words">{option.name} · {option.angle}</li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </section>
+            ) : null}
             {isDraftReview ? (
               <section className="rounded-lg border border-border bg-card">
                 <div className="flex items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">

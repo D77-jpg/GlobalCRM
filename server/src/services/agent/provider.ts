@@ -47,6 +47,7 @@ export interface CustomerExtractionResult {
 }
 
 export interface PreviousOutreachDraft {
+  angleCode?: string;
   step: number;
   subject: string;
   bodyText: string;

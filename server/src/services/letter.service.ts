@@ -1,6 +1,7 @@
 import {redactPrivateReview} from './agent/knowledge-visibility';
 import type {KnowledgeReview,KnowledgeFreshness} from './agent/knowledge-types';
-import {knowledgeReviewHardBlocker,knowledgeReviewSendIssue} from './agent/knowledge-send-gate';
+import {automatedReviewIssue,knowledgeReviewHardBlocker,knowledgeReviewSendIssue,repeatedOutreachIssue} from './agent/knowledge-send-gate';
+import { previousOutreachDrafts } from './agent/outreach-history';
 import {knowledgeFreshness,draftHash} from './agent/knowledge-grounding';
 import {recordLetterReviewFeedback,retractLetterReviewFeedback} from './agent/knowledge-training';
 import type {FeedbackIssue} from '../models/KnowledgeFeedback';
@@ -36,6 +37,7 @@ import {
   type CustomerDocument,
   type ICustomer,
   type IDevelopmentLetter,
+  type DevelopmentLetterDocument,
 } from '../models';
 import env from '../config/env';
 import { createLogger } from '../config/logger';
@@ -534,6 +536,7 @@ async function persistAndSend(options: {
   agentTaskId?:Types.ObjectId;
   automationCampaignId?: Types.ObjectId;
   automationEnrollmentId?: Types.ObjectId;
+  automationDraftVersion?: Date;
   knowledgeReview?:KnowledgeReview;
   knowledgeRechecks?:Record<string,unknown>[];
   agentDraftId?:Types.ObjectId;
@@ -620,6 +623,9 @@ async function persistAndSend(options: {
   const knowledgeReview = options.knowledgeReview
     ? { ...options.knowledgeReview, bodyHash: draftHash(rendered.text) }
     : undefined;
+  if (options.automationCampaignId && options.knowledgeReview?.bodyHash !== draftHash(rendered.text)) {
+    throw ApiError.conflict('发信内容与已核验的草稿不同，请重新准备');
+  }
 
   // 1) 草稿：直接落库，不发送、不改客户状态
   if (saveAsDraft) {
@@ -720,11 +726,13 @@ async function persistAndSend(options: {
       projectId: customer.projectId,
       customerId: customer._id,
       status: 'draft',
+      ...(options.automationDraftVersion ? { updatedAt: options.automationDraftVersion } : {}),
     }, {
       $set: {
         ...(options.agentTaskId ? { agentTaskId: options.agentTaskId } : {}),
         ...(options.automationCampaignId ? { automationCampaignId: options.automationCampaignId } : {}),
         ...(options.automationEnrollmentId ? { automationEnrollmentId: options.automationEnrollmentId } : {}),
+        ...(options.automationCampaignId ? { automationRuleVersion: options.knowledgeReview?.context.writingVersion ?? 'legacy' } : {}),
         ...(options.agentDraftId ? { agentDraftId: options.agentDraftId } : {}),
         ...(options.agentOutreachId ? { agentOutreachId: options.agentOutreachId } : {}),
         ...(knowledgeReview ? { knowledgeReview } : {}),
@@ -742,7 +750,7 @@ async function persistAndSend(options: {
         ...options.templateAttribution,
         status: options.scheduledAt ? 'scheduled' : 'queued',
         channel: activeChannel,
-        messageId: newMessageId(),
+        messageId: newMessageId(sender.senderAddress),
         threadId,
         inReplyTo,
         references,
@@ -778,7 +786,7 @@ async function persistAndSend(options: {
         contentText: rendered.text, template: contentTemplate,
         ...options.templateAttribution,
         status: options.scheduledAt ? 'scheduled' : 'queued', channel: activeChannel,
-        messageId: newMessageId(), threadId, inReplyTo, references,
+        messageId: newMessageId(sender.senderAddress), threadId, inReplyTo, references,
         ...(outreachStep ? { outreachStep } : {}),
         scheduledAt: options.scheduledAt, nextAttemptAt: due, markAsDeveloped,
         sentBy: userId ? new Types.ObjectId(userId) : undefined,
@@ -949,7 +957,8 @@ export async function resendLetter(
       throw ApiError.conflict('审核后内容已变化，请重新审核后再发送');
     }
   }
-  assertKnowledgeReviewCanSend(original.knowledgeReview);
+  if (automation) await assertAutomaticDraftCanSend(original, actor!);
+  else assertKnowledgeReviewCanSend(original.knowledgeReview);
 
   let threadId = original.threadId;
   let inReplyTo = original.inReplyTo;
@@ -976,6 +985,7 @@ export async function resendLetter(
     agentTaskId:original.agentTaskId,
     automationCampaignId: automation?.campaignId,
     automationEnrollmentId: automation?.enrollmentId,
+    automationDraftVersion: automation ? original.updatedAt : undefined,
     // A draft is promoted in place; a sent record keeps its historical draft
     // association when a new resend row is created.
     agentDraftId:original.agentDraftId??(original.status!=='draft'?original._id:undefined),
@@ -1007,30 +1017,19 @@ export async function resendLetter(
  * 自动开发活动被显式开启时调用。依据过期、冲突、检索失败等硬拦截仍然
  * 会在这里拒绝，自动发送只能绕过“需要人工看一眼”的软闸门。
  */
-export async function approveDraftForAutomation(
-  letterId: string,
-  actor: AuthUser,
-  campaignId: string,
-): Promise<void> {
-  if (!Types.ObjectId.isValid(letterId)) throw ApiError.badRequest('开发信 ID 格式不正确');
-  const letter = await DevelopmentLetter.findOne({ _id: letterId, ...projectScope(actor), status: 'draft' });
-  if (!letter) throw ApiError.conflict('自动发送草稿不存在或状态已变化');
-  if (!letter.knowledgeReview) return;
-  const blocker = knowledgeReviewHardBlocker(letter.knowledgeReview);
+export async function assertAutomaticDraftCanSend(letter: DevelopmentLetterDocument, actor: AuthUser): Promise<void> {
+  const review = letter.knowledgeReview;
+  const blocker = automatedReviewIssue(review, letter.outreachStep);
   if (blocker) throw ApiError.conflict(`自动发送已阻止：${blocker}`);
-  if (!letter.knowledgeReview.manualApprovedAt) {
-    const at = new Date().toISOString();
-    await DevelopmentLetter.updateOne(
-      { _id: letter._id, projectId: letter.projectId, status: 'draft' },
-      {
-        $set: {
-          'knowledgeReview.manualApprovedAt': at,
-          'knowledgeReview.manualApprovedBy': `automation:${campaignId}`,
-        },
-        $push: { history: { at: new Date(), status: 'auto_approved', error: '自动开发已通过依据闸门' } },
-      },
-    );
+  if (!review || review.bodyHash !== draftHash(letter.contentText)) throw ApiError.conflict('自动发送草稿在核验后发生变化');
+  if (letter.aiSnapshot && letter.aiSnapshot.subject !== letter.subject) throw ApiError.conflict('自动发送主题在核验后发生变化');
+  if (letter.outreachStep === 2) {
+    const previous = await previousOutreachDrafts(String(letter.projectId), String(letter.customerId), 2);
+    const repeated = repeatedOutreachIssue(review, previous.map(item => item.bodyText));
+    if (repeated) throw ApiError.conflict(repeated);
   }
+  const current = await knowledgeFreshness(review, actor);
+  if (current.failed || current.changed.length) throw ApiError.conflict('自动发送依据已变化或无法重新核对');
 }
 
 /**

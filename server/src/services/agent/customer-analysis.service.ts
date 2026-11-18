@@ -34,7 +34,7 @@ import type { AuthUser } from '../../types/express';
 import { ApiError } from '../../utils/ApiError';
 import { requireProjectId } from '../../utils/access';
 import { renderLetterContent, type LetterSignature } from '../letter-signature';
-import { projectPromptContext, resolveProjectSalesProfile } from '../project-profile';
+import { OUTREACH_WRITING_VERSION, projectPromptContext, resolveProjectSalesProfile } from '../project-profile';
 import { resolveSignerName } from '../signer.service';
 import { getCustomerByIdOrThrow, updateCustomer } from '../customer.service';
 import { sendLetter } from '../letter.service';
@@ -111,10 +111,10 @@ function clipped(value: unknown, max = 3000): string {
   return String(value ?? '').trim().slice(0, max);
 }
 
-async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledgeIds?:string[], goal='', workflow?:EvidenceWorkflow, taskKind?:SalesMailKind, outreachStep?:number, previousOutreach?:CustomerAnalysisInput['previousOutreach']): Promise<{ input: CustomerAnalysisInput; sources: AgentAnalysisSource[]; knowledgeBundle:KnowledgeBundle; signature: LetterSignature }> {
+async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledgeIds?:string[], goal='', workflow?:EvidenceWorkflow, taskKind?:SalesMailKind, outreachStep?:number, previousOutreach?:CustomerAnalysisInput['previousOutreach']): Promise<{ input: CustomerAnalysisInput; sources: AgentAnalysisSource[]; knowledgeBundle:KnowledgeBundle; signature: LetterSignature; brandRevision?: number }> {
   const customer = await getCustomerByIdOrThrow(customerId, actor);
   const projectId = requireProjectId(actor);
-  const project = await Project.findById(projectId).select('code slug name industry companyName website mailFrom senderName').lean();
+  const project = await Project.findById(projectId).select('code slug name industry companyName website mailFrom senderName brandProfile').lean();
   const salesProfile = resolveProjectSalesProfile(project);
   const oid = new Types.ObjectId(customerId);
   const [timeline, inbound, outbound, followups] = await Promise.all([
@@ -132,6 +132,7 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
   };
   add({ sourceId: `profile:${customerId}`, kind: 'profile', recordId: customerId, label: '客户档案' }, {
     name: customer.name, company: customer.company, email: customer.email, phone: customer.phone, country: customer.country,
+    title: customer.title,
     website:customer.website,industry: customer.industry, status: customer.status, priority: customer.priority, interestedProducts: customer.interestedProducts,
     productModel: customer.productModel, productCategory: customer.productCategory, expectedQuantity: customer.expectedQuantity,
     targetPrice: customer.targetPrice, moq: customer.moq, requirementNotes: customer.requirementNotes, notes: customer.notes,
@@ -176,6 +177,8 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
     industry:customer.industry,
     interestedProducts:customer.interestedProducts,
     productCategory:customer.productCategory,
+    contactRole:customer.title,
+    usedAngles:previousOutreach?.flatMap(item=>item.angleCode?[item.angleCode]:[]),
     // Website text often starts with cookie/country selectors. Put the
     // extracted product hint first so a real product signal is not buried.
     websiteText:[websiteHint,...websiteSources.map(item=>item.content.text)].join(' ').slice(0,16000),
@@ -183,7 +186,7 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
   const profileContext=projectPromptContext(salesProfile);
   return { input: { customerName: customer.name, customerEmail: customer.email, sourceCatalog,salesRequirements:prepared.requirements,taskType:taskKind??salesMailKind(goal),knowledgeContext:knowledgeForModel(knowledgeContext),projectProfile:playbook?{...profileContext,playbook}:profileContext,
     ...(outreachStep ? { outreachStep: (Math.min(3, Math.max(1, outreachStep)) as 1|2|3) } : {}),
-    ...(previousOutreach?.length ? { previousOutreach } : {}) }, sources, knowledgeBundle:knowledgeForAudit(knowledgeContext), signature:salesProfile.signature };
+    ...(previousOutreach?.length ? { previousOutreach } : {}) }, sources, knowledgeBundle:knowledgeForAudit(knowledgeContext), signature:salesProfile.signature, brandRevision:importedPlaybook?.revision };
 }
 
 const outputSchema = z.object({
@@ -279,6 +282,7 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
     },providerFactVerifier(activeProvider,actor,options?.taskId,options?.workflow?.check,context.input.projectProfile,{outreachStep:options?.outreachStep,previousOutreach:options?.previousOutreach}),actor),{cache:true,tool:'model'});
     await options?.workflow?.check();
     await assertSalesEvidenceCurrent(context.knowledgeBundle,actor,input.customerId);
+    if(options?.firstOutreach||options?.outreachStep){grounded.review.context.writingVersion=OUTREACH_WRITING_VERSION;grounded.review.context.brandRevision=context.brandRevision??0;}
     if(research.state!=='ready'){grounded.review.issues.push({code:'customer_research_gap',message:research.message});grounded.review.completeness='partial';}
     parsed.emailDraft.bodyText=grounded.bodyText;
     // A generated subject is not an unchecked channel for numeric commitments:
@@ -394,7 +398,7 @@ export async function saveAnalysisEmailDraft(id: string, input: ConfirmAgentAnal
   try {
     const owner = await Customer.findById(locked.customerId).select('ownerId').lean();
     const signer = await resolveSignerName({ projectId: requireProjectId(actor), ownerId: owner?.ownerId, actorId: actor.id });
-    const project = await Project.findById(requireProjectId(actor)).select('code slug name companyName industry website mailFrom senderName').lean();
+    const project = await Project.findById(requireProjectId(actor)).select('code slug name companyName industry website mailFrom senderName brandProfile').lean();
     const signature = resolveProjectSalesProfile(project).signature;
     const content = renderLetterContent(locked.emailDraft.bodyText, signer, signature, true);
     const result = await sendLetter({

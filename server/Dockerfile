@@ -13,9 +13,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && npm cache clean --force \
-    && mkdir -p /data/uploads /backups \
+    && mkdir -p /data/uploads /data/knowledge-index /opt/knowledge /backups \
     && chown -R node:node /data /backups /app
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node semantic ./semantic
+COPY --chown=node:node parsers ./parsers
 USER node
 EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \

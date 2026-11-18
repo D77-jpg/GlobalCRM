@@ -63,6 +63,8 @@ export interface IDevelopmentLetter {
   claimedAt?: Date;
   attempts: number;
   needsReview: boolean;
+  hardBouncedAt?: Date;
+  automationRuleVersion?: string;
   /** 人工审核结论；没有该字段表示草稿尚未审核。审核是业务员对自己草稿的自检，不记录理由。 */
   review?: {
     decision: 'approved' | 'rejected';
@@ -85,9 +87,13 @@ export interface IDevelopmentLetter {
     openTokenHash?: string;
     openedAt?: Date;
     openCount: number;
+    automatedOpenCount?: number;
+    unclassifiedOpenedAt?: Date;
     lastOpenedAt?: Date;
     clickedAt?: Date;
     clickCount: number;
+    automatedClickCount?: number;
+    unclassifiedClickedAt?: Date;
     lastClickedAt?: Date;
     links: {
       tokenHash: string;
@@ -180,6 +186,8 @@ const DevelopmentLetterSchema = new Schema<IDevelopmentLetter>(
     claimedAt: Date,
     attempts: { type: Number, default: 0 },
     needsReview: { type: Boolean, default: false },
+    hardBouncedAt: Date,
+    automationRuleVersion: { type: String, maxlength: 60 },
     review: {
       decision: { type: String, enum: ['approved', 'rejected'] },
       at: Date,
@@ -198,9 +206,13 @@ const DevelopmentLetterSchema = new Schema<IDevelopmentLetter>(
       openTokenHash: { type: String, select: false },
       openedAt: Date,
       openCount: { type: Number, default: 0, min: 0 },
+      automatedOpenCount: { type: Number, default: 0, min: 0 },
+      unclassifiedOpenedAt: Date,
       lastOpenedAt: Date,
       clickedAt: Date,
       clickCount: { type: Number, default: 0, min: 0 },
+      automatedClickCount: { type: Number, default: 0, min: 0 },
+      unclassifiedClickedAt: Date,
       lastClickedAt: Date,
       links: {
         type: [{

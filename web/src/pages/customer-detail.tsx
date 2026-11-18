@@ -377,25 +377,36 @@ export function CustomerDetailPage(): React.JSX.Element {
   }, [reloadCustomer, reloadLetters, refreshDrafts]);
 
   /** 客户详情页的一键首封：后台准备草稿，完成后直接打开审核 */
+  const quickGeneration = React.useRef<AbortController | null>(null);
+  React.useEffect(() => {
+    setQuickGenerating(false);
+    return () => quickGeneration.current?.abort();
+  }, [id]);
   const quickGenerate = React.useCallback(async () => {
     if (!customer || quickGenerating) return;
+    const controller = new AbortController();
+    quickGeneration.current = controller;
     setQuickGenerating(true);
     const requestKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
-      const task = await apiPost<AgentTask>(`/agent/customers/${customer.id}/outreach-task`, { requestKey });
+      const task = await apiPost<AgentTask>(`/agent/customers/${customer.id}/outreach-task`, { requestKey }, { signal: controller.signal });
       toast.info('已开始生成首封开发信', { description: '完成后会自动打开草稿供你审核' });
       let current = task;
       for (let attempt = 0; attempt < 90; attempt += 1) {
         if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000));
-        current = await apiGet<AgentTask>(`/agent/tasks/${task.id}`);
+        if (controller.signal.aborted) return;
+        current = await apiGet<AgentTask>(`/agent/tasks/${task.id}`, { signal: controller.signal });
         const draftId = current.draftId ?? current.staleDraftId;
         if (current.status === 'awaiting_review' && draftId) {
           if (!current.draftId && current.staleDraftId) {
             toast.warning('草稿基于较早资料生成', { description: '发送前请重新核对依据' });
           }
-          const letter = await apiGet<DevelopmentLetter>(`/letters/${draftId}`);
-          setViewTarget(letter);
-          setViewOpen(true);
+          const letter = await apiGet<DevelopmentLetter>(`/letters/${draftId}`, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          if (letter.customerId !== customer.id || letter.status !== 'draft') throw new Error('草稿与当前客户不匹配或状态已变化');
+          setComposeDraft(null);
+          setResendTarget(letter);
+          setSendOpen(true);
           refreshDrafts();
           await reloadLetters();
           toast.success('首封开发信草稿已生成', { description: '已保存为草稿，尚未发送' });
@@ -410,9 +421,9 @@ export function CustomerDetailPage(): React.JSX.Element {
       }
       throw new Error('生成时间较长，请到销售助手的任务中查看');
     } catch (cause) {
-      toast.error('首封开发信生成失败', { description: toErrorMessage(cause, '请稍后重试') });
+      if (!controller.signal.aborted) toast.error('首封开发信生成失败', { description: toErrorMessage(cause, '请稍后重试') });
     } finally {
-      setQuickGenerating(false);
+      if (quickGeneration.current === controller && !controller.signal.aborted) setQuickGenerating(false);
     }
   }, [customer, quickGenerating, refreshDrafts, reloadLetters]);
 

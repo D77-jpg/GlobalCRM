@@ -1160,6 +1160,8 @@ export interface UpdateUserInput {
 /* ---------------------------- 多项目工作空间 ---------------------------- */
 
 export interface ProjectBrandProfile {
+  brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
+  approvedActions?: string[];
   label?: string;
   identity?: string;
   offerSummary?: string;
@@ -1579,6 +1581,7 @@ export interface DraftCleanupResult extends DraftCleanupPreview {
 /* ---------------------------- 自动开发 ---------------------------- */
 
 export interface OutreachAutomationConfig {
+  rolloutMode: 'shadow' | 'pilot' | 'active';
   id: string;
   enabled: boolean;
   pausedReason?: string;

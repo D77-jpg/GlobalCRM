@@ -243,6 +243,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
     try {
       const next = await apiPut<OutreachAutomationOverview>(scoped('/outreach-automation'), {
         expectedVersion: form.version,
+        rolloutMode: form.rolloutMode,
         dailyLimit: form.dailyLimit,
         perDomainLimit: form.perDomainLimit,
         windowStart: form.windowStart,
@@ -335,7 +336,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
   };
 
   const mailbox = overview?.mailbox;
-  const canStart = Boolean(mailbox?.canSend) && Boolean(overview?.stats.eligible || overview?.stats.enrolled);
+  const canStart = (overview?.config.rolloutMode === 'shadow' || Boolean(mailbox?.canSend)) && Boolean(overview?.stats.eligible || overview?.stats.enrolled);
   const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + (overview?.stats.blocked ?? 0);
 
   return (
@@ -471,6 +472,18 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 ) : null}
                 {form ? (
                   <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="auto-rollout">发送模式</Label>
+                      <Select value={form.rolloutMode} onValueChange={(value: OutreachAutomationConfig['rolloutMode']) => patch({ rolloutMode: value })}>
+                        <SelectTrigger id="auto-rollout"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="shadow">模拟校验</SelectItem>
+                          <SelectItem value="pilot">小流量试发</SelectItem>
+                          <SelectItem value="active">按设置发送</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">模拟只记录校验结果。试发每天每个邮箱最多 5 封，且遵守下方额度。</p>
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label htmlFor="auto-daily-limit">每天最多</Label>
@@ -597,6 +610,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
             </Card>
           </div>
 
+          <OutreachResultsPanel key={`${activeProjectId}-${ownerId}`} endpoint={scoped('/outreach-automation/results')} />
+
           {overview.recent.length ? (
             <Card>
               <CardHeader className="pb-2">
@@ -631,11 +646,51 @@ export function OutreachAutomationPage(): React.JSX.Element {
         onConfirm={start}
       >
         <div className="space-y-2 leading-5">
-          <p>开启后，第 1、2、3 封草稿生成后会直接通过 {overview?.mailbox?.email || '业务员邮箱'} 发送，不再逐封人工审核。</p>
-          <p>系统会在工作日 {overview ? formatWindow(overview.config) : '09:30–17:30'} 发送，每天最多 {overview?.config.dailyLimit ?? 20} 封；客户回复、退订、退信或明确拒绝后会立即停止。</p>
+          {overview?.config.rolloutMode === 'shadow' ? <p>系统会准备草稿并记录是否通过校验。模拟模式不会投递邮件。</p> : <>
+            <p>校验通过的草稿会通过 {overview?.mailbox?.email || '业务员邮箱'} 自动发送。</p>
+            <p>发送时段为工作日 {overview ? formatWindow(overview.config) : '09:30–17:30'}。客户回复、退订、退信或明确拒绝后会停止跟进。</p>
+          </>}
           <p className="font-medium">请确认这个业务员的客户名单和邮箱已经核对无误。</p>
         </div>
       </ConfirmDialog>
     </div>
   );
+}
+interface OutreachResults {
+  groups: { angle: string; step: number; version: string; sent: number; hardBounces: number; opened: number; clicked: number;
+    proxyOpens: number; scannerClicks: number; replies: number; inquiries: number; sampleRequests: number }[];
+  optOuts: number;
+  observedComplaints: number;
+  observedBounces: number;
+}
+
+function OutreachResultsPanel({ endpoint }: { endpoint: string }) {
+  const [data, setData] = React.useState<OutreachResults>();
+  const [error, setError] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  async function load() {
+    setLoading(true); setError('');
+    try { setData(await apiGet<OutreachResults>(endpoint)); }
+    catch (reason) { setError(toErrorMessage(reason, '效果数据加载失败')); }
+    finally { setLoading(false); }
+  }
+  return <Card>
+    <CardHeader className="flex flex-row items-start justify-between gap-2 pb-3">
+      <div className="space-y-1"><CardTitle className="text-sm">近 30 天自动开发效果</CardTitle>
+        <CardDescription>按切入点、步骤和写信版本统计。回复按邮件关联，投诉按收到的反馈统计。</CardDescription></div>
+      <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>{loading ? '加载中' : data ? '刷新' : '查看'}</Button>
+    </CardHeader>
+    {error && <CardContent><p role="alert" className="text-sm text-destructive">{error}</p></CardContent>}
+    {data && <CardContent className="space-y-3">
+      <p className="text-sm text-muted-foreground">观察到 {data.observedBounces} 个收件地址硬退信 · {data.optOuts} 个退订 · {data.observedComplaints} 个投诉</p>
+      {data.groups.length ? <div className="overflow-x-auto"><Table>
+        <TableHeader><TableRow>{['切入点', '已发', '有回复', '询价', '样品请求', '打开 / 点击', '代理 / 扫描'].map(title => <TableHead key={title}>{title}</TableHead>)}</TableRow></TableHeader>
+        <TableBody>{data.groups.map(row => <TableRow key={`${row.angle}-${row.step}-${row.version}`}>
+          <TableCell><p className="font-medium">{row.angle}</p><p className="text-xs text-muted-foreground">第 {row.step || '—'} 封 · {row.version}</p></TableCell>
+          <TableCell>{row.sent}</TableCell><TableCell>{row.replies}</TableCell><TableCell>{row.inquiries}</TableCell><TableCell>{row.sampleRequests}</TableCell>
+          <TableCell>{row.opened} / {row.clicked}</TableCell><TableCell>{row.proxyOpens} / {row.scannerClicks}</TableCell>
+        </TableRow>)}</TableBody>
+      </Table></div> : <p className="text-sm text-muted-foreground">近 30 天暂无自动发送记录。</p>}
+    </CardContent>}
+  </Card>;
 }
