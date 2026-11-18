@@ -34,6 +34,13 @@ function customerDescription(text:string,quotes:EvidenceQuote[],customer?:Custom
  const cited=new Set(quotes.flatMap(q=>numbers(q.quote)));
  return numbers(text).every(n=>cited.has(n));
 }
+const supplierVoice=(text:string)=>/\b(?:we|our|us)\b|\bi\s+(?:can|will|offer|supply|provide|guarantee)\b|我们|我方/i.test(text);
+function customerSiteAttribution(text:string,quotes:EvidenceQuote[]){
+ if(/\b(?:you\s+(?:need|require|want|plan|intend|are\s+(?:looking|planning|seeking|buying|sourcing))|your\s+(?:procurement|purchasing|sourcing)\s+(?:needs?|plans?|intentions?))\b|贵司(?:需要|计划|正在采购)|您的采购(?:需求|计划)/i.test(text))return false;
+ if(/\b(?:your|you|website|site)\b|贵司|贵公司|您/i.test(text))return true;
+ return /^(?:i\s+(?:noticed|saw|came across|liked|loved)|noticed|came across|liked|loved)\b/i.test(text)
+  && quotes.some(q=>q.sourceId.startsWith('website:')&&q.quote.length>=4&&normalizeFact(text).includes(normalizeFact(q.quote)));
+}
 const negative=(s:string)=>/\b(?:not|never|no|cannot|can't|without|except|unless)\b|不支持|不可|不能|不提供|未认证|未经|除外|除非/i.test(s);
 // A negation word count is not semantic polarity: "empty" and "without contents"
 // can be equivalent. Keep a deterministic guard for literal reversals of the same
@@ -94,8 +101,10 @@ const generalCategoryInsight=(s:string)=>{
  const text=s.trim();
  return !/\d/.test(text.normalize('NFKC'))
   && !COMMITMENT_WORDS.test(text)
+  && !/^(?:i|noticed|came across|liked|loved|saw)\b/i.test(text)
   && !/\b(?:you|your|we|our|us)\b|你们|您|贵司|我们|我方/i.test(text)
-  && /unbox|packag|gift|presentation|first impression|arriv/i.test(text);
+  && (/unbox|packag|gift|presentation|first impression|arriv/i.test(text)
+    || /^(?:when|if)\b[^.!?]{6,230}\b(?:can|may|could)\b[^.!?]{3,150}[.!?]?$/i.test(text));
 };
 // Only closed, data-seeking forms are exempt. Open-ended questions can hide
 // arbitrary promises ("Could you please reply, we can hold stock for you?").
@@ -167,7 +176,7 @@ export function checkSemanticResults(body:string,bundle:KnowledgeBundle,result:S
   if(!quotes.length)return fail('引用里没有能对上本次授权证据的片段');
   if(quotes.length!==check.quotes.length)return fail('引用片段未能全部精确匹配本次授权证据');
   if(customer&&quotes.some(q=>q.sourceId==='profile:'+customer.id)&&(/\b(?:we|our|us)\b|我们|我方/i.test(part.text)||!(/\b(?:you|your)\b|贵司|贵公司|您/i.test(part.text))))return fail('客户档案只支持客户事实，不能成为我方能力或政策');
-  if(quotes.some(q=>q.sourceId.startsWith('website:'))&&(!/\b(?:website|site)\b|贵司官网|贵公司网站|您的网站/i.test(part.text)||/\b(?:we|our|us)\b|我们|我方/i.test(part.text)))return fail('官网仅支持明确归属客户网站的陈述，不能支持我方能力、政策或混合承诺');
+  if(quotes.some(q=>q.sourceId.startsWith('website:'))&&(!customerSiteAttribution(part.text,quotes)||supplierVoice(part.text)||policyCritical(part.text)))return fail('官网仅支持明确归属客户的陈述，不能支持我方能力、政策或混合承诺');
   if(critical(part.text)&&!customerDescription(part.text,quotes,customer)){
    // Semantic judgements cannot bypass numeric/unit/scope checks. Retain complete approved cards verbatim.
    const fact=facts.find(f=>normalizeFact(conditionalSentence(f.term,bundle.sources.find(s=>s.sourceId===f.sourceId)!))===normalizeFact(part.text));
@@ -195,7 +204,7 @@ function factRewritePrompt(profile?: ProjectPromptContext, step = 1, previous?: 
   const prev = (previous ?? []).map(item => `第${item.step}封主题：${item.subject}\n第${item.step}封正文：\n${item.bodyText}`).join('\n---\n');
   if (step === 2) return `${common} This is the SECOND email in the same thread (follow-up 1). Rewrite it as a natural follow-up, never as a first introduction. Write exactly three short body paragraphs, 35–75 words total: (1) one short sentence that follows up on the previous note without repeating it; (2) one new concrete idea, deliverable or unused proof point that is supported by allowed evidence and matters to this customer; (3) one low-pressure question such as "Worth a look?". Do not write "We are…", a company introduction, a website fact, a signature, a greeting other than a short greeting, prices, MOQ, lead times, certifications, capacity or case numbers. Do not repeat the first email's exact wording or its proof point. If previous drafts are supplied, use them only to avoid repetition and to keep the thread coherent: ${prev || 'none'}. Keep the existing recipient greeting.`;
   if (step >= 3) return `${common} This is the THIRD and final email in the same thread. Rewrite it as a low-pressure close, never as a first introduction. Write exactly three short body paragraphs, 30–60 words total: (1) one sentence saying you do not want to keep filling their inbox and this is the last note in this round; (2) one future door, or a polite question about who handles the relevant purchasing; (3) one short thank-you. Do not add any new fact, proof, website detail, product claim, price, MOQ, lead time, certification, capacity, case number or promise. Do not write "We are…", a company introduction, or a signature. If previous drafts are supplied, use them only to avoid repetition: ${prev || 'none'}. Keep the existing recipient greeting.`;
-  return `${common} Write exactly three short body paragraphs (greeting and signature excluded), 50–90 words total: (1) one sourced customer product fact plus one ${p.insightLabel} (${p.insightExamples}); (2) one-sentence identity plus one customer-relevant outcome and only one proof point (${p.proofExamples}); (3) one low-friction CTA question about ${p.outreachFocus} (${p.ctaExamples}). Do not stack capabilities, certifications, capacity or years; do not make every sentence its own paragraph. Use a natural low-pressure closing question; vary the wording and do not use the fixed phrase "Could you please...". If website evidence contains a clear product fact, keep one naturally attributed opener (for example "Your site lists..." or "I saw ... on your site") using only one short exact product phrase; do not use the fixed phrase "Your website shows..." (prefer productHint if present); never invent or combine product names. Keep identity and proof in separate sentences. Keep a short greeting and the closing question. Keep attributed customer website descriptions in their own paragraph, separate from supplier claims. Omit internal statements listing unapproved policies; retain those as internal issues only. For a first outreach with no policy questions, do not volunteer MOQ, price or timing. End with a concise natural low-pressure question about ${p.outreachFocus}; never ask about ${p.avoidTopics}. Do not write wording about ${p.avoidTopics} unless it is explicitly required by the current project profile or allowed evidence.`;
+  return `${common} Write exactly three short body paragraphs (greeting and signature excluded), 80–120 words as a target (shorter when context is limited): (1) one sourced customer product fact plus one ${p.insightLabel} (${p.insightExamples}); (2) one-sentence identity plus one customer-relevant outcome and only one proof point (${p.proofExamples}); (3) one low-friction CTA question about ${p.outreachFocus} (${p.ctaExamples}). Do not stack capabilities, certifications, capacity or years; do not make every sentence its own paragraph. Use a natural low-pressure closing question; vary the wording and do not use the fixed phrase "Could you please...". If website evidence contains a clear product fact, keep one natural customer-attributed opener (for example "I noticed your ...") using only one short exact product phrase; do not use the fixed phrase "Your website shows..." (prefer productHint if present); never invent or combine product names. Keep identity and proof in separate sentences. Keep a short greeting and the closing question. Keep attributed customer website descriptions in their own paragraph, separate from supplier claims. Omit internal statements listing unapproved policies; retain those as internal issues only. For a first outreach with no policy questions, do not volunteer MOQ, price or timing. End with a concise natural low-pressure question about ${p.outreachFocus}; never ask about ${p.avoidTopics}. Do not write wording about ${p.avoidTopics} unless it is explicitly required by the current project profile or allowed evidence.`;
 }
 
 export function providerFactVerifier(provider:AgentProvider,actor:AuthUser,taskId?:string,guard?:()=>Promise<unknown>,profile?:ProjectPromptContext,sequence?:{outreachStep?:number;previousOutreach?:{step:number;subject:string;bodyText:string}[]}):SemanticVerifier|undefined{
@@ -220,7 +229,7 @@ export function providerFactVerifier(provider:AgentProvider,actor:AuthUser,taskI
    const texts=new Map(input.segments.map(part=>[part.id,part.text]));
    for(const check of checks)for(let i=0;i<check.quotes.length;i++){const q=check.quotes[i];const source=input.evidence.find(e=>e.sourceId===q.sourceId)?.text;if(source===undefined)continue;
     const text=texts.get(check.id)??'';
-    const customerAttributed=/^(?:your|the customer'?s?)\s+(?:website|site|company)\b/i.test(text)&&!/\d/.test(text.normalize('NFKC'));
+    const customerAttributed=q.sourceId.startsWith('website:')&&!supplierVoice(text)&&!policyCritical(text)&&customerSiteAttribution(text,[q]);
     check.quotes[i]=resolveEvidenceQuote(q,source,{allowDuplicate:!critical(text)||customerAttributed})??q;
    }
    return checks;},

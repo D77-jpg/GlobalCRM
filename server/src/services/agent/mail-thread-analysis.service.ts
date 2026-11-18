@@ -10,7 +10,7 @@ import {chargeTaskBudget} from './task-budget';
 import {knowledgeFreshness,customerProfileOf} from './knowledge-grounding';
 import type {AgentProvider} from './provider';
 import env from '../../config/env';
-import { Types } from 'mongoose';
+import { Types, type FilterQuery } from 'mongoose';
 import { z } from 'zod';
 import {
   AgentAction, AgentMailThreadAnalysis, AgentRun, DevelopmentLetter,
@@ -20,7 +20,7 @@ import { MailMessage } from '../../models/MailMessage';
 import type { AuthUser } from '../../types/express';
 import { ApiError } from '../../utils/ApiError';
 import { customerRefScope, requireProjectId } from '../../utils/access';
-import { escapeHtml } from '../../utils/text';
+import { escapeHtml, freshReplyText } from '../../utils/text';
 import type {
   ConfirmAgentAnalysisActionBody, CreateAgentMailAnalysisBody, UpdateAgentMailAnalysisBody,
 } from '../../validators/agent.validator';
@@ -52,13 +52,23 @@ function clipped(value: unknown, max = 12000): string { return String(value ?? '
 export const PROTECTED_MAIL_CONTENT_PATTERN = /undeliverable|delivery status notification|mail delivery failed|returned mail|退信|无法投递|投递失败|unsubscribe|remove me|stop emailing|do not contact|opt[ -]?out|退订|取消订阅|不要再发|停止联系|not interested|no longer interested|do not need|we decline|not a fit|不感兴趣|不需要|拒绝|暂不考虑|\[spam\]|\bspam\b|垃圾邮件|\bjunk mail\b/i;
 
 export async function hasProtectedCustomerMail(customerId: string, projectId: string): Promise<boolean> {
-  return Boolean(await MailMessage.exists({ customerId: new Types.ObjectId(customerId), projectId: new Types.ObjectId(projectId), deleted: { $ne: true },
-    $or: [{ from: /mailer-daemon|postmaster/i }, { subject: PROTECTED_MAIL_CONTENT_PATTERN }, { text: PROTECTED_MAIL_CONTENT_PATTERN }] }));
+  return Boolean(await protectedMail({ customerId: new Types.ObjectId(customerId), projectId: new Types.ObjectId(projectId) }));
+}
+
+async function protectedMail(filter: FilterQuery<InstanceType<typeof MailMessage>>) {
+  const candidates = MailMessage.find({ ...filter, deleted: { $ne: true },
+    $or: [{ from: /mailer-daemon|postmaster/i }, { subject: PROTECTED_MAIL_CONTENT_PATTERN }, { text: PROTECTED_MAIL_CONTENT_PATTERN }],
+  }).sort({ sentAt: -1 }).select('from subject text html sentAt').lean().cursor();
+  for await (const item of candidates) {
+    const text = freshReplyText(item.text, item.html);
+    if (detectProtectedMailSignal({ from: item.from, subject: item.subject, text }).classification !== 'normal') return { ...item, text };
+  }
+  return undefined;
 }
 
 export function detectProtectedMailSignal(input: { from?: string; subject?: string; text?: string }): { classification: AgentMailSafety; reason: string } {
   const from = `${input.from ?? ''}`.toLowerCase();
-  const content = `${input.subject ?? ''}\n${input.text ?? ''}`.toLowerCase();
+  const content = `${input.subject ?? ''}\n${freshReplyText(input.text)}`.toLowerCase();
   if (/mailer-daemon|postmaster/.test(from) || /undeliverable|delivery status notification|mail delivery failed|returned mail|退信|无法投递|投递失败/.test(content)) {
     return { classification: 'bounce', reason: '最新来信显示邮件退信或无法投递，禁止继续建议营销发送。' };
   }
@@ -89,7 +99,7 @@ async function buildThreadInput(mailId: string, direction: 'inbound' | 'outbound
     DevelopmentLetter.find({ ...filter, status: { $ne: 'draft' } }).sort({ createdAt: -1 }).limit(200),
   ]);
   const messages: ThreadMessage[] = [
-    ...inbound.map((item) => ({ messageId: String(item._id), direction: 'inbound' as const, subject: clipped(item.subject, 300), from: clipped(item.from, 300), to: item.to, text: clipped(item.text), sentAt: item.sentAt.toISOString() })),
+    ...inbound.map((item) => ({ messageId: String(item._id), direction: 'inbound' as const, subject: clipped(item.subject, 300), from: clipped(item.from, 300), to: item.to, text: clipped(freshReplyText(item.text, item.html)), sentAt: item.sentAt.toISOString() })),
     ...outbound.map((item) => ({ messageId: String(item._id), direction: 'outbound' as const, subject: clipped(item.subject, 300), from: clipped(item.senderAddress, 300), to: [item.recipientEmail], text: clipped(item.contentText), sentAt: (item.sentAt ?? item.createdAt).toISOString() })),
   ].sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
   if (!messages.some((item) => item.messageId === mailId)) {
@@ -106,9 +116,7 @@ async function buildThreadInput(mailId: string, direction: 'inbound' | 'outbound
   const latestInbound = [...messages].reverse().find((item) => item.direction === 'inbound');
   // Safety is independent of the bounded model context: an older opt-out cannot
   // disappear when a later neutral message arrives or the thread exceeds 200 items.
-  const protectedInbound = await MailMessage.findOne({ ...inboundFilter, deleted: { $ne: true },
-    $or: [{ from: /mailer-daemon|postmaster/i }, { subject: PROTECTED_MAIL_CONTENT_PATTERN }, { text: PROTECTED_MAIL_CONTENT_PATTERN }],
-  }).sort({ sentAt: -1 });
+  const protectedInbound = await protectedMail(inboundFilter);
   return {
     root, threadId, messages, latestInbound, protectedInbound: protectedInbound ? {
       messageId: String(protectedInbound._id), from: protectedInbound.from,

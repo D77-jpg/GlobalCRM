@@ -145,7 +145,11 @@ export async function processKnowledgeIndex(id?:string,adapter:SemanticAdapter=l
    }
   }
   const items=[...reusedItems,...freshItems];
-  if(items.length)await Item.bulkWrite(items.map(item=>({updateOne:{filter:{generation:g._id,itemId:item.itemId},update:{$setOnInsert:item},upsert:true}})));
+  if(items.length){
+   const project=await Project.findById(g.projectId).select('organizationId').lean();
+   const organization=project?.organizationId?{organizationId:project.organizationId}:{};
+   await Item.bulkWrite(items.map(item=>({updateOne:{filter:{generation:g._id,itemId:item.itemId},update:{$setOnInsert:{...item,...organization}},upsert:true}})));
+  }
   if(!(await Gen.updateOne(fence,{$set:{total:items.length,done:reusedItems.length},$inc:{reused:reusedItems.length}})).matchedCount)throw new IndexError('cancelled','任务已停止');
   for(let offset=0;offset<freshItems.length;offset+=16){
    if(abort.signal.aborted)throw new IndexError('cancelled','索引权限或租约已变化');

@@ -17,8 +17,16 @@ export interface PlaybookSelectionInput {
   interestedProducts?: string;
   productCategory?: string;
   websiteText?: string;
+  contactRole?: string;
+  usedAngles?: string[];
   /** Project-managed cards imported through the knowledge workspace. */
-  cards?:{segments:PlaybookCardData[];preferences:PlaybookCardData[]};
+  cards?:{segments:PlaybookCardData[];preferences:PlaybookCardData[];revision?:number};
+}
+
+function contactRole(title?: string): OutreachPlaybookContext['contactRole'] {
+  if (/\b(?:buyer|procurement|sourcing|purchasing|operations|supply chain)\b|采购|供应链|运营/i.test(title ?? '')) return 'procurement';
+  if (/\b(?:founder|owner|brand|creative|merchandising)\b|创始人|品牌|设计/i.test(title ?? '')) return 'brand';
+  return undefined;
 }
 
 const GENERIC_TERMS=new Set([
@@ -181,13 +189,20 @@ export function selectOutreachPlaybook(input:PlaybookSelectionInput):OutreachPla
   const ranked=playbook.segments
     .filter(card=>Boolean(input.cards)||projectKey!=='genesis'||!REQUIRED_SIGNALS[card.id]||REQUIRED_SIGNALS[card.id].test(haystack))
     .map(card=>({card,score:scoreCard(card,haystack)}))
+    .filter(({score})=>score>=3)
     .sort((a,b)=>b.score-a.score||a.card.id.localeCompare(b.card.id));
-  const top=ranked[0];
-  if(!top||top.score<3)return undefined;
-  const importedPreference=input.cards?.preferences
-    .map(card=>({card,score:scoreCard(card,haystack)}))
-    .sort((a,b)=>b.score-a.score||a.card.id.localeCompare(b.card.id))[0]?.card;
-  const preference=input.cards?importedPreference:PREFERENCE_CHOOSERS[projectKey]?.(haystack);
+  const unused=ranked.filter(({card})=>!input.usedAngles?.includes(card.id));
+  const top=(input.outreachStep===2?unused[0]:undefined)??ranked[0];
+  if(!top)return undefined;
+  const role=contactRole(input.contactRole);
+  const roleTerms=role==='brand'?/品牌|体验|陈列|搭配|brand|presentation|experience/i
+    :role==='procurement'?/采购|二供|批次|一致|规格|补货|sourcing|consistency|specification/i:undefined;
+  const options=playbook.preferences.map(card=>({card,score:scoreCard(card,haystack)
+    +(roleTerms?.test(`${card.name} ${card.signals} ${card.logic}`)?3:0)})).filter(entry=>entry.score>0)
+    .sort((a,b)=>b.score-a.score||a.card.id.localeCompare(b.card.id));
+  const preference=(role||input.cards?options[0]?.card:undefined)??PREFERENCE_CHOOSERS[projectKey]?.(haystack);
+  const alternatives=unused.filter(({card})=>card.id!==top.card.id).slice(0,2)
+    .map(({card})=>({code:card.id,name:card.name,angle:card.logic}));
   return {
     segmentCode:top.card.id,
     segmentName:top.card.name,
@@ -199,6 +214,10 @@ export function selectOutreachPlaybook(input:PlaybookSelectionInput):OutreachPla
     prepare:top.card.prepare,
     check:top.card.check,
     subjects:top.card.subjects.slice(0,3),
+    selectionReason:`客户资料与「${top.card.name}」的品类线索匹配${role==='procurement'?'，偏重采购场景':role==='brand'?'，偏重品牌与产品体验':''}。`,
+    ...(input.cards?.revision === undefined ? {} : { revision: input.cards.revision }),
+    ...(role?{contactRole:role}:{}),
+    ...(alternatives.length?{alternatives}:{}),
     ...(preference?{
       preferenceCode:preference.id,
       preferenceName:preference.name,

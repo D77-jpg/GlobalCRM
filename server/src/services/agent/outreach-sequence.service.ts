@@ -298,7 +298,7 @@ export async function queueOutreachStep(
   }
 
   const project = await Project.findById(projectId)
-    .select('code slug name companyName industry website mailFrom senderName')
+    .select('code slug name companyName industry website mailFrom senderName brandProfile')
     .lean();
   const salesProfile = resolveProjectSalesProfile(project);
   const session = await createAgentSession({
@@ -328,7 +328,7 @@ export async function queueOutreachSequence(actor: AuthUser, ids: string[]): Pro
 
   const projectId = requireProjectId(actor);
   const project = await Project.findById(projectId)
-    .select('code slug name companyName industry website mailFrom senderName')
+    .select('code slug name companyName industry website mailFrom senderName brandProfile')
     .lean();
   const salesProfile = resolveProjectSalesProfile(project);
 

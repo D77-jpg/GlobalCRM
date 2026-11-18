@@ -14,6 +14,11 @@ x-server-env: &server-env
   API_RATE_LIMIT_WINDOW_MS: ${API_RATE_LIMIT_WINDOW_MS:-60000}
   API_RATE_LIMIT_MAX: ${API_RATE_LIMIT_MAX:-600}
   UPLOAD_DIR: /data/uploads
+  KNOWLEDGE_INDEX_DIR: /data/knowledge-index
+  KNOWLEDGE_PYTHON: ${KNOWLEDGE_PYTHON:-}
+  KNOWLEDGE_MODEL_DIR: ${KNOWLEDGE_MODEL_DIR:-}
+  KNOWLEDGE_RERANKER_DIR: ${KNOWLEDGE_RERANKER_DIR:-}
+  KNOWLEDGE_TOKENIZER_DIR: ${KNOWLEDGE_TOKENIZER_DIR:-}
   MONGODB_URI: ${MONGODB_URI:?Set MONGODB_URI with URI-encoded credentials and mongo hostname}
   JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
   JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
@@ -50,15 +55,36 @@ x-server-env: &server-env
 services:
   mongo:
     image: mongo:7.0
-    command: ["mongod", "--bind_ip_all", "--auth"]
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        key=/data/configdb/replica-key
+        if [ ! -s "$$key" ]; then
+          umask 077
+          head -c 512 /dev/urandom | base64 > "$$key.tmp"
+          mv "$$key.tmp" "$$key"
+        fi
+        chown mongodb:mongodb "$$key"
+        chmod 0400 "$$key"
+        exec /usr/local/bin/docker-entrypoint.sh mongod --bind_ip_all --auth --replSet rs0 --keyFile "$$key"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?Set MONGO_ROOT_USERNAME in .env.production}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env.production}
     volumes:
       - mongo_data:/data/db
+      - mongo_config:/data/configdb
     networks: [internal]
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'db.adminCommand({ping:1}).ok' | grep -q 1"]
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --host 127.0.0.1 --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval
+          'const h=db.adminCommand({hello:1});
+          if(h.setName==="rs0" && h.isWritablePrimary) quit(0);
+          if(h.isreplicaset) { try { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}); } catch (_) {} }
+          quit(1)' >/dev/null 2>&1
       interval: 15s
       timeout: 5s
       retries: 10
@@ -88,6 +114,8 @@ services:
     volumes:
       - uploads:/data/uploads
       - backups:/backups
+      - knowledge_index:/data/knowledge-index
+      - knowledge_runtime:/opt/knowledge:ro
     networks: [internal]
     depends_on:
       mongo: {condition: service_healthy}
@@ -109,6 +137,8 @@ services:
     volumes:
       - uploads:/data/uploads
       - backups:/backups
+      - knowledge_index:/data/knowledge-index
+      - knowledge_runtime:/opt/knowledge:ro
     networks: [internal]
     depends_on:
       mongo: {condition: service_healthy}
@@ -148,5 +178,8 @@ networks:
 
 volumes:
   mongo_data:
+  mongo_config:
   uploads:
   backups:
+  knowledge_index:
+  knowledge_runtime:

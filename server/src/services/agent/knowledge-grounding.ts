@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {Types} from 'mongoose';
 import {Quotation} from '../../models/Quotation';
 import {AgentKnowledge} from '../../models/AgentKnowledge';
+import {ProjectPlaybook} from '../../models/ProjectPlaybook';
 import type {AuthUser} from '../../types/express';
 import {requireProjectId} from '../../utils/access';
 import {getCustomerByIdOrThrow} from '../customer.service';
@@ -254,6 +255,10 @@ export async function knowledgeFreshness(review:KnowledgeReview,actor:AuthUser):
  const result:KnowledgeFreshness={checkedAt:new Date().toISOString(),changed:[]};
  if(review.projectId!==String(requireProjectId(actor)))return {...result,failed:true};
  try{
+  if(review.context.brandRevision!==undefined){
+   const current=await ProjectPlaybook.findOne({projectId:requireProjectId(actor)}).select('version').lean();
+   if((current?.version??0)!==review.context.brandRevision)result.changed.push({sourceId:'brand-package',title:'品牌资料包',reason:'品牌版本已变化，请重新生成'});
+  }
   if(review.context.customerId){const customer=await getCustomerByIdOrThrow(review.context.customerId,actor);if(review.context.customerProfile&&JSON.stringify(customerProfileOf(customer))!==JSON.stringify(review.context.customerProfile))result.changed.push({sourceId:'profile:'+review.context.customerId,title:'客户资料',reason:'本稿使用的客户事实已变化'});}
   if(review.context.customerWebsites?.length){
    if(!review.context.customerId)return {...result,failed:true};

@@ -11,6 +11,7 @@ import { Schema, Types, model, type HydratedDocument } from 'mongoose';
 export type OutreachAutomationEnrollmentStatus = 'active' | 'paused' | 'blocked' | 'completed' | 'failed';
 
 export interface IOutreachAutomationConfig {
+  rolloutMode?: 'shadow' | 'pilot' | 'active';
   projectId: Types.ObjectId;
   userId: Types.ObjectId;
   actorRole: 'admin' | 'project_admin' | 'user' | 'viewer';
@@ -55,6 +56,7 @@ const configSchema = new Schema<IOutreachAutomationConfig>(
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     actorRole: { type: String, enum: ['admin', 'project_admin', 'user', 'viewer'], required: true },
     enabled: { type: Boolean, default: false },
+    rolloutMode: { type: String, enum: ['shadow', 'pilot', 'active'] },
     pausedReason: { type: String, maxlength: 300 },
     dailyLimit: { type: Number, default: 20, min: 1, max: 20 },
     perDomainLimit: { type: Number, default: 3, min: 1, max: 10 },

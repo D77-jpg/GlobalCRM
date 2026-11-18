@@ -14,7 +14,7 @@ import axios, {
 } from 'axios';
 import type { ApiErrorBody, ApiErrorDetail, ApiResponse, ErrorCode } from '@/types';
 import { STORAGE_KEYS } from '@/constants';
-import { removeStorage, readStorage } from './utils';
+import { removeStorage } from './utils';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 const CSRF_COOKIE_NAME = 'cdlm_csrf';
@@ -63,6 +63,11 @@ export class ApiClientError extends Error {
 
 /** 401 时的回调，由 auth store 注册（避免 api 层直接依赖 store 造成循环引用） */
 let unauthorizedHandler: (() => void) | null = null;
+let projectScope: string | undefined;
+
+export function setRequestProjectScope(projectId?: string): void {
+  projectScope = projectId;
+}
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler;
 }
@@ -81,10 +86,9 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     const csrf = readCookie(CSRF_COOKIE_NAME);
     if (csrf) config.headers.set('X-CSRF-Token', csrf);
   }
-  const projectId = readStorage<string | null>(STORAGE_KEYS.activeProject, null);
-  if (projectId) config.headers.set('X-Project-Id', projectId);
+  if (projectScope && !config.headers.has('X-Project-Id')) config.headers.set('X-Project-Id', projectScope);
   return config;
-});
+}, undefined, { synchronous: true });
 
 /* ---------------------------- 响应拦截 ---------------------------- */
 let refreshPromise: Promise<void> | null = null;

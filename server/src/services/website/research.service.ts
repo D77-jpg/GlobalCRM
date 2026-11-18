@@ -83,7 +83,7 @@ export async function prepareWebsiteEmail(id:string,actor:AuthUser){
  const {getAgentTask,createAgentTask}=await import('../agent/task.service');
  if(doc.draftTaskId)return getAgentTask(String(doc.draftTaskId),actor);
  const {AgentSession}=await import('../../models');
- const project=await Project.findById(doc.projectId).select('code slug name companyName industry website mailFrom senderName').lean();
+ const project=await Project.findById(doc.projectId).select('code slug name companyName industry website mailFrom senderName brandProfile').lean();
  const salesProfile=resolveProjectSalesProfile(project);
  const sessionId=new Types.ObjectId(createHash('sha256').update('website-session:'+doc.id+':'+actor.id).digest('hex').slice(0,24));
  await AgentSession.updateOne({_id:sessionId,...scope(actor)},{$setOnInsert:{...scope(actor),title:'官网客户开发',context:{type:'customer',resourceId:String(doc.customerId)},status:'active'}},{upsert:true});

@@ -31,7 +31,7 @@ export interface KnowledgeReview {
   status: KnowledgeBundle['status']; completeness: 'complete'|'partial';
   sources: KnowledgeSource[]; claims: {text:string;sourceIds:string[];topic?:PolicyTopic}[];
   questions: {question:string;topic?:PolicyTopic;status:'answered'|'unanswered';sourceIds:string[]}[];
-  issues: KnowledgeIssue[]; context: {customerWebsites?:CustomerWebsiteSnapshot[];customerProfile?:CustomerFactProfile;factContext?:FactContext;customerId?:string;mailId?:string;direction?:'inbound'|'outbound';request?:string;playbook?:OutreachPlaybookContext};
+  issues: KnowledgeIssue[]; context: {writingVersion?:string;brandRevision?:number;customerWebsites?:CustomerWebsiteSnapshot[];customerProfile?:CustomerFactProfile;factContext?:FactContext;customerId?:string;mailId?:string;direction?:'inbound'|'outbound';request?:string;playbook?:OutreachPlaybookContext};
   bodyHash: string;
   /** Set only by a human approve action on the existing draft review page. */
   manualApprovedAt?: string;

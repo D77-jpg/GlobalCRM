@@ -1,6 +1,8 @@
 import { Types } from 'mongoose';
 import { AgentTask } from '../models/AgentTask';
 import { Customer, DevelopmentLetter, Project, User } from '../models';
+import { runWithTenant } from '../models/tenant-context';
+import { campaignPauseReason, campaignResults } from './outreach-results.service';
 import {
   OutreachAutomationConfig,
   OutreachAutomationDay,
@@ -14,7 +16,7 @@ import { getCurrentMailSender } from './mail-account.service';
 import { queueOutreachStep } from './agent/outreach-sequence.service';
 import { hasProtectedCustomerMail } from './agent/mail-thread-analysis.service';
 import { draftHash } from './agent/knowledge-grounding';
-import { approveDraftForAutomation, resendLetter } from './letter.service';
+import { assertAutomaticDraftCanSend, resendLetter } from './letter.service';
 import {
   cancelPendingOutreachLetters,
   hasInboundReplySince,
@@ -30,6 +32,7 @@ const TICK_MS = 15_000;
 const MAX_QUEUE_ROWS = 80;
 
 export interface OutreachAutomationConfigDto {
+  rolloutMode: 'shadow' | 'pilot' | 'active';
   id: string;
   enabled: boolean;
   pausedReason?: string;
@@ -98,6 +101,7 @@ export interface OutreachAutomationOverview {
 }
 
 export interface OutreachAutomationConfigInput {
+  rolloutMode?: OutreachAutomationConfigDto['rolloutMode'];
   expectedVersion: number;
   dailyLimit: number;
   perDomainLimit: number;
@@ -165,6 +169,7 @@ function configDto(doc: InstanceType<typeof OutreachAutomationConfig>): Outreach
   return {
     id: String(doc._id),
     enabled: doc.enabled,
+    rolloutMode: doc.rolloutMode ?? 'active',
     ...(doc.pausedReason ? { pausedReason: doc.pausedReason } : {}),
     dailyLimit: Number(doc.dailyLimit),
     perDomainLimit: Number(doc.perDomainLimit),
@@ -207,6 +212,7 @@ async function getConfig(actor: AuthUser, targetUserId?: string) {
       actorRole: target.role,
       enabled: false,
       dailyLimit: 20,
+      rolloutMode: 'shadow',
       perDomainLimit: 3,
       windowStart: '09:30',
       windowEnd: '17:30',
@@ -247,10 +253,11 @@ function eligibleFilter(actor: AuthUser, targetUserId?: string) {
 
 async function getActorForConfig(doc: InstanceType<typeof OutreachAutomationConfig>): Promise<AuthUser> {
   const [user, project] = await Promise.all([
-    User.findById(doc.userId).select('username displayName role status projectIds'),
-    Project.findById(doc.projectId).select('status'),
+    User.findById(doc.userId).select('username displayName role status projectIds organizationId'),
+    Project.findById(doc.projectId).select('status organizationId'),
   ]);
-  if (!user || user.status === 'disabled' || !project || project.status !== 'active') {
+  if (!user || user.status === 'disabled' || user.role === 'viewer' || !project || project.status !== 'active'
+    || (project.organizationId && String(project.organizationId) !== String(user.organizationId))) {
     throw new Error('当前账号或项目已停用');
   }
   if (user.role !== 'admin' && !user.projectIds.some((id) => String(id) === String(doc.projectId))) {
@@ -262,6 +269,7 @@ async function getActorForConfig(doc: InstanceType<typeof OutreachAutomationConf
     displayName: user.displayName,
     role: doc.actorRole === 'admin' && user.role === 'admin' ? 'admin' : 'user',
     projectId: String(doc.projectId),
+    organizationId: project.organizationId?.toString(),
   };
 }
 
@@ -458,7 +466,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       blocked: counts.blocked ?? 0,
       failed: counts.failed ?? 0,
       sentToday,
-      remainingToday: Math.max(0, config.dailyLimit - sentToday),
+      remainingToday: Math.max(0, effectiveDailyLimit(config) - sentToday),
     },
     queue: rows.map((row) => {
       const customer = customerMap.get(String(row.customerId));
@@ -539,13 +547,26 @@ export async function saveOutreachAutomationConfig(
         windowStart: input.windowStart,
         windowEnd: input.windowEnd,
         timezone: input.timezone,
+        ...(input.rolloutMode ? { rolloutMode: input.rolloutMode } : {}),
       },
       $inc: { version: 1 },
     },
     { new: true, runValidators: true },
   );
   if (!saved) throw ApiError.conflict('自动开发设置已变化，请刷新后重试');
+  if (input.rolloutMode && config.rolloutMode !== input.rolloutMode) {
+    await OutreachAutomationEnrollment.updateMany({ campaignId: config._id, status: 'active', lastError: '模拟校验通过' }, {
+      $set: { nextRunAt: new Date(), lastError: null },
+    });
+  }
   return getOutreachAutomationOverview(actor, target.id);
+}
+
+export async function getOutreachResults(actor: AuthUser, targetUserId?: string) {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const project = await Project.findById(config.projectId).select('organizationId').lean();
+  return campaignResults(config.projectId, config._id, project?.organizationId?.toString());
 }
 
 async function assertMailboxReady(actor: AuthUser, targetUserId?: string) {
@@ -564,8 +585,8 @@ export async function startOutreachAutomation(
   targetUserId?: string,
 ): Promise<{ enrolled: number; skipped: number; overview: OutreachAutomationOverview }> {
   const target = await resolveTargetUser(actor, targetUserId);
-  await assertMailboxReady(actor, target.id);
   const config = await getConfig(actor, target.id);
+  if (config.rolloutMode !== 'shadow') await assertMailboxReady(actor, target.id);
   const now = new Date();
   let candidates;
   if (customerIds?.length) {
@@ -628,8 +649,8 @@ export async function pauseOutreachAutomation(
 
 export async function resumeOutreachAutomation(actor: AuthUser, targetUserId?: string): Promise<OutreachAutomationOverview> {
   const target = await resolveTargetUser(actor, targetUserId);
-  await assertMailboxReady(actor, target.id);
   const config = await getConfig(actor, target.id);
+  if (config.rolloutMode !== 'shadow') await assertMailboxReady(actor, target.id);
   await OutreachAutomationConfig.updateOne(
     { _id: config._id },
     { $set: { enabled: true, pausedReason: null }, $inc: { version: 1 } },
@@ -711,6 +732,10 @@ async function hasActiveTask(projectId: Types.ObjectId, customerId: Types.Object
     outreachStep: step,
     status: { $in: ['queued', 'running', 'paused', 'waiting_input', 'awaiting_review'] },
   });
+}
+
+function effectiveDailyLimit(config: InstanceType<typeof OutreachAutomationConfig>): number {
+  return config.rolloutMode === 'pilot' ? Math.min(5, config.dailyLimit) : config.dailyLimit;
 }
 
 async function processEnrollment(
@@ -818,11 +843,11 @@ async function processEnrollment(
     return { sent: false };
   }
   if (draft.needsReview) {
-    await markEnrollment(enrollment._id, { status: 'paused', lastError: '草稿需要人工核实，自动发送已暂停' });
+    await markEnrollment(enrollment._id, { status: 'blocked', lastError: '草稿的核验未通过，已跳过该客户' });
     return { sent: false };
   }
   if (!draft.knowledgeReview) {
-    await markEnrollment(enrollment._id, { status: 'paused', lastError: '草稿缺少依据审核，自动发送已暂停' });
+    await markEnrollment(enrollment._id, { status: 'blocked', lastError: '草稿缺少依据审核，已跳过该客户' });
     return { sent: false };
   }
   if (draft.knowledgeReview.bodyHash && draftHash(draft.contentText) !== draft.knowledgeReview.bodyHash) {
@@ -831,6 +856,15 @@ async function processEnrollment(
   }
   if (!draft.subject?.trim() || !draft.contentText?.trim() || /\{\{[^}]+\}\}/.test(draft.contentText)) {
     await markEnrollment(enrollment._id, { status: 'failed', lastError: '草稿内容不完整或仍有未替换的占位符' });
+    return { sent: false };
+  }
+  if (config.rolloutMode === 'shadow') {
+    try {
+      await assertAutomaticDraftCanSend(draft, actor);
+      await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + DAY_MS), lastError: '模拟校验通过' });
+    } catch (error) {
+      await markEnrollment(enrollment._id, { status: 'blocked', lastError: error instanceof ApiError ? error.message : '模拟校验未完成' });
+    }
     return { sent: false };
   }
   if (!allowSend) {
@@ -845,13 +879,12 @@ async function processEnrollment(
     await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + 30 * 60_000) });
     return { sent: false };
   }
-  if (!await reserveDay(config.projectId, config._id, config.timezone, config.dailyLimit, now)) {
+  if (!await reserveDay(config.projectId, config._id, config.timezone, effectiveDailyLimit(config), now)) {
     await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + 60 * 60_000) });
     return { sent: false };
   }
 
   try {
-    await approveDraftForAutomation(String(draft._id), actor, String(config._id));
     const result = await resendLetter(
       String(draft._id),
       {
@@ -895,8 +928,9 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
   ticking = true;
   const syncedProjects = new Set<string>();
   try {
-    const configs = await OutreachAutomationConfig.find({ enabled: true }).limit(50);
+    const configs = await OutreachAutomationConfig.find({ enabled: true }).sort({ lastTickAt: 1, _id: 1 }).limit(50);
     for (const config of configs) {
+      await OutreachAutomationConfig.updateOne({ _id: config._id }, { $set: { lastTickAt: now } });
       if (!await campaignPacingReady(config._id, now)) continue;
       let actor: AuthUser;
       try {
@@ -913,8 +947,19 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
         continue;
       }
 
+      const processCampaign = async () => {
+      const risk = config.rolloutMode === 'shadow' ? undefined : await campaignPauseReason(config.projectId, config._id, now, actor.organizationId);
+      if (risk) {
+        await OutreachAutomationConfig.updateOne({ _id: config._id, enabled: true }, {
+          $set: { enabled: false, pausedReason: risk }, $inc: { version: 1 },
+        });
+        await OutreachAutomationEnrollment.updateMany({ campaignId: config._id, status: 'active' }, {
+          $set: { status: 'paused', nextRunAt: now },
+        });
+        return;
+      }
       const mailbox = await getCurrentMailSender(String(config.projectId), String(config.userId));
-      if (!mailbox.canSend || mailbox.channel !== 'smtp') {
+      if (config.rolloutMode !== 'shadow' && (!mailbox.canSend || mailbox.channel !== 'smtp')) {
         await OutreachAutomationConfig.updateOne(
           { _id: config._id },
           {
@@ -929,7 +974,7 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
           { campaignId: config._id, status: 'active' },
           { $set: { status: 'paused', nextRunAt: now } },
         );
-        continue;
+        return;
       }
 
       const allowSend = isWithinSendWindow(configDto(config), now);
@@ -937,7 +982,7 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
         campaignId: config._id,
         day: dayIn(config.timezone, now),
       }).select('sent').lean();
-      if (Number(today?.sent ?? 0) >= config.dailyLimit) continue;
+      if (config.rolloutMode !== 'shadow' && Number(today?.sent ?? 0) >= effectiveDailyLimit(config)) return;
       if (!syncedProjects.has(String(config.projectId))) {
         syncedProjects.add(String(config.projectId));
         try {
@@ -946,7 +991,6 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
           logger.warn(`自动开发同步回复失败：${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      await OutreachAutomationConfig.updateOne({ _id: config._id }, { $set: { lastTickAt: now } });
       const rows = await OutreachAutomationEnrollment.find({
         campaignId: config._id,
         status: 'active',
@@ -957,6 +1001,9 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
         const result = await processEnrollment(config, row, actor, now, allowSend);
         if (result.sent || result.queued) break;
       }
+      };
+      if (actor.organizationId) await runWithTenant({ organizationId: actor.organizationId, source: 'outreach-worker' }, processCampaign);
+      else await processCampaign();
     }
   } catch (error) {
     logger.warn(`自动开发 tick 失败：${error instanceof Error ? error.message : String(error)}`);

@@ -252,7 +252,7 @@ async function executeRun(runId: string, actor: AuthUser) {
     if (config.llmScoring !== false && enriched.length) {
       try {
         const profileText = await loadProfileText(projectId).catch(() => null);
-        const project = await Project.findById(projectId).select('code slug name companyName industry website mailFrom senderName').lean();
+        const project = await Project.findById(projectId).select('code slug name companyName industry website mailFrom senderName brandProfile').lean();
         const salesProfile = resolveProjectSalesProfile(project);
         llmScores = await scoreLeadsWithLlm(enriched.map((lead) => ({
           domain: lead.domain, name: lead.name, country: lead.country, snippet: lead.snippet,
@@ -581,7 +581,7 @@ export async function approveProspect(actor: AuthUser, id: string) {
     if (claimed.emails.length > 0) {
       // 目标必须从当前项目的销售画像生成，不能复用其他项目的行业话术。
       const project = await Project.findById(projectId)
-        .select('code slug name companyName industry website mailFrom senderName')
+        .select('code slug name companyName industry website mailFrom senderName brandProfile')
         .lean();
       const salesProfile = resolveProjectSalesProfile(project);
       try {

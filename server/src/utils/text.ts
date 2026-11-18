@@ -7,6 +7,7 @@
  */
 import { LETTER_PLACEHOLDERS } from '../constants';
 import type { ICustomer } from '../models/Customer';
+import { DomUtils, parseDocument } from 'htmlparser2';
 
 /** 转义正则元字符 */
 export function escapeRegExp(input: string): string {
@@ -70,6 +71,22 @@ export function htmlToPlainText(html: string): string {
     .map((line) => line.trim())
     .join('\n')
     .trim();
+}
+
+export function freshReplyText(text?: string, html?: string): string {
+  let body = text ?? '';
+  if (html) {
+    const document = parseDocument(html);
+    const quotes = DomUtils.findAll(node => node.name === 'blockquote' ||
+      /(?:^|\s)(?:gmail_quote|yahoo_quoted|protonmail_quote)(?:\s|$)/i.test(node.attribs.class ?? ''), document.children);
+    if (quotes.length || !body.trim()) {
+      for (const quote of quotes) DomUtils.removeElement(quote);
+      body = htmlToPlainText(DomUtils.getInnerHTML(document));
+    }
+  }
+  const history = /^(?:\s*[-_]{2,}\s*(?:original|forwarded) message\b|\s*on [^\n]{1,350}\bwrote\s*:\s*$|\s*在[^\n]{1,350}写道\s*[:：]\s*$|\s*you are receiving this business email because we believe it is relevant)/im;
+  const beforeHistory = body.replace(/\r\n?/g, '\n').split(history, 1)[0] ?? '';
+  return beforeHistory.split('\n').filter(line => !/^\s*>/.test(line)).join('\n').trim();
 }
 
 /** 将任意值转义为可安全嵌入 HTML 的字符串（防存储型 XSS） */

@@ -158,23 +158,29 @@ export function trackingSummary(value: unknown): TrackingSummary | undefined {
   };
 }
 
-export async function recordOpen(token: string, _req?: Request): Promise<boolean> {
+function automatedTrackingRequest(req?: Request): boolean {
+  return Boolean(req && (/imageproxy|safelinks|proofpoint|mimecast|barracuda|urlscan|headlesschrome/i.test(req.get('user-agent') ?? '') ||
+    /prefetch|preview/i.test(req.get('sec-purpose') ?? req.get('purpose') ?? '')));
+}
+
+export async function recordOpen(token: string, req?: Request): Promise<boolean> {
   if (!TOKEN_PATTERN.test(token)) return false;
   const now = new Date();
+  const automated = automatedTrackingRequest(req);
   const result = await DevelopmentLetter.updateOne({
     'tracking.openTokenHash': hashTrackingToken(token),
     'tracking.enabled': true,
     status: { $in: ['sent', 'opened'] },
   }, {
     $set: { status: 'opened' },
-    $min: { 'tracking.openedAt': now },
+    $min: { 'tracking.openedAt': now, ...(!automated ? { 'tracking.unclassifiedOpenedAt': now } : {}) },
     $max: { 'tracking.lastOpenedAt': now },
-    $inc: { 'tracking.openCount': 1 },
+    $inc: { 'tracking.openCount': 1, ...(automated ? { 'tracking.automatedOpenCount': 1 } : {}) },
   });
   return result.modifiedCount === 1;
 }
 
-export async function recordClick(token: string, _req?: Request): Promise<string | null> {
+export async function recordClick(token: string, req?: Request): Promise<string | null> {
   if (!TOKEN_PATTERN.test(token)) return null;
   const tokenHash = hashTrackingToken(token);
   const doc = await DevelopmentLetter.findOne({
@@ -186,15 +192,16 @@ export async function recordClick(token: string, _req?: Request): Promise<string
   if (!doc || !link || !isSafeRedirectUrl(link.originalUrl)) return null;
 
   const now = new Date();
+  const automated = automatedTrackingRequest(req);
   const result = await DevelopmentLetter.updateOne({
     _id: doc._id,
     'tracking.links.tokenHash': tokenHash,
     'tracking.enabled': true,
     status: { $in: ['sent', 'opened'] },
   }, {
-    $min: { 'tracking.clickedAt': now, 'tracking.links.$.clickedAt': now },
+    $min: { 'tracking.clickedAt': now, 'tracking.links.$.clickedAt': now, ...(!automated ? { 'tracking.unclassifiedClickedAt': now } : {}) },
     $max: { 'tracking.lastClickedAt': now, 'tracking.links.$.lastClickedAt': now },
-    $inc: { 'tracking.clickCount': 1, 'tracking.links.$.clickCount': 1 },
+    $inc: { 'tracking.clickCount': 1, 'tracking.links.$.clickCount': 1, ...(automated ? { 'tracking.automatedClickCount': 1 } : {}) },
   });
   return result.modifiedCount === 1 ? link.originalUrl : null;
 }

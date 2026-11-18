@@ -44,6 +44,7 @@ export interface ProjectSalesProfile {
   ctaExamples: string;
   /** 主题必须落在这个范围 */
   subjectFocus: string;
+  approvedActions?: string[];
   /** 项目签名 */
   signature: LetterSignature;
 }
@@ -67,12 +68,18 @@ export interface OutreachPlaybookContext {
   preferenceName?: string;
   preferenceLogic?: string;
   preferenceCta?: string;
+  contactRole?: 'brand' | 'procurement';
+  selectionReason?: string;
+  revision?: number;
+  alternatives?: { code: string; name: string; angle: string }[];
   confidence: 'high' | 'medium' | 'low';
 }
 
 export type ProjectPromptContext = Omit<ProjectSalesProfile, 'signature'> & {
   playbook?: OutreachPlaybookContext;
 };
+
+export const OUTREACH_WRITING_VERSION = '2026-11-18.1';
 
 const GENESIS_SIGNATURE: LetterSignature = {
   title: 'Sales Manager, Genesis (Xiamen) Bags Co., Ltd.',
@@ -197,6 +204,7 @@ function mergedProfile(base: ProjectSalesProfile, project: ProjectLike): Project
     proofExamples: text(custom.proofExamples, base.proofExamples),
     ctaExamples: text(custom.ctaExamples, base.ctaExamples),
     subjectFocus: text(custom.subjectFocus, base.subjectFocus),
+    approvedActions: custom.approvedActions,
     signature: {
       ...base.signature,
       title: text(custom.signatureTitle, base.signature.title),
@@ -208,12 +216,12 @@ function mergedProfile(base: ProjectSalesProfile, project: ProjectLike): Project
 export function resolveProjectSalesProfile(project?: ProjectLike | null): ProjectSalesProfile {
   const p = project ?? {};
   // 只按项目标识匹配已知项目；不要按行业猜测，否则未来同行业项目会误继承 Genesis/IronHue 话术。
-  const identity = `${p.code ?? ''} ${p.slug ?? ''} ${p.name ?? ''}`.toLowerCase();
-  const base = identity.includes('velaturo')
+  const key = p.brandProfile?.brandKey;
+  const base = key === 'velaturo'
     ? VELATURO_PROFILE
-    : identity.includes('ironhue')
+    : key === 'ironhue'
       ? IRONHUE_PROFILE
-      : identity.includes('genesis')
+      : key === 'genesis'
         ? GENESIS_PROFILE
         : generalProfile(p);
   return mergedProfile(base, p);
@@ -226,7 +234,7 @@ export function projectPromptContext(profile: ProjectSalesProfile): ProjectPromp
 
 /** 自动创建首封开发信任务时使用的目标文本（项目级，不含其他项目话术） */
 export function firstOutreachGoal(profile: ProjectSalesProfile, extra = ''): string {
-  return `为首封开发信准备英文草稿，收件人是刚通过审核的新客户。${profile.identity}；${profile.offerSummary} 开发信和结尾问题只围绕${profile.outreachFocus}，不要询问${profile.avoidTopics}。${extra}严格三段式：第一段用一个可核实的客户产品/系列细节，加该品类在采购上的一个普遍关键点，1–2 句，不猜客户现状、不暗示对方缺少什么；第二段一句说明我们是谁，加一个对客户有意义的结果，再加一个真实证明点，只讲一个方向；第三段给一个几乎零成本的具体下一步，用一个明确问题收尾。正文 50–90 词（最多 110 词），每段 1–3 句，具体、口语化，避免 considered、restrained、coherent、deliberate、elevate、worth considering 这类 AI 高频词。只保存待审核草稿，不发送邮件。`;
+  return `为首封开发信准备英文草稿，收件人是刚通过审核的新客户。${profile.identity}；${profile.offerSummary} 开发信和结尾问题只围绕${profile.outreachFocus}，不要询问${profile.avoidTopics}。${extra}严格三段式：第一段用一个可核实的客户细节自然过渡到待确认的合作问题，资料不足时直接说明行业来意，不猜客户现状；第二段一句说明我们是谁，加一个对客户有意义的结果，再加一个真实证明点，只讲一个方向；第三段给一个几乎零成本的具体下一步，用一个明确问题收尾。正文目标 80–120 词，资料较少可以更短，每段 1–3 句，具体、口语化，避免 considered、restrained、coherent、deliberate、elevate、worth considering 这类 AI 高频词。只保存待审核草稿，不发送邮件。`;
 }
 
 export type OutreachStep = 1 | 2 | 3;
@@ -240,7 +248,7 @@ export type OutreachStep = 1 | 2 | 3;
 export function outreachStepGoal(profile: ProjectSalesProfile, step: OutreachStep): string {
   const common = `${profile.identity}；${profile.offerSummary} 三封都只围绕${profile.outreachFocus}，不要转向${profile.avoidTopics}。签名由系统追加，正文不要写签名、公司落款、日期、占位符或伪造 Re:/Fwd:。每封只允许一个证明点；商务条款和数字只能引用当前项目已发布知识，首封主动省略未经确认的商务承诺。`;
   if (step === 1) {
-    return `请为首封开发信准备英文草稿，收件人是刚通过审核的新客户。${common} 严格三段式：第一段用一个可核实的客户产品/系列细节，加该品类在采购上的一个普遍关键点，1–2 句，不猜客户现状、不暗示对方缺少什么；第二段一句说明我们是谁，加一个对客户有意义的结果，再加一个真实证明点，只讲一个方向；第三段给一个几乎零成本的具体下一步，用一个明确问题收尾。正文 50–90 词（最多 110 词），每段 1–3 句，使用具体、口语化的英文，避免 considered、restrained、coherent、deliberate、elevate、worth considering 这类 AI 高频词。主题 3–7 个词并包含真实产品/系列名。只保存待审核草稿，不发送邮件。`;
+    return `请为首封开发信准备英文草稿，收件人是刚通过审核的新客户。${common} 严格三段式：第一段用一个可核实的客户细节自然过渡到待确认的合作问题，资料不足时直接说明行业来意，不猜客户现状；第二段一句说明我们是谁，加一个对客户有意义的结果，再加一个真实证明点，只讲一个方向；第三段给一个几乎零成本的具体下一步，用一个明确问题收尾。正文目标 80–120 词，资料较少可以更短，每段 1–3 句，使用具体、口语化的英文，避免 considered、restrained、coherent、deliberate、elevate、worth considering 这类 AI 高频词。主题 3–7 个词，有可靠产品细节时可用真实产品/系列名。只保存待审核草稿，不发送邮件。`;
   }
   if (step === 2) {
     return `请为同一客户的开发信序列准备第 2 封英文草稿（跟进 1，同一线程回复）。${common} 不要重新自我介绍，不要重复首封的完整内容或同一证明点；第一段用一句自然承接上一封，第二段带一个新东西——一个具体想法、可交付的资料，或证明点库中尚未使用的下一条；第三段用类似 Worth a look? 的低压力问题收尾。正文 35–75 词（最多 90 词），三段，语气像真人跟进，不催促、不制造虚假紧迫感。只保存待审核草稿，不发送邮件。`;

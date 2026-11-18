@@ -1,8 +1,27 @@
 import { create } from 'zustand';
-import { apiDelete, apiGet, apiPost, apiPut, toErrorMessage } from '@/lib/api';
+import { apiDelete, apiGet, apiPost, apiPut, setRequestProjectScope, toErrorMessage } from '@/lib/api';
 import { STORAGE_KEYS } from '@/constants';
 import { readStorage, removeStorage, writeStorage } from '@/lib/utils';
 import type { CreateProjectInput, Project, UpdateProjectInput } from '@/types';
+
+let initialisation = 0;
+
+function saveProjectChoice(id?: string): void {
+  try {
+    if (id) sessionStorage.setItem(STORAGE_KEYS.activeProject, id);
+    else sessionStorage.removeItem(STORAGE_KEYS.activeProject);
+  } catch { /* Browser storage can be disabled. */ }
+  if (id) writeStorage(STORAGE_KEYS.activeProject, id);
+  else removeStorage(STORAGE_KEYS.activeProject);
+}
+
+function savedProjectChoice(): string | null {
+  try {
+    const selected = sessionStorage.getItem(STORAGE_KEYS.activeProject);
+    if (selected) return selected;
+  } catch { /* Use the browser preference if available. */ }
+  return readStorage<string | null>(STORAGE_KEYS.activeProject, null);
+}
 
 interface ProjectState {
   items: Project[];
@@ -22,26 +41,29 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   items: [], activeProject: null, loading: false, initialized: false, error: null,
   async initialize(force = false) {
     if (get().loading || (get().initialized && !force)) return;
+    const generation = ++initialisation;
     set({ loading: true, error: null, ...(force ? { initialized: false, activeProject: null } : {}) });
     try {
       const items = await apiGet<Project[]>('/projects');
-      const saved = readStorage<string | null>(STORAGE_KEYS.activeProject, null);
+      if (generation !== initialisation) return;
+      const saved = savedProjectChoice();
       const activeProject = items.find((item) => item.id === saved && item.status === 'active')
         ?? items.find((item) => item.isDefault && item.status === 'active')
         ?? items.find((item) => item.status === 'active')
         ?? null;
-      if (activeProject) writeStorage(STORAGE_KEYS.activeProject, activeProject.id);
-      else removeStorage(STORAGE_KEYS.activeProject);
+      saveProjectChoice(activeProject?.id);
+      setRequestProjectScope(activeProject?.id);
       set({ items, activeProject, loading: false, initialized: true, error: activeProject ? null : '当前账号没有可访问的项目' });
     } catch (error) {
+      if (generation !== initialisation) return;
       set({ loading: false, initialized: true, error: toErrorMessage(error, '项目列表加载失败') });
     }
   },
   switchProject(id) {
     const project = get().items.find((item) => item.id === id && item.status === 'active');
     if (!project || project.id === get().activeProject?.id) return;
-    writeStorage(STORAGE_KEYS.activeProject, project.id);
-    set({ activeProject: project });
+    // The old page can still have pending edits until navigation takes effect.
+    saveProjectChoice(project.id);
     window.location.assign('/');
   },
   async createProject(input) {
@@ -60,9 +82,14 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     const wasActive = get().activeProject?.id === id;
     set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
     if (wasActive) {
-      removeStorage(STORAGE_KEYS.activeProject);
+      saveProjectChoice();
+      setRequestProjectScope();
       await get().initialize(true);
     }
   },
-  reset() { set({ items: [], activeProject: null, loading: false, initialized: false, error: null }); },
+  reset() {
+    initialisation++;
+    setRequestProjectScope();
+    set({ items: [], activeProject: null, loading: false, initialized: false, error: null });
+  },
 }));

@@ -31,7 +31,7 @@ export async function createQuickFirstOutreachTask(
   if (active) return getAgentTask(active.id, actor);
 
   const project = await Project.findById(projectId)
-    .select('code slug name companyName industry website mailFrom senderName')
+    .select('code slug name companyName industry website mailFrom senderName brandProfile')
     .lean();
   const salesProfile = resolveProjectSalesProfile(project);
   const session = await createAgentSession({

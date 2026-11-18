@@ -49,7 +49,7 @@ import {
   updateAgentMailAnalysisSchema,
 } from '../validators/agent.validator';
 import {checkQuote} from '../services/quote-check.service';
-import {clearProjectPlaybook,getProjectPlaybook,importProjectPlaybook,playbookImportInput} from '../services/playbook-import.service';
+import {applyBrandPackage,applyBrandPackageInput,brandPackageInput,clearProjectPlaybook,getProjectPlaybook,importProjectPlaybook,playbookImportInput,previewBrandPackage,rollbackBrandPackage} from '../services/playbook-import.service';
 import {
   cancelScratchpadCustomerPreview,
   confirmScratchpadCustomerPreview,
@@ -239,6 +239,15 @@ router.put('/playbooks', requireRole('admin'), messageLimiter, validate({ body: 
 }));
 router.delete('/playbooks', requireRole('admin'), asyncHandler(async (req, res) => {
   sendSuccess(res, await clearProjectPlaybook(req.user!));
+}));
+router.post('/playbooks/brand-package/preview', requireRole('admin'), messageLimiter, validate({ body: brandPackageInput }), asyncHandler(async (req, res) => {
+  sendSuccess(res, await previewBrandPackage(req.body, req.user!));
+}));
+router.put('/playbooks/brand-package', requireRole('admin'), messageLimiter, validate({ body: applyBrandPackageInput }), asyncHandler(async (req, res) => {
+  sendSuccess(res, await applyBrandPackage(req.body, req.user!));
+}));
+router.post('/playbooks/brand-package/rollback', requireRole('admin'), messageLimiter, validate({ body: z.object({ expectedVersion: z.number().int().nonnegative() }).strict() }), asyncHandler(async (req, res) => {
+  sendSuccess(res, await rollbackBrandPackage(req.body.expectedVersion, req.user!));
 }));
 
 router.post('/quote-checks', messageLimiter, validate({ body: quoteCheckSchema }), asyncHandler(async (req, res) => {

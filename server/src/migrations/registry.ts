@@ -1,6 +1,8 @@
 import { globalSiteOAuthMigration } from './011-globalsite-oauth';
 import { customsDataMigration } from './012-customs-data';
 import { customsEngagementMigration } from './013-customs-engagement';
+import { productionIndexesMigration } from './014-production-indexes';
+import { projectBrandPackagesMigration } from './015-project-brand-packages';
 import {globalSiteWebhookMigration} from './010-globalsite-webhooks';
 import {globalSiteInquiryMigration} from './009-globalsite-inquiries';
 import { defaultOrganizationMigration } from './001-default-organization';
@@ -28,4 +30,6 @@ export const migrations: Migration[] = [
   globalSiteOAuthMigration,
   customsDataMigration,
   customsEngagementMigration,
+  productionIndexesMigration,
+  projectBrandPackagesMigration,
 ];

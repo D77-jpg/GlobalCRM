@@ -774,6 +774,7 @@ export interface LetterSignatureProfile {
 }
 
 interface ProjectSignatureSource {
+  brandProfile?: { brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general'; signatureTitle?: string; signatureLines?: string[] };
   code?: string;
   slug?: string;
   name?: string;
@@ -815,9 +816,7 @@ export const LETTER_SIGNATURE = GENESIS_LETTER_SIGNATURE;
 
 /** 只按项目标识匹配，不能按行业猜测，避免未来项目继承 Genesis/IronHue 结尾。 */
 export function letterSignatureForProject(project?: ProjectSignatureSource | null): LetterSignatureProfile {
-  const identity = `${project?.code ?? ''} ${project?.slug ?? ''} ${project?.name ?? ''}`.toLowerCase();
-  if (identity.includes('ironhue')) return IRONHUE_LETTER_SIGNATURE;
-  if (identity.includes('genesis')) return GENESIS_LETTER_SIGNATURE;
+  const key = project?.brandProfile?.brandKey;
   const companyName = String(project?.companyName || project?.name || 'Our team').trim();
   const industry = String(project?.industry || '').trim();
   const lines = [
@@ -825,13 +824,17 @@ export function letterSignatureForProject(project?: ProjectSignatureSource | nul
     ...(project?.website ? [`Website ${project.website}`] : []),
     ...(project?.mailFrom ? [`Email ${project.mailFrom}`] : []),
   ];
-  return {
+  const generic = {
     marker: `Sales Manager, ${companyName}`,
     title: `Sales Manager, ${companyName}`,
     lines: lines.length ? lines : [companyName],
     logoPath: null,
     logoAlt: companyName,
   };
+  const base = key === 'ironhue' ? IRONHUE_LETTER_SIGNATURE : key === 'genesis' ? GENESIS_LETTER_SIGNATURE : generic;
+  const title = project?.brandProfile?.signatureTitle?.trim();
+  const linesOverride = project?.brandProfile?.signatureLines?.map(line => line.trim()).filter(Boolean);
+  return { ...base, ...(title ? { title, marker: title } : {}), ...(linesOverride?.length ? { lines: linesOverride } : {}) };
 }
 
 function escapeSignatureText(value: string): string {
@@ -982,8 +985,8 @@ export const DEFAULT_LETTER_SUBJECT = '{{company}} packaging — samples from {{
 
 /** 新写开发信时的项目默认模板，避免 IronHue/未知项目落进 Genesis 包装话术。 */
 export function defaultLetterTemplateForProject(project?: ProjectSignatureSource | null): { subject: string; content: string } {
-  const identity = `${project?.code ?? ''} ${project?.slug ?? ''} ${project?.name ?? ''}`.toLowerCase();
-  if (identity.includes('ironhue')) {
+  const key = project?.brandProfile?.brandKey;
+  if (key === 'ironhue') {
     return {
       subject: '{{company}} — free weights and strength equipment',
       content: `<p>Hi {{firstName}},</p>
@@ -992,7 +995,7 @@ export function defaultLetterTemplateForProject(project?: ProjectSignatureSource
 <p>Would it be useful if I sent over a few options that could fit your current range?</p>`,
     };
   }
-  if (identity.includes('genesis')) return { subject: DEFAULT_LETTER_SUBJECT, content: DEFAULT_LETTER_TEMPLATE };
+  if (key === 'genesis') return { subject: DEFAULT_LETTER_SUBJECT, content: DEFAULT_LETTER_TEMPLATE };
   const companyName = String(project?.companyName || project?.name || 'our team').trim();
   return {
     subject: '{{company}} — {{industry}} introduction',

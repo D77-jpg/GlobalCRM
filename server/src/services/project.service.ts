@@ -28,7 +28,7 @@ import {
 import { MailMessage, MailSyncState } from '../models/MailMessage';
 import type { AuthUser } from '../types/express';
 import { ApiError } from '../utils/ApiError';
-import type { CreateProjectInput, UpdateProjectInput } from '../validators/project.validator';
+import { brandProfileSchema, type CreateProjectInput, type UpdateProjectInput } from '../validators/project.validator';
 import { getProjectActiveChannel } from './mailer.service';
 import { assertOrganizationCapacity, ensureDefaultOrganization } from './organization.service';
 import type { ProjectBrandProfile, ProjectMailCompliance } from '../models/Project';
@@ -114,7 +114,18 @@ export async function updateProject(id: string, input: UpdateProjectInput, actor
     if (!existing) throw ApiError.notFound('项目不存在');
     if (existing.isDefault) throw ApiError.badRequest('默认项目不能归档');
   }
-  const project = await Project.findByIdAndUpdate(id, { $set: input }, { new: true, runValidators: true });
+  const patch: Record<string, unknown> = { ...input };
+  const removed: Record<string, 1> = {};
+  if (input.brandProfile) {
+    delete patch.brandProfile;
+    for (const key of brandProfileSchema.keyof().options) {
+      const field = `brandProfile.${key}`;
+      const value = input.brandProfile[key];
+      if (value === undefined) removed[field] = 1;
+      else patch[field] = value;
+    }
+  }
+  const project = await Project.findByIdAndUpdate(id, { $set: patch, ...(Object.keys(removed).length ? { $unset: removed } : {}) }, { new: true, runValidators: true });
   if (!project) throw ApiError.notFound('项目不存在');
   return {
     ...dto(project.toObject() as unknown as Record<string, unknown>),
@@ -183,22 +194,22 @@ async function dropLegacyRequestKeyIndex(): Promise<void> {
 export async function bootstrapProjects(): Promise<void> {
   const organization = await ensureDefaultOrganization();
   const genesis = await Project.findOneAndUpdate(
-    { slug: 'genesis-bags' },
+    { slug: 'genesis-bags', organizationId: organization._id },
     { $setOnInsert: { organizationId: organization._id, name: 'Genesis Bags', code: 'GENESIS', industry: '箱包外贸', companyName: env.COMPANY_NAME,
       website: env.COMPANY_WEBSITE, moq: env.COMPANY_MOQ, senderName: env.SENDER_NAME, mailFrom: env.MAIL_FROM,
-      mailProfileKey: 'genesis-bags', status: 'active', isDefault: true } },
+      mailProfileKey: 'genesis-bags', brandProfile: { brandKey: 'genesis' }, status: 'active', isDefault: true } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
   await Project.findOneAndUpdate(
-    { slug: 'ironhue' },
+    { slug: 'ironhue', organizationId: organization._id },
     { $setOnInsert: { organizationId: organization._id, name: 'IRONHUE', code: 'IRONHUE', industry: '运动器材外贸', companyName: 'IRONHUE',
-      mailProfileKey: 'ironhue', status: 'active', isDefault: false } },
+      mailProfileKey: 'ironhue', brandProfile: { brandKey: 'ironhue' }, status: 'active', isDefault: false } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
   await Project.findOneAndUpdate(
-    { slug: 'velaturo' },
+    { slug: 'velaturo', organizationId: organization._id },
     { $setOnInsert: { organizationId: organization._id, name: 'VELATURO', code: 'VELATURO', industry: '手绘艺术与商业空间配画', companyName: 'VELATURO',
-      website: 'https://velaturo.com', mailProfileKey: 'velaturo', mailTransport: 'mock', status: 'active', isDefault: false } },
+      website: 'https://velaturo.com', mailProfileKey: 'velaturo', brandProfile: { brandKey: 'velaturo' }, mailTransport: 'mock', status: 'active', isDefault: false } },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
 

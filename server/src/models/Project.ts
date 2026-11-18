@@ -8,6 +8,8 @@ export type ProjectStatus = 'active' | 'archived';
  * existing projects keep the built-in profile resolved by project code.
  */
 export interface ProjectBrandProfile {
+  brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
+  approvedActions?: string[];
   label?: string;
   identity?: string;
   offerSummary?: string;
@@ -95,6 +97,8 @@ const ProjectSchema = new Schema<IProject>(
     // Compressed data URL (browser downscales to <=1280px) or an absolute https URL.
     coverImage: { type: String, maxlength: 600000 },
     brandProfile: {
+      brandKey: { type: String, enum: ['genesis', 'ironhue', 'velaturo', 'general'] },
+      approvedActions: { type: [String], default: undefined },
       label: { type: String, trim: true, maxlength: 200 },
       identity: { type: String, trim: true, maxlength: 500 },
       offerSummary: { type: String, trim: true, maxlength: 2000 },
