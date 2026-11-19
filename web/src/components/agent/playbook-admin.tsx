@@ -1,11 +1,12 @@
 import * as React from 'react';
-import { Braces, CheckCircle2, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Braces, CheckCircle2, Download, FileUp, Loader2, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { apiDelete, apiGet, apiPost, apiPut, toErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
+import { useProjectStore } from '@/store/project.store';
 
 interface Card {
   id: string; kind?: 'segment' | 'preference'; name: string; signals: string; products: string;
@@ -24,6 +25,7 @@ interface PackagePreview {
   brandKey: string;
   signatureTitle: string | null;
   cardCount: number;
+  diff?: { addedCards: number; updatedCards: number; removedCards: number };
 }
 
 function CardPreview({ title, cards }: { title: string; cards: Card[] }): React.JSX.Element | null {
@@ -65,6 +67,7 @@ export function PlaybookAdmin(): React.JSX.Element {
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
   const [preview, setPreview] = React.useState<PackagePreview | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true); setError('');
@@ -76,6 +79,40 @@ export function PlaybookAdmin(): React.JSX.Element {
     finally { setLoading(false); }
   }, []);
   React.useEffect(() => { void load(); }, [load]);
+
+  async function exportCurrentPackage() {
+    setSaving(true); setError('');
+    try {
+      const pkg = await apiGet<Record<string, unknown>>('/agent/playbooks/brand-package/export');
+      const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `brand-package-${state?.projectKey ?? 'project'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('当前项目品牌包已导出');
+    } catch (reason) {
+      setError(toErrorMessage(reason, '导出品牌包失败'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setText(reader.result);
+        setPreview(null);
+        toast.info(`已载入文件 ${file.name}，请点击「校验并导入」预览差异`);
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  }
 
   async function save() {
     if (saving) return;
@@ -89,7 +126,8 @@ export function PlaybookAdmin(): React.JSX.Element {
         }
         await apiPut('/agent/playbooks/brand-package', { bundle: parsed, expectedVersion: preview.expectedVersion });
         setPreview(null);
-        toast.success('品牌包已应用到当前项目');
+        await useProjectStore.getState().initialize(true);
+        toast.success('品牌包已应用到当前项目，签名与话术已立即生效');
         await load();
         return;
       }
@@ -108,7 +146,8 @@ export function PlaybookAdmin(): React.JSX.Element {
     try {
       await apiPost('/agent/playbooks/brand-package/rollback', { expectedVersion: state.version });
       setPreview(null);
-      toast.success('已恢复上一版本');
+      await useProjectStore.getState().initialize(true);
+      toast.success('已恢复上一版本，项目配置已同步');
       await load();
     } catch (reason) { setError(toErrorMessage(reason, '品牌包回退失败')); }
     finally { setSaving(false); }
@@ -123,23 +162,35 @@ export function PlaybookAdmin(): React.JSX.Element {
   }
 
   return <div className="space-y-4 p-4">
+    <input ref={fileInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleFileUpload} />
     <header className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="flex items-center gap-2 text-lg font-semibold"><Braces className="h-5 w-5 text-primary" />行业卡与偏好卡</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">行业卡只影响写作策略，不作为事实证据。未导入时展示并使用当前项目内置卡；导入后展示本项目版本。</p></div>
-      <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => { setPreview(null); void load(); }} disabled={loading || saving}><RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />刷新</Button>{state?.canRollback && <Button variant="outline" size="sm" onClick={() => void rollback()} disabled={saving}>恢复上一版本</Button>}{state?.source === 'imported' && !state.brandRelease && <Button variant="outline" size="sm" onClick={() => void clear()} disabled={saving}><Trash2 className="h-4 w-4" />回退内置</Button>}<Button size="sm" onClick={() => void save()} disabled={saving || !text.trim()}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{preview ? '确认应用品牌包' : '校验并导入'}</Button></div>
+      <div><h2 className="flex items-center gap-2 text-lg font-semibold"><Braces className="h-5 w-5 text-primary" />行业卡与品牌包</h2><p className="mt-1 max-w-2xl text-sm text-muted-foreground">行业卡与品牌包只影响写作策略和签名模板，不作为事实证据。支持导出/导入私有品牌包，变更即时同步到发信编辑器。</p></div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" onClick={() => { setPreview(null); void load(); }} disabled={loading || saving}><RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />刷新</Button>
+        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={saving}><FileUp className="h-4 w-4" />载入 JSON 文件</Button>
+        <Button variant="outline" size="sm" onClick={() => void exportCurrentPackage()} disabled={loading || saving}><Download className="h-4 w-4" />导出品牌包</Button>
+        {state?.canRollback && <Button variant="outline" size="sm" onClick={() => void rollback()} disabled={saving}>恢复上一版本</Button>}
+        {state?.source === 'imported' && !state.brandRelease && <Button variant="outline" size="sm" onClick={() => void clear()} disabled={saving}><Trash2 className="h-4 w-4" />回退内置</Button>}
+        <Button size="sm" onClick={() => void save()} disabled={saving || !text.trim()}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}{preview ? '确认应用品牌包' : '校验并导入'}</Button>
+      </div>
     </header>
     {error && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
-    {preview && <p role="status" className="rounded-md border bg-muted/20 p-3 text-sm">目标项目 {preview.projectName} · {preview.brandKey} · 版本 {preview.release} · {preview.cardCount} 张卡{preview.signatureTitle ? ` · ${preview.signatureTitle}` : ''}</p>}
+    {preview && <p role="status" className="rounded-md border bg-muted/20 p-3 text-sm">
+      目标项目 {preview.projectName} · {preview.brandKey} · 版本 {preview.release} · 共 {preview.cardCount} 张卡
+      {preview.diff ? `（新增 ${preview.diff.addedCards} / 更新 ${preview.diff.updatedCards} / 移除 ${preview.diff.removedCards}）` : ''}
+      {preview.signatureTitle ? ` · ${preview.signatureTitle}` : ''}
+    </p>}
     <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3 text-sm">
-      <Badge variant={state?.source === 'imported' ? 'developed' : 'secondary'}>{state?.source === 'imported' ? '本项目已导入' : '使用内置卡片'}</Badge>
+      <Badge variant={state?.source === 'imported' ? 'developed' : 'secondary'}>{state?.source === 'imported' ? '本项目已导入' : '使用通用/内置卡片'}</Badge>
       <span className="text-xs text-muted-foreground">{state?.projectLabel ? `${state.projectLabel} · ` : ''}版本 {state?.version ?? 0} · 行业卡 {state?.segments.length ?? 0} · 偏好卡 {state?.preferences.length ?? 0}{state?.updatedAt ? ` · ${formatDateTime(state.updatedAt)}` : ''}</span>
-      <span className="ml-auto text-xs text-muted-foreground">只导入 text、不导入示例邮件正文；卡片中的数字不会被当作已确认事实。</span>
+      <span className="ml-auto text-xs text-muted-foreground">只导入策略文本，不导入示例邮件正文；卡片中的数字不会被当作已确认事实。</span>
     </div>
     {!loading && state && (state.segments.length > 0 || state.preferences.length > 0) && <div className="grid gap-3 lg:grid-cols-2"><CardPreview title="行业卡预览" cards={state.segments} /><CardPreview title="偏好卡预览" cards={state.preferences} /></div>}
     <div className="rounded-lg border p-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">卡片 JSON（segment / preference）</p><Button variant="ghost" size="sm" onClick={() => setText(JSON.stringify(example, null, 2))}><Braces className="h-4 w-4" />载入格式示例</Button></div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">品牌包或卡片 JSON（segment / preference）</p><Button variant="ghost" size="sm" onClick={() => setText(JSON.stringify(example, null, 2))}><Braces className="h-4 w-4" />载入格式示例</Button></div>
       <Textarea aria-label="品牌包或卡片 JSON" className="min-h-[440px] font-mono text-xs" value={text} onChange={(event) => { setText(event.target.value); setPreview(null); }} disabled={loading || saving} placeholder="粘贴版本化品牌包，或包含 id、kind、name 的卡片数组。" />
       <p className="mt-2 text-xs text-muted-foreground">每个项目独立存储。导入后不会修改知识库事实、报价或已生成草稿；重新生成开发信时才生效。上方预览展示当前实际生效的卡片，JSON 可查看全部字段。</p>
     </div>
-    {!loading && state?.source === 'builtin' && <div className="flex items-center gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground"><CheckCircle2 className="h-4 w-4" />{state.segments.length || state.preferences.length ? '当前项目正在使用代码内置卡；下方已列出内置数据，可直接编辑后导入为项目副本。' : '当前项目没有内置卡片；可粘贴 JSON 导入本项目。'}</div>}
+    {!loading && state?.source === 'builtin' && <div className="flex items-center gap-2 rounded-md border border-dashed p-3 text-xs text-muted-foreground"><CheckCircle2 className="h-4 w-4" />{state.segments.length || state.preferences.length ? '当前项目正在使用兼容卡片；可导出并作为独立私有品牌包维护。' : '当前项目没有内置卡片；可载入私有品牌包 JSON 导入本项目。'}</div>}
   </div>;
 }

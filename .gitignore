@@ -64,3 +64,7 @@ __pycache__/
 
 # ---- Local agent workspace (screenshots, scratch scripts, tool caches) ----
 .dsh/
+deliverables/
+docs/*-results/*.png
+docs/*-results/*.json
+server/evaluation/outreach/reports/

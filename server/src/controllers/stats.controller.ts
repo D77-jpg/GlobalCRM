@@ -15,6 +15,7 @@ import { getLetterStats, listLetters } from '../services/letter.service';
 import { getSalesWorkspace } from '../services/stats.service';
 import { getActiveChannel } from '../services/mailer.service';
 import { isDraining } from '../services/runtime-state';
+import { customerRefScope } from '../utils/access';
 import type { ListLettersQuery } from '../validators/letter.validator';
 
 /** 仪表盘「最近发送」固定取最新 6 条 */
@@ -61,11 +62,13 @@ function processSnapshot() {
 }
 
 export const overviewHandler = asyncHandler(async (req: Request, res: Response) => {
+  // 复算一次 customerRefScope，避免同一仪表盘请求重复 3 次拉取可见客户 ID 列表
+  const refScope = await customerRefScope(req.user);
   const [customer, letter, recentResult, workspace] = await Promise.all([
     getCustomerStats(req.user),
-    getLetterStats(req.user),
-    listLetters(RECENT_LETTER_QUERY, req.user),
-    getSalesWorkspace(req.user),
+    getLetterStats(req.user, refScope),
+    listLetters(RECENT_LETTER_QUERY, req.user, { refScope }),
+    getSalesWorkspace(req.user, refScope),
   ]);
 
   const developmentRate = customer.total > 0 ? Number(((customer.developed / customer.total) * 100).toFixed(1)) : 0;

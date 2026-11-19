@@ -1,5 +1,7 @@
 import {ensureCustomerResearch,type CustomerResearchStatus} from '../website/customer-research';
 import {websiteCustomerEvidence} from '../website/research.service';
+import {getCustomerCustomsEvidence} from '../customs.service';
+import {listWinningExemplars} from '../winning-exemplar.service';
 import {prepareSalesEvidence,assertSalesEvidenceCurrent,salesMailKind,salesSubjects,type SalesMailKind} from './sales-evidence';
 import {workflowStage,type EvidenceWorkflow} from './evidence-workflow';
 import {verifyGroundedEmail,providerFactVerifier} from './fact-verifier';
@@ -34,7 +36,10 @@ import type { AuthUser } from '../../types/express';
 import { ApiError } from '../../utils/ApiError';
 import { requireProjectId } from '../../utils/access';
 import { renderLetterContent, type LetterSignature } from '../letter-signature';
-import { OUTREACH_WRITING_VERSION, projectPromptContext, resolveProjectSalesProfile } from '../project-profile';
+import { projectPromptContext, resolveProjectSalesProfile } from '../project-profile';
+import { evaluateOutreachDraftQuality, extractDeliverables, extractQuestions } from './outreach-quality';
+import { classifyCustomerTier, resolveEffectiveWritingVersion, type CustomerTierBucket } from './writing-release.service';
+import type { ProjectApprovedOffer } from '../../models/Project';
 import { resolveSignerName } from '../signer.service';
 import { getCustomerByIdOrThrow, updateCustomer } from '../customer.service';
 import { sendLetter } from '../letter.service';
@@ -111,11 +116,12 @@ function clipped(value: unknown, max = 3000): string {
   return String(value ?? '').trim().slice(0, max);
 }
 
-async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledgeIds?:string[], goal='', workflow?:EvidenceWorkflow, taskKind?:SalesMailKind, outreachStep?:number, previousOutreach?:CustomerAnalysisInput['previousOutreach']): Promise<{ input: CustomerAnalysisInput; sources: AgentAnalysisSource[]; knowledgeBundle:KnowledgeBundle; signature: LetterSignature; brandRevision?: number }> {
+async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledgeIds?:string[], goal='', workflow?:EvidenceWorkflow, taskKind?:SalesMailKind, outreachStep?:number, previousOutreach?:CustomerAnalysisInput['previousOutreach'], forcedSegmentCode?:string): Promise<{ input: CustomerAnalysisInput; sources: AgentAnalysisSource[]; knowledgeBundle:KnowledgeBundle; signature: LetterSignature; brandRevision?: number; writingVersion: string; customerTier: CustomerTierBucket; approvedOffers?: ProjectApprovedOffer[]; importedPlaybook?: Awaited<ReturnType<typeof loadImportedPlaybook>>; playbookBaseInput: Parameters<typeof selectOutreachPlaybook>[0] }> {
   const customer = await getCustomerByIdOrThrow(customerId, actor);
   const projectId = requireProjectId(actor);
   const project = await Project.findById(projectId).select('code slug name industry companyName website mailFrom senderName brandProfile').lean();
   const salesProfile = resolveProjectSalesProfile(project);
+  const writingVersion = resolveEffectiveWritingVersion(project);
   const oid = new Types.ObjectId(customerId);
   const [timeline, inbound, outbound, followups] = await Promise.all([
     getCustomerTimeline(customerId, 30, actor),
@@ -150,11 +156,33 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
   for (const followup of followups) add({
     sourceId: `followup:${String(followup._id)}`, kind: 'followup', recordId: String(followup._id), label: `跟进 · ${followup.method}`, occurredAt: followup.followUpAt,
   }, { method: followup.method, result: followup.result, content: clipped(followup.content), followUpAt: followup.followUpAt, nextFollowUpAt: followup.nextFollowUpAt });
-  const websiteSources=await websiteCustomerEvidence(customerId,actor);
-  for(const item of websiteSources)add({sourceId:item.sourceId,kind:'website',recordId:item.recordId,label:item.label,occurredAt:item.occurredAt},item.content);
+  const [websiteSources, customsEvidence] = await Promise.all([
+    websiteCustomerEvidence(customerId, actor),
+    getCustomerCustomsEvidence(projectId, customerId).catch(() => null),
+  ]);
+  for (const item of websiteSources) add({ sourceId: item.sourceId, kind: 'website', recordId: item.recordId, label: item.label, occurredAt: item.occurredAt }, item.content);
+  if (customsEvidence && customsEvidence.companyId) {
+    add({
+      sourceId: `customs:${customsEvidence.companyId}`,
+      kind: 'customs',
+      recordId: customsEvidence.companyId,
+      label: `海关采购信号 · ${customsEvidence.companyName}${customsEvidence.stale ? '（超1年）' : ''}`,
+      occurredAt: customsEvidence.latestShipmentAt,
+    }, {
+      matchMethod: customsEvidence.matchMethod,
+      confidence: customsEvidence.confidence,
+      stale: customsEvidence.stale,
+      signals: customsEvidence.signals,
+      summaryText: customsEvidence.summaryText,
+    });
+  }
   await workflowStage(workflow,'read_context',{customerId,sourceCatalog},async()=>({projectId:actor.projectId,customerId,sourceCatalog}),{tool:'crm'});
   const websiteHint=[...new Set(websiteSources.map(item=>item.content.productHint).filter(Boolean))].join(' ');
-  const productHint=([customer.interestedProducts,customer.productCategory,customer.industry,websiteHint].filter(Boolean).join(' ').trim().slice(0,600)
+  const websiteStructured = websiteSources.map((item) => item.content.structuredProfile).find(Boolean);
+  const customsCategories = customsEvidence && !customsEvidence.stale && customsEvidence.confidence !== 'low'
+    ? customsEvidence.signals.importedCategories.slice(0, 3).join(' ')
+    : '';
+  const productHint=([customer.interestedProducts,customer.productCategory,customer.industry,websiteHint,customsCategories].filter(Boolean).join(' ').trim().slice(0,600)
     || [project?.industry,project?.companyName,salesProfile.offerSummary].filter(Boolean).join(' ').slice(0,300));
   const prepared=await prepareSalesEvidence(actor,{request:goal,history:inbound.slice().reverse().map(m=>m.text).join('\n'),productHint,kind:taskKind??salesMailKind(goal),customerId,ids:knowledgeIds},workflow);
   const knowledgeContext=prepared.bundle;
@@ -169,24 +197,90 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
   }
   for(const item of await customerAttachmentEvidence(customerId,actor))add({sourceId:item.sourceId,kind:'attachment',recordId:item.id,label:`客户附件 · ${item.name} · ${item.status}`},{...item,text:item.text.slice(0,3000)});
   const importedPlaybook=await loadImportedPlaybook(actor.projectId);
-  const playbook=selectOutreachPlaybook({
-    ...(importedPlaybook?{cards:importedPlaybook}:{}),
-    projectKey:salesProfile.key,
-    taskType:taskKind??salesMailKind(goal),
+  const websiteText = [websiteHint, ...websiteSources.map((item) => item.content.text)].join(' ').slice(0, 16000);
+  const savedAlternatives = previousOutreach?.find((item) => item.step === 1 && item.savedAlternatives?.length)?.savedAlternatives;
+  const playbookBaseInput: Parameters<typeof selectOutreachPlaybook>[0] = {
+    ...(importedPlaybook ? { cards: importedPlaybook } : {}),
+    projectKey: salesProfile.key,
+    taskType: taskKind ?? salesMailKind(goal),
     outreachStep,
-    industry:customer.industry,
-    interestedProducts:customer.interestedProducts,
-    productCategory:customer.productCategory,
-    contactRole:customer.title,
-    usedAngles:previousOutreach?.flatMap(item=>item.angleCode?[item.angleCode]:[]),
-    // Website text often starts with cookie/country selectors. Put the
-    // extracted product hint first so a real product signal is not buried.
-    websiteText:[websiteHint,...websiteSources.map(item=>item.content.text)].join(' ').slice(0,16000),
+    industry: customer.industry,
+    interestedProducts: customer.interestedProducts,
+    productCategory: customer.productCategory,
+    contactRole: customer.title,
+    usedAngles: previousOutreach?.flatMap((item) => (item.angleCode ? [item.angleCode] : [])),
+    ...(savedAlternatives?.length ? { savedAlternatives } : {}),
+    ...(forcedSegmentCode ? { forcedSegmentCode } : {}),
+    ...(salesProfile.industryRules?.length ? { industryRules: salesProfile.industryRules } : {}),
+    ...(customsEvidence ? {
+      customsSignals: {
+        purchaseScale: customsEvidence.signals.purchaseScale,
+        shipmentCount: customsEvidence.signals.shipmentCount,
+        importedCategories: customsEvidence.signals.importedCategories,
+        importedMaterials: customsEvidence.signals.importedMaterials,
+        seasonalPeakMonths: customsEvidence.signals.seasonalPeakMonths,
+        upcomingRestockWindow: customsEvidence.signals.upcomingRestockWindow,
+        supplierConcentration: customsEvidence.signals.supplierConcentration,
+        topSupplierShare: customsEvidence.signals.topSupplierShare,
+        confidence: customsEvidence.confidence,
+        stale: customsEvidence.stale,
+      },
+    } : {}),
+    ...(websiteStructured ? {
+      websiteStructured: {
+        productLines: websiteStructured.productLines,
+        materials: websiteStructured.materials,
+        priceTier: websiteStructured.priceBand?.tier,
+        brandPositioning: websiteStructured.brandPositioning,
+      },
+    } : {}),
+    websiteText,
+  };
+  const playbook = selectOutreachPlaybook(playbookBaseInput);
+  const winningExemplars = await listWinningExemplars(projectId, {
+    segmentCode: playbook?.segmentCode,
+    outreachStep: outreachStep ?? 1,
+    limit: 2,
+  }).catch(() => []);
+  const customerTier = classifyCustomerTier({
+    email: customer.email,
+    contactRole: customer.title,
+    websiteTextLength: websiteText.trim().length,
+    hasProducts: Boolean(customer.interestedProducts || websiteHint),
   });
-  const profileContext=projectPromptContext(salesProfile);
-  return { input: { customerName: customer.name, customerEmail: customer.email, sourceCatalog,salesRequirements:prepared.requirements,taskType:taskKind??salesMailKind(goal),knowledgeContext:knowledgeForModel(knowledgeContext),projectProfile:playbook?{...profileContext,playbook}:profileContext,
-    ...(outreachStep ? { outreachStep: (Math.min(3, Math.max(1, outreachStep)) as 1|2|3) } : {}),
-    ...(previousOutreach?.length ? { previousOutreach } : {}) }, sources, knowledgeBundle:knowledgeForAudit(knowledgeContext), signature:salesProfile.signature, brandRevision:importedPlaybook?.revision };
+  const profileContext = {
+    ...projectPromptContext(salesProfile),
+    writingVersion,
+    ...(winningExemplars.length ? {
+      styleExemplars: winningExemplars.map((e) => ({
+        outcomeType: e.outcomeType,
+        subject: e.redactedSubject,
+        body: e.redactedBody.slice(0, 600),
+      })),
+    } : {}),
+  };
+  return {
+    input: {
+      customerName: customer.name,
+      customerEmail: customer.email,
+      sourceCatalog,
+      salesRequirements: prepared.requirements,
+      taskType: taskKind ?? salesMailKind(goal),
+      knowledgeContext: knowledgeForModel(knowledgeContext),
+      projectProfile: playbook ? { ...profileContext, playbook } : profileContext,
+      ...(outreachStep ? { outreachStep: (Math.min(3, Math.max(1, outreachStep)) as 1 | 2 | 3) } : {}),
+      ...(previousOutreach?.length ? { previousOutreach } : {}),
+    },
+    sources,
+    knowledgeBundle: knowledgeForAudit(knowledgeContext),
+    signature: salesProfile.signature,
+    brandRevision: importedPlaybook?.revision,
+    writingVersion,
+    customerTier,
+    approvedOffers: salesProfile.approvedOffers,
+    importedPlaybook,
+    playbookBaseInput,
+  };
 }
 
 const outputSchema = z.object({
@@ -208,7 +302,7 @@ function recommendationEvidence(recommendations: AgentAnalysisClaim[]): { reason
   return { reason: recommendation.rationale!.trim(), sourceIds: recommendation.sourceIds };
 }
 
-export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisBody, actor: AuthUser, options?: { firstOutreach?: boolean; userRequest?: string; provider?: AgentProvider; knowledgeIds?:string[]; taskId?:string;workflow?:EvidenceWorkflow;taskKind?:SalesMailKind;customerResearch?:CustomerResearchStatus;outreachStep?:number;previousOutreach?:CustomerAnalysisInput['previousOutreach'] }) {
+export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisBody, actor: AuthUser, options?: { firstOutreach?: boolean; userRequest?: string; provider?: AgentProvider; knowledgeIds?:string[]; taskId?:string;workflow?:EvidenceWorkflow;taskKind?:SalesMailKind;customerResearch?:CustomerResearchStatus;outreachStep?:number;previousOutreach?:CustomerAnalysisInput['previousOutreach'];forcedSegmentCode?:string;dualAngle?:boolean }) {
   const identifiers = scope(actor);
   await getCustomerByIdOrThrow(input.customerId, actor);
   const existing = await AgentCustomerAnalysis.findOne({ ...identifiers, requestKey: input.idempotencyKey });
@@ -225,7 +319,7 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
     if (!activeProvider.isAvailable()) throw new AgentProviderError('AGENT_NOT_CONFIGURED');
     const taskKind=options?.taskKind??(options?.firstOutreach?'first_outreach':options?.userRequest?salesMailKind(options.userRequest):'followup_review');
     const research=options?.customerResearch??await ensureCustomerResearch(input.customerId,actor,{requestKey:input.idempotencyKey});
-    const context = await buildAnalysisInput(input.customerId, actor,options?.knowledgeIds,options?.userRequest,options?.workflow,taskKind,options?.outreachStep,options?.previousOutreach);
+    const context = await buildAnalysisInput(input.customerId, actor,options?.knowledgeIds,options?.userRequest,options?.workflow,taskKind,options?.outreachStep,options?.previousOutreach,options?.forcedSegmentCode);
     context.input.userRequest=options?.userRequest;context.input.customerResearch=research;
     {
       const project = await Project.findById(requireProjectId(actor)).select('companyName website moq senderName');
@@ -265,24 +359,136 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
       }
       throw new AgentProviderError('OPENAI_INVALID_STRUCTURED_OUTPUT');
     },{cache:true,tool:'model'});
-    const parsed = outputSchema.parse({
+    let parsed = outputSchema.parse({
       facts: generated.facts, gaps: generated.gaps, recommendations: generated.recommendations,
       emailDraft: generated.emailDraft, followUpPlan: generated.followUpPlan,
     });
-    const grounded=await workflowStage(options?.workflow,'audit_claims',{body:parsed.emailDraft.bodyText,bundle:context.knowledgeBundle,model:activeProvider.model},async()=>verifyGroundedEmail(parsed.emailDraft.bodyText,context.knowledgeBundle,{
-      taskType:options?.taskKind??context.input.taskType??(options?.firstOutreach?'first_outreach':'followup'),knownRequirements:context.input.salesRequirements?.known,
-      customerProfile:customerProfileOf(context.input.sourceCatalog.find(s=>s.kind==='profile')!.content as {name:string;company?:string;country?:string;industry?:string;interestedProducts?:string}),recipientName:context.input.customerName,customerId:input.customerId,request:options?.userRequest,
-      customerWebsites:context.input.sourceCatalog.filter(s=>s.kind==='website').map(s=>{const c=s.content as {url:string;text:string;sha256:string;collectedAt:string};return {sourceId:s.sourceId,url:c.url,text:c.text,sha256:c.sha256,collectedAt:c.collectedAt};}),
-      customerEvidence:JSON.stringify(context.input.sourceCatalog.filter(item=>item.kind!=='knowledge')),
-      playbook:context.input.projectProfile?.playbook,
-      seller:context.input.seller,
-      signature:context.signature,
-      outreachStep:options?.outreachStep,
-      previousOutreach:options?.previousOutreach,
-    },providerFactVerifier(activeProvider,actor,options?.taskId,options?.workflow?.check,context.input.projectProfile,{outreachStep:options?.outreachStep,previousOutreach:options?.previousOutreach}),actor),{cache:true,tool:'model'});
+    const verifyDraft = async (bodyText: string, playbookOverride = context.input.projectProfile?.playbook) => verifyGroundedEmail(bodyText, context.knowledgeBundle, {
+      taskType: options?.taskKind ?? context.input.taskType ?? (options?.firstOutreach ? 'first_outreach' : 'followup'),
+      knownRequirements: context.input.salesRequirements?.known,
+      customerProfile: customerProfileOf(context.input.sourceCatalog.find((s) => s.kind === 'profile')!.content as { name: string; company?: string; country?: string; industry?: string; interestedProducts?: string }),
+      recipientName: context.input.customerName,
+      customerId: input.customerId,
+      request: options?.userRequest,
+      customerWebsites: context.input.sourceCatalog.filter((s) => s.kind === 'website').map((s) => { const c = s.content as { url: string; text: string; sha256: string; collectedAt: string }; return { sourceId: s.sourceId, url: c.url, text: c.text, sha256: c.sha256, collectedAt: c.collectedAt }; }),
+      customerEvidence: JSON.stringify(context.input.sourceCatalog.filter((item) => item.kind !== 'knowledge')),
+      playbook: playbookOverride,
+      seller: context.input.seller,
+      signature: context.signature,
+      outreachStep: options?.outreachStep,
+      previousOutreach: options?.previousOutreach,
+    }, providerFactVerifier(activeProvider, actor, options?.taskId, options?.workflow?.check, playbookOverride && context.input.projectProfile ? { ...context.input.projectProfile, playbook: playbookOverride } : context.input.projectProfile, { outreachStep: options?.outreachStep, previousOutreach: options?.previousOutreach }), actor);
+
+    let grounded = await workflowStage(options?.workflow, 'audit_claims', { body: parsed.emailDraft.bodyText, bundle: context.knowledgeBundle, model: activeProvider.model }, () => verifyDraft(parsed.emailDraft.bodyText), { cache: true, tool: 'model' });
+
+    // Dual-angle generation & automatic selection for Step 1 when a strong runner-up exists
+    const primaryPlaybook = context.input.projectProfile?.playbook;
+    const runnerUpAlt = !options?.forcedSegmentCode && (options?.dualAngle || options?.outreachStep === 1 || options?.firstOutreach)
+      ? primaryPlaybook?.alternatives?.find((alt) => (alt.score ?? 0) >= 3)
+      : undefined;
+    if (primaryPlaybook && runnerUpAlt) {
+      const scoreCandidate = (body: string, subj: string, review: typeof grounded.review, playbookRelevance: number) => {
+        const quality = evaluateOutreachDraftQuality({
+          bodyText: body,
+          subject: subj,
+          step: options?.outreachStep ?? 1,
+          sparseInfo: context.customerTier === 'sparse',
+          review,
+          approvedOffers: context.approvedOffers,
+        });
+        const supportedKnowledge = review.claims.filter((c) => c.sourceIds.some((id) => id.startsWith('knowledge:'))).length;
+        const unsupported = (review.factAudit?.checks ?? []).filter((c) => c.status !== 'supported' && c.status !== 'non_claim').length;
+        return quality.score + supportedKnowledge * 12 + Math.min(15, playbookRelevance * 1.5) - unsupported * 25;
+      };
+      const primaryScore = scoreCandidate(grounded.bodyText, parsed.emailDraft.subject, grounded.review, primaryPlaybook.confidence === 'high' ? 8 : 5);
+      const altPlaybook = selectOutreachPlaybook({ ...context.playbookBaseInput, forcedSegmentCode: runnerUpAlt.code });
+      let selectedMode: 'dual_draft' | 'evidence_rank' = 'evidence_rank';
+      let altScore = (runnerUpAlt.score ?? 3) * 1.5 + 50;
+      if (altPlaybook && (options?.dualAngle || activeProvider.name === 'openai' || activeProvider.name === 'mock')) {
+        try {
+          const altInput: CustomerAnalysisInput = {
+            ...context.input,
+            projectProfile: context.input.projectProfile ? { ...context.input.projectProfile, playbook: altPlaybook } : undefined,
+          };
+          const altChars = JSON.stringify(altInput).length;
+          if (altChars <= env.AI_MAX_INPUT_CHARS) {
+            const altRaw = await activeProvider.analyzeCustomer({ input: altInput, safetyIdentifier: agentSafetyIdentifier(actor) });
+            const altParsed = outputSchema.parse({
+              facts: altRaw.facts, gaps: altRaw.gaps, recommendations: altRaw.recommendations,
+              emailDraft: altRaw.emailDraft, followUpPlan: altRaw.followUpPlan,
+            });
+            const altGrounded = await verifyDraft(altParsed.emailDraft.bodyText, altPlaybook);
+            selectedMode = 'dual_draft';
+            altScore = scoreCandidate(altGrounded.bodyText, altParsed.emailDraft.subject, altGrounded.review, runnerUpAlt.score ?? 4);
+            if (altScore > primaryScore + 4) {
+              parsed = altParsed;
+              grounded = altGrounded;
+              grounded.review.context.playbook = {
+                ...altPlaybook,
+                dualAngleComparison: {
+                  winnerCode: altPlaybook.segmentCode,
+                  winnerScore: Number(altScore.toFixed(1)),
+                  runnerUpCode: primaryPlaybook.segmentCode,
+                  runnerUpScore: Number(primaryScore.toFixed(1)),
+                  mode: selectedMode,
+                  rationale: `双角度比稿择优：备选「${altPlaybook.segmentName}」证据贴合与正文得分 ${altScore.toFixed(1)} 高于初选「${primaryPlaybook.segmentName}」（${primaryScore.toFixed(1)}），系统自动采用该稿。`,
+                },
+              };
+            } else if (grounded.review.context.playbook) {
+              grounded.review.context.playbook = {
+                ...grounded.review.context.playbook,
+                dualAngleComparison: {
+                  winnerCode: primaryPlaybook.segmentCode,
+                  winnerScore: Number(primaryScore.toFixed(1)),
+                  runnerUpCode: altPlaybook.segmentCode,
+                  runnerUpScore: Number(altScore.toFixed(1)),
+                  mode: selectedMode,
+                  rationale: `双角度比稿择优：主角度「${primaryPlaybook.segmentName}」证据贴合与正文得分 ${primaryScore.toFixed(1)} 优于备选「${altPlaybook.segmentName}」（${altScore.toFixed(1)}），保留主角度并将备选留给第 2 封。`,
+                },
+              };
+            }
+          }
+        } catch {
+          // Never fail primary draft because optional second-angle comparison errored.
+        }
+      }
+      if (grounded.review.context.playbook && !grounded.review.context.playbook.dualAngleComparison) {
+        grounded.review.context.playbook = {
+          ...grounded.review.context.playbook,
+          dualAngleComparison: {
+            winnerCode: primaryPlaybook.segmentCode,
+            winnerScore: Number(primaryScore.toFixed(1)),
+            runnerUpCode: runnerUpAlt.code,
+            runnerUpScore: Number(altScore.toFixed(1)),
+            mode: selectedMode,
+            rationale: `证据排序择优：主角度「${primaryPlaybook.segmentName}」线索相关性更强，备选「${runnerUpAlt.name}」保留供第 2 封或人工换角度使用。`,
+          },
+        };
+      }
+    }
+
     await options?.workflow?.check();
     await assertSalesEvidenceCurrent(context.knowledgeBundle,actor,input.customerId);
-    if(options?.firstOutreach||options?.outreachStep){grounded.review.context.writingVersion=OUTREACH_WRITING_VERSION;grounded.review.context.brandRevision=context.brandRevision??0;}
+    const qualityReport = evaluateOutreachDraftQuality({
+      bodyText: grounded.bodyText,
+      subject: parsed.emailDraft.subject,
+      step: options?.outreachStep ?? (options?.firstOutreach ? 1 : undefined),
+      sparseInfo: context.customerTier === 'sparse',
+      review: grounded.review,
+      approvedOffers: context.approvedOffers,
+    });
+    if (options?.firstOutreach || options?.outreachStep) {
+      grounded.review.context.writingVersion = context.writingVersion;
+      grounded.review.context.brandRevision = context.brandRevision ?? 0;
+      grounded.review.context.customerTier = context.customerTier === 'unknown' ? undefined : context.customerTier;
+      grounded.review.context.qualityReport = qualityReport;
+      grounded.review.context.outreachMemory = {
+        usedProofIds: [...new Set(grounded.review.claims.flatMap((c) => c.sourceIds).filter((id) => id.startsWith('knowledge:')))],
+        usedProofTexts: grounded.review.claims.map((c) => c.text).slice(0, 6),
+        usedCtas: extractQuestions(grounded.bodyText).slice(0, 3),
+        usedDeliverables: extractDeliverables(grounded.bodyText).map((d) => d.key),
+      };
+    }
     if(research.state!=='ready'){grounded.review.issues.push({code:'customer_research_gap',message:research.message});grounded.review.completeness='partial';}
     parsed.emailDraft.bodyText=grounded.bodyText;
     // A generated subject is not an unchecked channel for numeric commitments:

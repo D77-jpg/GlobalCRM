@@ -11,6 +11,7 @@
  */
 import { WebsiteError, fetchWebsite, type WebResponse } from './public-web';
 import { browserFetch } from './browser-fetch';
+import { firecrawlScrape } from '../prospecting/lead-source';
 
 const AVAILABLE_API = 'https://archive.org/wayback/available';
 const MAX_AGE_DAYS = 365 * 3;
@@ -69,6 +70,13 @@ export async function fetchWithArchiveFallback(raw: string, kind: 'html' | 'robo
     // 浏览器兜底在前：archive.org 在当前网络常超时，别让它先吃掉 12 秒。
     const rendered = await browserFetch(raw);
     if (rendered) return rendered;
+    if (process.env.LEAD_FIRECRAWL_API_KEY) {
+      const scraped = await firecrawlScrape(raw, { html: true }).catch(() => null);
+      const html = scraped?.rawHtml || scraped?.markdown;
+      if (html && html.trim().length >= 50) {
+        return { url: raw, text: html, status: 200 };
+      }
+    }
     const snapshot = await archivedSnapshot(raw);
     if (snapshot) return snapshot;
     throw error;

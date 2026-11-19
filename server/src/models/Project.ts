@@ -7,9 +7,38 @@ export type ProjectStatus = 'active' | 'archived';
  * Customer-editable brand / sales narrative. Every field is optional so
  * existing projects keep the built-in profile resolved by project code.
  */
+export interface ProjectApprovedOffer {
+  id: string;
+  label: string;
+  actionText: string;
+  category: 'spec_sheet' | 'drawing' | 'swatch' | 'sample' | 'quote_range' | 'other';
+  requiresEvidence: boolean;
+  allowsFree: boolean;
+  allowsSample: boolean;
+  allowsShipping: boolean;
+  conditions?: string;
+  enabled: boolean;
+}
+
+export interface ProjectIndustryRule {
+  code: string;
+  name: string;
+  requiredPattern?: string;
+  excludedPattern?: string;
+  keywords: string[];
+  priority?: number;
+}
+
 export interface ProjectBrandProfile {
   brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
   approvedActions?: string[];
+  approvedOffers?: ProjectApprovedOffer[];
+  industryRules?: ProjectIndustryRule[];
+  activeWritingVersion?: string;
+  writingPausedReason?: string;
+  logoPath?: string | null;
+  defaultLetterSubject?: string;
+  defaultLetterTemplate?: string;
   label?: string;
   identity?: string;
   offerSummary?: string;
@@ -99,6 +128,37 @@ const ProjectSchema = new Schema<IProject>(
     brandProfile: {
       brandKey: { type: String, enum: ['genesis', 'ironhue', 'velaturo', 'general'] },
       approvedActions: { type: [String], default: undefined },
+      approvedOffers: {
+        type: [{
+          id: { type: String, required: true, trim: true, maxlength: 60 },
+          label: { type: String, required: true, trim: true, maxlength: 120 },
+          actionText: { type: String, required: true, trim: true, maxlength: 400 },
+          category: { type: String, enum: ['spec_sheet', 'drawing', 'swatch', 'sample', 'quote_range', 'other'], default: 'other' },
+          requiresEvidence: { type: Boolean, default: true },
+          allowsFree: { type: Boolean, default: false },
+          allowsSample: { type: Boolean, default: false },
+          allowsShipping: { type: Boolean, default: false },
+          conditions: { type: String, trim: true, maxlength: 500 },
+          enabled: { type: Boolean, default: true },
+        }],
+        default: undefined,
+      },
+      industryRules: {
+        type: [{
+          code: { type: String, required: true, trim: true, maxlength: 40 },
+          name: { type: String, required: true, trim: true, maxlength: 120 },
+          requiredPattern: { type: String, trim: true, maxlength: 400 },
+          excludedPattern: { type: String, trim: true, maxlength: 400 },
+          keywords: { type: [String], default: [] },
+          priority: { type: Number, default: 0 },
+        }],
+        default: undefined,
+      },
+      activeWritingVersion: { type: String, trim: true, maxlength: 60 },
+      writingPausedReason: { type: String, trim: true, maxlength: 300 },
+      logoPath: { type: String, trim: true, maxlength: 500 },
+      defaultLetterSubject: { type: String, trim: true, maxlength: 300 },
+      defaultLetterTemplate: { type: String, maxlength: 20000 },
       label: { type: String, trim: true, maxlength: 200 },
       identity: { type: String, trim: true, maxlength: 500 },
       offerSummary: { type: String, trim: true, maxlength: 2000 },

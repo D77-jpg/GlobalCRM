@@ -93,7 +93,7 @@ import { CountryFlag } from '@/components/common/country-flag';
 import { isCompanyOnlyCustomer, secondaryCompanyLabel } from '@/lib/customer-display';
 import { formatDate, formatDateTime, formatRelative, getFollowUpState, initials, toInputDate } from '@/lib/format';
 import { parseTagsText } from '@/lib/validators';
-import { readStorage, writeStorage } from '@/lib/utils';
+import { createClientId, readStorage, writeStorage } from '@/lib/utils';
 import {
   CUSTOMER_LEAD_SOURCE_OPTIONS,
   CUSTOMER_PRIORITY_BADGE_CLASS,
@@ -387,7 +387,7 @@ export function CustomerDetailPage(): React.JSX.Element {
     const controller = new AbortController();
     quickGeneration.current = controller;
     setQuickGenerating(true);
-    const requestKey = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const requestKey = createClientId();
     try {
       const task = await apiPost<AgentTask>(`/agent/customers/${customer.id}/outreach-task`, { requestKey }, { signal: controller.signal });
       toast.info('已开始生成首封开发信', { description: '完成后会自动打开草稿供你审核' });
@@ -1197,6 +1197,35 @@ export function CustomerDetailPage(): React.JSX.Element {
           // 审核结论即时体现在草稿列表与当前弹窗上
           setResendTarget(reviewed);
           pendingDrafts.refresh();
+        }}
+        queueProgress={(() => {
+          if (!resendTarget || resendTarget.status !== 'draft') return undefined;
+          const idx = pendingDrafts.items.findIndex((item) => item.id === resendTarget.id);
+          if (idx < 0) return undefined;
+          return {
+            index: idx,
+            total: pendingDrafts.items.length,
+            hasPrev: idx > 0,
+            hasNext: idx < pendingDrafts.items.length - 1,
+          };
+        })()}
+        onAdvanceNext={() => {
+          if (!resendTarget) return;
+          const remaining = pendingDrafts.items.filter((item) => item.id !== resendTarget.id);
+          const nextItem = remaining[0];
+          if (!nextItem) { setSendOpen(false); setResendTarget(null); return; }
+          void apiGet<DevelopmentLetter>(`/letters/${nextItem.id}`)
+            .then((full) => setResendTarget(full))
+            .catch(() => setResendTarget(nextItem));
+        }}
+        onNavigateQueue={(delta) => {
+          if (!resendTarget) return;
+          const idx = pendingDrafts.items.findIndex((item) => item.id === resendTarget.id);
+          const nextItem = pendingDrafts.items[idx + delta];
+          if (!nextItem) return;
+          void apiGet<DevelopmentLetter>(`/letters/${nextItem.id}`)
+            .then((full) => setResendTarget(full))
+            .catch(() => setResendTarget(nextItem));
         }}
       />
 

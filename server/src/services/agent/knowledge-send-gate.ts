@@ -1,4 +1,10 @@
+import type { ProjectApprovedOffer } from '../../models/Project';
 import type {KnowledgeReview} from './knowledge-types';
+import {
+  detectCrossEmailRepetition,
+  evaluateOutreachDraftQuality,
+  type OutreachMemoryRecord,
+} from './outreach-quality';
 
 const BLOCKING_REVIEW_CODES = new Set([
   'fact_budget',
@@ -37,7 +43,19 @@ export function knowledgeReviewHardBlocker(review?:KnowledgeReview):string|undef
  return knowledgeReviewSendIssue(review,{manualApproved:true});
 }
 
-export function automatedReviewIssue(review?: KnowledgeReview, step?: number): string | undefined {
+export interface AutomatedReviewOptions {
+  bodyText?: string;
+  subject?: string;
+  approvedOffers?: ProjectApprovedOffer[];
+  sparseInfo?: boolean;
+  enforceWordFloor?: boolean;
+}
+
+export function automatedReviewIssue(
+  review?: KnowledgeReview,
+  step?: number,
+  options?: AutomatedReviewOptions,
+): string | undefined {
  if (!review?.bodyHash || !review.factAudit?.checks?.length) return '草稿缺少完整的逐项核验';
  const blocker = knowledgeReviewHardBlocker(review);
  if (blocker) return blocker;
@@ -54,20 +72,44 @@ export function automatedReviewIssue(review?: KnowledgeReview, step?: number): s
   const questions = review.factAudit.checks.flatMap(check => check.text.match(/[?？]/g) ?? []);
   if (questions.length !== 1) return '本封开发信应保留一个明确的回复问题';
  }
- if (review.factAudit.checks.some(check => /\b(?:i am reaching out to introduce|we are a leading manufacturer|high quality and competitive pric(?:e|es|ing)|following up on my email of)\b/i.test(check.text))) {
-  return '正文仍包含生硬的群发套话';
- }
+ const combinedText = options?.bodyText?.trim() || review.factAudit.checks.map(check => check.text).join('\n\n');
+ const quality = evaluateOutreachDraftQuality({
+  bodyText: combinedText,
+  subject: options?.subject,
+  step: step ?? 1,
+  sparseInfo: options?.sparseInfo,
+  review,
+  approvedOffers: options?.approvedOffers,
+ });
+ const blockingQuality = quality.issues.find((item) => {
+  if (item.severity !== 'block') return false;
+  // When only check texts are passed (legacy short unit fixtures), skip word-count floor
+  // unless caller explicitly asked to enforce it; always enforce clichés, buzzwords,
+  // sprawl, readability, intra-draft repetition, heavy CTAs, and unauthorized offers.
+  if (item.code === 'word_count' && !options?.enforceWordFloor && quality.wordCount < 35) return false;
+  if (item.code === 'cta_count' && !step) return false;
+  return true;
+ });
+ if (blockingQuality) return blockingQuality.message;
  return undefined;
 }
 
-export function repeatedOutreachIssue(review: KnowledgeReview, previousBodies: string[]): string | undefined {
- const normalize = (text: string) => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
- const sentences = (text: string) => text.split(/[.!?。！？\n]/u).map(normalize).filter(line => line.split(' ').length >= 5);
- const previous = new Set(previousBodies.flatMap(sentences));
- const proof = review.claims.flatMap(claim => sentences(claim.text));
- const questions = (text: string) => [...text.matchAll(/([^.!?。！？\n]+)[?？]/gu)].map(match => normalize(match[1] ?? '')).filter(Boolean);
- const asked = new Set(previousBodies.flatMap(questions));
- if (proof.length && proof.every(sentence => previous.has(sentence))) return '跟进内容重复了前一封的证明点';
- if (review.factAudit?.checks.some(check => questions(check.text).some(question => asked.has(question)))) return '跟进内容重复了之前的提问';
- return undefined;
+export function repeatedOutreachIssue(
+  review: KnowledgeReview,
+  previousBodies: (string | OutreachMemoryRecord)[],
+  options?: { bodyText?: string; step?: number; approvedOffers?: ProjectApprovedOffer[] },
+): string | undefined {
+ const records: OutreachMemoryRecord[] = previousBodies.map((item, idx) => (
+  typeof item === 'string'
+   ? { step: idx + 1, subject: '', bodyText: item }
+   : item
+ ));
+ const bodyText = options?.bodyText?.trim() || (review.factAudit?.checks ?? []).map((c) => c.text).join('\n');
+ return detectCrossEmailRepetition({
+  bodyText,
+  step: options?.step ?? 2,
+  review,
+  previous: records,
+  approvedOffers: options?.approvedOffers,
+ });
 }

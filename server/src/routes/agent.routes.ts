@@ -1,3 +1,4 @@
+import { getWritingReleaseStatus, updateWritingRelease } from '../services/agent/writing-release.service';
 import {governanceOverview,versionDiff,previewDisable,commitDisable,bulkInput,draftEvidence} from '../services/agent/knowledge-governance';
 import {agreementInput,listCustomerAgreements,saveCustomerAgreement,disableCustomerAgreement} from '../services/agent/customer-agreement.service';
 import {regenerateKnowledgeDraft,recheckKnowledgeDraft} from '../services/agent/knowledge-draft.service';
@@ -49,7 +50,7 @@ import {
   updateAgentMailAnalysisSchema,
 } from '../validators/agent.validator';
 import {checkQuote} from '../services/quote-check.service';
-import {applyBrandPackage,applyBrandPackageInput,brandPackageInput,clearProjectPlaybook,getProjectPlaybook,importProjectPlaybook,playbookImportInput,previewBrandPackage,rollbackBrandPackage} from '../services/playbook-import.service';
+import {applyBrandPackage,applyBrandPackageInput,brandPackageInput,clearProjectPlaybook,exportBrandPackage,getProjectPlaybook,importProjectPlaybook,playbookImportInput,previewBrandPackage,rollbackBrandPackage} from '../services/playbook-import.service';
 import {
   cancelScratchpadCustomerPreview,
   confirmScratchpadCustomerPreview,
@@ -97,7 +98,7 @@ router.get('/skills',(_req,res)=>sendSuccess(res,BUSINESS_SKILLS));
 router.post('/translate',messageLimiter,validate({body:z.object({subject:z.string().trim().max(300).optional(),body:z.string().trim().min(1).max(8000)}).strict()}),asyncHandler(async(req,res)=>sendSuccess(res,await translateLetter({subject:req.body.subject,body:req.body.body}))));
 router.post('/knowledge/import-preview',requireRole('admin'),validate({body:importPreviewInput}),asyncHandler(async(req,res)=>sendSuccess(res,previewKnowledgeImport(req.body))));
 router.post('/knowledge/import',requireRole('admin'),validate({body:importCommitInput}),asyncHandler(async(req,res)=>sendSuccess(res,await importKnowledge(req.body.entries,req.user!),201)));
-router.post('/knowledge-drafts/:id/regenerate',messageLimiter,validate({params:agentSessionParamsSchema,body:z.object({requestKey:z.string().uuid()}).strict()}),asyncHandler(async(req,res)=>sendSuccess(res,await regenerateKnowledgeDraft(req.params.id,req.user!,req.body.requestKey),201)));
+router.post('/knowledge-drafts/:id/regenerate',messageLimiter,validate({params:agentSessionParamsSchema,body:z.object({requestKey:z.string().uuid(),angleCode:z.string().trim().max(40).optional(),instruction:z.string().trim().max(600).optional()}).strict()}),asyncHandler(async(req,res)=>sendSuccess(res,await regenerateKnowledgeDraft(req.params.id,req.user!,req.body.requestKey,{angleCode:req.body.angleCode,instruction:req.body.instruction}),201)));
 
 const agreementParams=z.object({customerId:z.string().regex(/^[a-f\d]{24}$/i),id:z.string().regex(/^[a-f\d]{24}$/i).optional()});
 router.get('/customers/:customerId/agreements',validate({params:agreementParams}),asyncHandler(async(req,res)=>sendSuccess(res,await listCustomerAgreements(req.params.customerId,req.user!))));
@@ -243,11 +244,28 @@ router.delete('/playbooks', requireRole('admin'), asyncHandler(async (req, res) 
 router.post('/playbooks/brand-package/preview', requireRole('admin'), messageLimiter, validate({ body: brandPackageInput }), asyncHandler(async (req, res) => {
   sendSuccess(res, await previewBrandPackage(req.body, req.user!));
 }));
+router.get('/playbooks/brand-package/export', requireRole('admin'), asyncHandler(async (req, res) => {
+  sendSuccess(res, await exportBrandPackage(req.user!));
+}));
 router.put('/playbooks/brand-package', requireRole('admin'), messageLimiter, validate({ body: applyBrandPackageInput }), asyncHandler(async (req, res) => {
   sendSuccess(res, await applyBrandPackage(req.body, req.user!));
 }));
 router.post('/playbooks/brand-package/rollback', requireRole('admin'), messageLimiter, validate({ body: z.object({ expectedVersion: z.number().int().nonnegative() }).strict() }), asyncHandler(async (req, res) => {
   sendSuccess(res, await rollbackBrandPackage(req.body.expectedVersion, req.user!));
+}));
+
+router.get('/writing-release', asyncHandler(async (req, res) => {
+  const windowDays = Number(req.query.windowDays ?? 30) || 30;
+  sendSuccess(res, await getWritingReleaseStatus(req.user!, windowDays));
+}));
+router.put('/writing-release', requireRole('admin'), messageLimiter, validate({
+  body: z.object({
+    action: z.enum(['set_version', 'pause_new', 'rollback', 'resume']),
+    version: z.string().trim().max(60).optional(),
+    reason: z.string().trim().max(300).optional(),
+  }).strict(),
+}), asyncHandler(async (req, res) => {
+  sendSuccess(res, await updateWritingRelease(req.body, req.user!));
 }));
 
 router.post('/quote-checks', messageLimiter, validate({ body: quoteCheckSchema }), asyncHandler(async (req, res) => {

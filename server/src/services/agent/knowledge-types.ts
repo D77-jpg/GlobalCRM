@@ -31,7 +31,35 @@ export interface KnowledgeReview {
   status: KnowledgeBundle['status']; completeness: 'complete'|'partial';
   sources: KnowledgeSource[]; claims: {text:string;sourceIds:string[];topic?:PolicyTopic}[];
   questions: {question:string;topic?:PolicyTopic;status:'answered'|'unanswered';sourceIds:string[]}[];
-  issues: KnowledgeIssue[]; context: {writingVersion?:string;brandRevision?:number;customerWebsites?:CustomerWebsiteSnapshot[];customerProfile?:CustomerFactProfile;factContext?:FactContext;customerId?:string;mailId?:string;direction?:'inbound'|'outbound';request?:string;playbook?:OutreachPlaybookContext};
+  issues: KnowledgeIssue[]; context: {
+    writingVersion?:string;
+    brandRevision?:number;
+    customerTier?:'rich'|'sparse'|'generic_email'|'brand_role'|'procurement_role';
+    customerWebsites?:CustomerWebsiteSnapshot[];
+    customerProfile?:CustomerFactProfile;
+    factContext?:FactContext;
+    customerId?:string;
+    mailId?:string;
+    direction?:'inbound'|'outbound';
+    request?:string;
+    playbook?:OutreachPlaybookContext;
+    outreachMemory?:{
+      usedProofIds?:string[];
+      usedProofTexts?:string[];
+      usedCtas?:string[];
+      usedDeliverables?:string[];
+    };
+    qualityReport?:{
+      wordCount:number;
+      paragraphCount:number;
+      maxParagraphWords:number;
+      avgSentenceWords:number;
+      fleschKincaidGrade:number;
+      questionCount:number;
+      score:number;
+      issues:{code:string;severity:'block'|'warn';message:string}[];
+    };
+  };
   bodyHash: string;
   /** Set only by a human approve action on the existing draft review page. */
   manualApprovedAt?: string;

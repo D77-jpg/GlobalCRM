@@ -9,7 +9,7 @@
  */
 import type { LetterSignature } from './letter-signature';
 import { IRONHUE_LOGO_PATH } from '../constants/ironhue-logo';
-import type { ProjectBrandProfile } from '../models/Project';
+import type { ProjectApprovedOffer, ProjectBrandProfile, ProjectIndustryRule } from '../models/Project';
 
 export interface ProjectLike {
   code?: string;
@@ -45,6 +45,12 @@ export interface ProjectSalesProfile {
   /** 主题必须落在这个范围 */
   subjectFocus: string;
   approvedActions?: string[];
+  approvedOffers?: ProjectApprovedOffer[];
+  industryRules?: ProjectIndustryRule[];
+  activeWritingVersion?: string;
+  writingPausedReason?: string;
+  defaultLetterSubject?: string;
+  defaultLetterTemplate?: string;
   /** 项目签名 */
   signature: LetterSignature;
 }
@@ -53,6 +59,24 @@ export interface ProjectSalesProfile {
  * A selected playbook card is strategy, not a factual source. It is injected
  * only into the writing prompt; the fact verifier never treats it as evidence.
  */
+export interface OutreachPlaybookAlternative {
+  code: string;
+  name: string;
+  angle: string;
+  reason?: string;
+  matchedClues?: string[];
+  score?: number;
+}
+
+export interface DualAngleComparisonSummary {
+  winnerCode: string;
+  winnerScore: number;
+  runnerUpCode: string;
+  runnerUpScore: number;
+  mode: 'dual_draft' | 'evidence_rank';
+  rationale: string;
+}
+
 export interface OutreachPlaybookContext {
   segmentCode: string;
   segmentName: string;
@@ -70,16 +94,22 @@ export interface OutreachPlaybookContext {
   preferenceCta?: string;
   contactRole?: 'brand' | 'procurement';
   selectionReason?: string;
+  matchedClues?: string[];
   revision?: number;
-  alternatives?: { code: string; name: string; angle: string }[];
+  alternatives?: OutreachPlaybookAlternative[];
+  dualAngleComparison?: DualAngleComparisonSummary;
   confidence: 'high' | 'medium' | 'low';
 }
 
 export type ProjectPromptContext = Omit<ProjectSalesProfile, 'signature'> & {
   playbook?: OutreachPlaybookContext;
+  writingVersion?: string;
+  styleExemplars?: { outcomeType: string; subject: string; body: string }[];
 };
 
-export const OUTREACH_WRITING_VERSION = '2026-11-18.1';
+export const OUTREACH_WRITING_VERSION_LEGACY = 'legacy-2026-10';
+export const OUTREACH_WRITING_VERSION = '2026-11-19.2';
+export const SUPPORTED_WRITING_VERSIONS = [OUTREACH_WRITING_VERSION, OUTREACH_WRITING_VERSION_LEGACY] as const;
 
 const GENESIS_SIGNATURE: LetterSignature = {
   title: 'Sales Manager, Genesis (Xiamen) Bags Co., Ltd.',
@@ -205,16 +235,29 @@ function mergedProfile(base: ProjectSalesProfile, project: ProjectLike): Project
     ctaExamples: text(custom.ctaExamples, base.ctaExamples),
     subjectFocus: text(custom.subjectFocus, base.subjectFocus),
     approvedActions: custom.approvedActions,
+    approvedOffers: custom.approvedOffers,
+    industryRules: custom.industryRules,
+    activeWritingVersion: custom.activeWritingVersion,
+    writingPausedReason: custom.writingPausedReason,
+    defaultLetterSubject: custom.defaultLetterSubject,
+    defaultLetterTemplate: custom.defaultLetterTemplate,
     signature: {
       ...base.signature,
       title: text(custom.signatureTitle, base.signature.title),
       lines: signatureLines.length ? signatureLines : base.signature.lines,
+      ...(custom.logoPath !== undefined ? { logoPath: custom.logoPath } : {}),
     },
   };
 }
 
 export function resolveProjectSalesProfile(project?: ProjectLike | null): ProjectSalesProfile {
   const p = project ?? {};
+  // Clean open-source/generic mode (`BRAND_PACKAGES_MODE=strict`): never fall back to built-in
+  // private brand presets; every workspace starts from neutral general defaults and restores
+  // private brand identity strictly through imported Project.brandProfile / brand packages.
+  if (process.env.BRAND_PACKAGES_MODE === 'strict') {
+    return mergedProfile(generalProfile(p), p);
+  }
   // 只按项目标识匹配已知项目；不要按行业猜测，否则未来同行业项目会误继承 Genesis/IronHue 话术。
   const key = p.brandProfile?.brandKey;
   const base = key === 'velaturo'

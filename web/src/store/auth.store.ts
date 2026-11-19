@@ -10,7 +10,7 @@ import { apiGet, apiPost, setUnauthorizedHandler, toErrorMessage, ApiClientError
 import { ROUTES, SCRATCHPAD_PENDING_PREFIX, STORAGE_KEYS } from '@/constants';
 import { removeStorage, removeStorageByPrefix } from '@/lib/utils';
 import type { AuthUser, LoginResponse, LoginResult, TwoFactorChallenge } from '@/types';
-import { useProjectStore } from './project.store';
+import { resetAllBusinessStores } from './reset';
 
 export type AuthStatus = 'idle' | 'bootstrapping' | 'authenticated' | 'unauthenticated';
 
@@ -123,7 +123,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     void apiPost('/auth/logout').catch(() => undefined);
     removeStorage(STORAGE_KEYS.token);
     removeStorageByPrefix(SCRATCHPAD_PENDING_PREFIX);
-    useProjectStore.getState().reset();
+    resetAllBusinessStores();
     set({
       user: null,
       status: 'unauthenticated',
@@ -164,7 +164,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (get().status === 'unauthenticated') return;
     removeStorage(STORAGE_KEYS.token);
     removeStorageByPrefix(SCRATCHPAD_PENDING_PREFIX);
-    useProjectStore.getState().reset();
+    resetAllBusinessStores();
     set({ user: null, status: 'unauthenticated', initialized: true, twoFactorChallenge: null, twoFactorError: null });
     // 强制整页跳登录页：避免残留的内存态 UI 在掉登录后仍能被继续操作
     if (window.location.pathname !== ROUTES.login) {

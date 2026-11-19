@@ -174,13 +174,31 @@ export async function processKnowledgeIndex(id?:string,adapter:SemanticAdapter=l
   await Gen.updateOne(fence,{$set:{state:retry?'queued':error.code==='superseded'?'superseded':'failed',error,...(retry?{retryAt:new Date(Date.now()+g.attempts*3000)}:{})},$unset:{leaseToken:1,leaseUntil:1}});
  }finally{clearInterval(heartbeat);abort.abort();}
 }
-export async function indexStatus(actor:AuthUser){
+const verifyCache = new Map<string, { at: number; ok: boolean; issue?: string }>();
+const VERIFY_CACHE_TTL_MS = 60_000;
+
+export async function indexStatus(actor:AuthUser, options?: { deepVerify?: boolean }){
  const current=await indexActor(actor);requireAdmin(current);const projectId=String(requireProjectId(actor));
  const [state,rows,identity,snapshot]=await Promise.all([State.findOne({projectId}),Gen.find({projectId}).sort({createdAt:-1}).limit(20).lean(),embeddingIdentity(),published(projectId)]);
  const active=rows.find(g=>String(g._id)===String(state?.activeGeneration))??(state?.activeGeneration?await Gen.findById(state.activeGeneration).lean():null);
  let ready=!!active&&active.state==='ready'&&active.manifest===snapshot.manifest&&active.identity.id===identity.id&&active.identity.dimension===identity.dimension;
  let storageIssue:string|undefined;
- if(ready&&active){try{const checked=await localEmbedding.run({command:'verify',projectId,generation:String(active._id)},identity);ready=checked.count===active.total&&checked.checksum===active.checksum;if(!ready)storageIssue='本地索引缺失或不完整，请重建';}catch(e){ready=false;storageIssue=e instanceof IndexError?e.message:'本地索引检查失败，请重试';}}
+ if(ready&&active){
+  const cacheKey=`${projectId}:${String(active._id)}:${identity.id}:${active.checksum ?? ''}`;
+  const cached=!options?.deepVerify ? verifyCache.get(cacheKey) : undefined;
+  if(cached&&Date.now()-cached.at<VERIFY_CACHE_TTL_MS){
+   ready=cached.ok;storageIssue=cached.issue;
+  }else{
+   try{
+    const checked=await localEmbedding.run({command:'verify',projectId,generation:String(active._id)},identity);
+    ready=checked.count===active.total&&checked.checksum===active.checksum;
+    if(!ready)storageIssue='本地索引缺失或不完整，请重建';
+    verifyCache.set(cacheKey,{at:Date.now(),ok:ready,issue:storageIssue});
+   }catch(e){
+    ready=false;storageIssue=e instanceof IndexError?e.message:'本地索引检查失败，请重试';
+   }
+  }
+ }
  return {storageIssue,status:ready?'ready':state?.pendingGeneration?'updating':state?.enabled?'stale':'not_ready',effectivePublications:snapshot.rows.length,
   activeGeneration:state?.activeGeneration?.toString(),identity,ready,
   generations:rows.map(g=>({id:String(g._id),state:g.state,done:g.done,total:g.total,publications:g.publications,attempts:g.attempts,

@@ -5,8 +5,9 @@ import {WebsiteResearch} from '../../models/WebsiteResearch';
 import type {AuthUser} from '../../types/express';
 import {requireProjectId} from '../../utils/access';
 import {getCustomerByIdOrThrow} from '../customer.service';
-import {createWebsiteResearch,processWebsiteResearch,controlWebsiteResearch} from './research.service';
-import {websiteUrl,fetchWebsite,WebsiteError,type WebsiteFetcher} from './public-web';
+import {createWebsiteResearch,processWebsiteResearch,controlWebsiteResearch,findSharedWebsiteCache} from './research.service';
+import {websiteUrl,WebsiteError,type WebsiteFetcher} from './public-web';
+import {fetchWithArchiveFallback} from './archive';
 export interface CustomerResearchStatus {state:'ready'|'partial'|'unavailable'|'no_website';message:string;reportId?:string;collectedAt?:string}
 export interface CustomerResearchOptions {requestKey?:string;fetcher?:WebsiteFetcher;check?:()=>Promise<unknown>;retry?:boolean}
 // Existing customers are authoritative. Research only attaches untrusted public source
@@ -20,6 +21,11 @@ export async function ensureCustomerResearch(customerId:string,actor:AuthUser,op
  const latest=await WebsiteResearch.findOne(filter).sort({createdAt:-1});
  const fresh=latest&&latest.createdAt.getTime()>Date.now()-24*3600000;
  if(fresh&&['ready','partial'].includes(latest.state))return {state:latest.state as 'ready'|'partial',reportId:latest.id,collectedAt:latest.pages[0]?.collectedAt,message:latest.state==='ready'?'已读取客户官网原文，将结合历史往来判断开发切入点。':'部分官网页面未能读取，可用原文已保留；其余依据现有往来分析。'};
+ // Reuse shared project-level crawl cache (e.g. from Firecrawl prospecting or manual research)
+ if(!options.retry){
+  const cached=await findSharedWebsiteCache(String(filter.projectId),url,filter.customerId);
+  if(cached)return {state:cached.state as 'ready'|'partial',reportId:cached.id,collectedAt:cached.pages[0]?.collectedAt,message:'已复用同项目官网抓取缓存，将结合历史往来判断开发切入点。'};
+ }
  if(latest&&['failed','cancelled'].includes(latest.state)&&latest.updatedAt.getTime()>Date.now()-15*60000&&!options.retry)return {state:'unavailable',reportId:latest.id,message:'官网最近读取未完成，将依据已有资料继续。'+(latest.error??'请人工核对官网。')};
  const key='agent-research:'+createHash('sha256').update(customerId+'|'+url+'|'+(options.requestKey??String(Math.floor(Date.now()/(24*3600000))))).digest('hex');
  let id:string;
@@ -31,7 +37,7 @@ export async function ensureCustomerResearch(customerId:string,actor:AuthUser,op
   const current=await WebsiteResearch.findById(id);if(!current||String(current.customerId)!==customerId)throw new WebsiteError('link_changed','官网资料关联已变化');
   if(['failed','cancelled'].includes(current.state)&&options.retry)await controlWebsiteResearch(id,'retry',current.version,actor);
   const started=Date.now();const check=async()=>{await authorized();if(Date.now()-started>80000)throw new WebsiteError('timeout','官网读取超过本轮时限，请人工核对');};
-  const fetcher:WebsiteFetcher=async(value,kind)=>{await check();const result=await (options.fetcher??fetchWebsite)(value,kind);await check();return result;};
+  const fetcher:WebsiteFetcher=async(value,kind)=>{await check();const result=await (options.fetcher??fetchWithArchiveFallback)(value,kind);await check();return result;};
   await processWebsiteResearch(id,fetcher);
   let result=await WebsiteResearch.findById(id);
   while(result&&['queued','running'].includes(result.state)&&Date.now()-started<80000){await check();await new Promise(resolve=>setTimeout(resolve,250));result=await WebsiteResearch.findById(id);}

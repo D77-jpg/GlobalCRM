@@ -88,9 +88,56 @@ export async function previewBrandPackage(input: unknown, actor: AuthUser) {
   const { project, filter } = await brandPackageScope(actor);
   const bundle = brandPackageInput.parse(input);
   const current = await ProjectPlaybook.findOne(filter).select('+activePackage').lean();
-  return { projectName: project.name, expectedVersion: current?.version ?? 0, release: bundle.release,
-    currentRelease: current?.activePackage?.release ?? null, brandKey: bundle.profile.brandKey,
-    signatureTitle: bundle.profile.signatureTitle ?? null, cardCount: bundle.playbook.cards.length };
+  const currentIds = new Set([...(current?.segments ?? []), ...(current?.preferences ?? [])].map((c) => c.id));
+  const incomingIds = new Set(bundle.playbook.cards.map((c) => c.id));
+  const addedCards = [...incomingIds].filter((id) => !currentIds.has(id)).length;
+  const removedCards = [...currentIds].filter((id) => !incomingIds.has(id)).length;
+  const updatedCards = [...incomingIds].filter((id) => currentIds.has(id)).length;
+  return {
+    projectName: project.name,
+    expectedVersion: current?.version ?? 0,
+    release: bundle.release,
+    currentRelease: current?.activePackage?.release ?? null,
+    brandKey: bundle.profile.brandKey,
+    signatureTitle: bundle.profile.signatureTitle ?? null,
+    cardCount: bundle.playbook.cards.length,
+    diff: { addedCards, updatedCards, removedCards },
+  };
+}
+
+export async function exportBrandPackage(actor: AuthUser) {
+  const { project, filter } = await brandPackageScope(actor);
+  const current = await ProjectPlaybook.findOne(filter).select('+activePackage').lean();
+  const profile = resolveProjectSalesProfile(project as unknown as ProjectLike);
+  const cards = [
+    ...(current?.segments ?? []).map((c) => ({ ...c, kind: 'segment' as const })),
+    ...(current?.preferences ?? []).map((c) => ({ ...c, kind: 'preference' as const })),
+  ];
+  return {
+    schemaVersion: 1 as const,
+    release: current?.activePackage?.release ?? `export-${new Date().toISOString().slice(0, 10)}`,
+    profile: {
+      brandKey: profile.key,
+      label: profile.label,
+      identity: profile.identity,
+      offerSummary: profile.offerSummary,
+      outreachFocus: profile.outreachFocus,
+      avoidTopics: profile.avoidTopics,
+      insightLabel: profile.insightLabel,
+      insightExamples: profile.insightExamples,
+      proofExamples: profile.proofExamples,
+      ctaExamples: profile.ctaExamples,
+      subjectFocus: profile.subjectFocus,
+      signatureTitle: profile.signature.title,
+      signatureLines: profile.signature.lines,
+      ...(profile.approvedActions?.length ? { approvedActions: profile.approvedActions } : {}),
+      ...(profile.approvedOffers?.length ? { approvedOffers: profile.approvedOffers } : {}),
+      ...(profile.industryRules?.length ? { industryRules: profile.industryRules } : {}),
+      ...(profile.defaultLetterSubject ? { defaultLetterSubject: profile.defaultLetterSubject } : {}),
+      ...(profile.defaultLetterTemplate ? { defaultLetterTemplate: profile.defaultLetterTemplate } : {}),
+    },
+    playbook: { cards },
+  };
 }
 
 export async function applyBrandPackage(input: unknown, actor: AuthUser) {

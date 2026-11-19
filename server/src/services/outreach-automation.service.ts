@@ -11,6 +11,7 @@ import {
 import type { AuthUser } from '../types/express';
 import { ApiError } from '../utils/ApiError';
 import { customerScope, requireProjectId } from '../utils/access';
+import { resolveBuyerTimezone } from '../utils/timezone';
 import { createLogger } from '../config/logger';
 import { getCurrentMailSender } from './mail-account.service';
 import { queueOutreachStep } from './agent/outreach-sequence.service';
@@ -33,6 +34,7 @@ const MAX_QUEUE_ROWS = 80;
 
 export interface OutreachAutomationConfigDto {
   rolloutMode: 'shadow' | 'pilot' | 'active';
+  legacyModeUnset?: boolean;
   id: string;
   enabled: boolean;
   pausedReason?: string;
@@ -41,6 +43,9 @@ export interface OutreachAutomationConfigDto {
   windowStart: string;
   windowEnd: string;
   timezone: string;
+  useBuyerTimezone: boolean;
+  minPacingSeconds: number;
+  maxPacingSeconds: number;
   version: number;
 }
 
@@ -108,6 +113,9 @@ export interface OutreachAutomationConfigInput {
   windowStart: string;
   windowEnd: string;
   timezone: string;
+  useBuyerTimezone?: boolean;
+  minPacingSeconds?: number;
+  maxPacingSeconds?: number;
 }
 
 const dayFormatter = (timezone: string): Intl.DateTimeFormat => {
@@ -140,11 +148,12 @@ export function localClock(timezone: string, now = new Date()): { minutes: numbe
 }
 
 export function isWithinSendWindow(
-  config: Pick<OutreachAutomationConfigDto, 'windowStart' | 'windowEnd' | 'timezone'>,
+  config: Pick<OutreachAutomationConfigDto, 'windowStart' | 'windowEnd' | 'timezone'> & { workdays?: number[] },
   now = new Date(),
 ): boolean {
   const { minutes, weekday } = localClock(config.timezone, now);
-  if (weekday === 0 || weekday === 6) return false;
+  const workdays = config.workdays ?? [1, 2, 3, 4, 5];
+  if (!workdays.includes(weekday)) return false;
   const [startHour, startMinute] = config.windowStart.split(':').map(Number);
   const [endHour, endMinute] = config.windowEnd.split(':').map(Number);
   const start = startHour * 60 + startMinute;
@@ -152,9 +161,9 @@ export function isWithinSendWindow(
   return start <= end ? minutes >= start && minutes <= end : minutes >= start || minutes <= end;
 }
 
-/** 下一个实际可发送的时间；周末和夜间会顺延到下一个工作日时段。 */
+/** 下一个实际可发送的时间；周末/非当地工作日和夜间会顺延到下一个工作日时段（自动兼容夏令时）。 */
 export function nextSendWindow(
-  config: Pick<OutreachAutomationConfigDto, 'windowStart' | 'windowEnd' | 'timezone'>,
+  config: Pick<OutreachAutomationConfigDto, 'windowStart' | 'windowEnd' | 'timezone'> & { workdays?: number[] },
   from: Date,
 ): Date {
   const startAt = new Date(from);
@@ -170,12 +179,16 @@ function configDto(doc: InstanceType<typeof OutreachAutomationConfig>): Outreach
     id: String(doc._id),
     enabled: doc.enabled,
     rolloutMode: doc.rolloutMode ?? 'active',
+    ...(!doc.rolloutMode ? { legacyModeUnset: true } : {}),
     ...(doc.pausedReason ? { pausedReason: doc.pausedReason } : {}),
     dailyLimit: Number(doc.dailyLimit),
     perDomainLimit: Number(doc.perDomainLimit),
     windowStart: doc.windowStart,
     windowEnd: doc.windowEnd,
     timezone: doc.timezone,
+    useBuyerTimezone: Boolean(doc.useBuyerTimezone),
+    minPacingSeconds: Number(doc.minPacingSeconds ?? 90),
+    maxPacingSeconds: Number(doc.maxPacingSeconds ?? 240),
     version: Number(doc.version),
   };
 }
@@ -316,14 +329,27 @@ async function domainAtLimit(campaignId: Types.ObjectId, email: string, limit: n
   return letters.filter((letter) => String(letter.recipientEmail).toLowerCase().endsWith(`@${domain}`)).length >= limit;
 }
 
-/** Keep a safe amount of time between automatic sends, even if many rows are due. */
-async function campaignPacingReady(campaignId: Types.ObjectId, now: Date): Promise<boolean> {
+/** Compute next randomized staggered send interval (seconds) within [min, max]. */
+export function nextRandomizedPacingMs(minSeconds = 90, maxSeconds = 240, rng = Math.random): number {
+  const lo = Math.max(30, Math.trunc(minSeconds));
+  const hi = Math.max(lo, Math.trunc(maxSeconds));
+  const jitter = lo + Math.floor(rng() * (hi - lo + 1));
+  return jitter * 1000;
+}
+
+/** Keep a randomized staggered interval between automatic sends, even if many rows are due. */
+async function campaignPacingReady(
+  config: Pick<InstanceType<typeof OutreachAutomationConfig>, '_id' | 'nextPacingAt' | 'minPacingSeconds'>,
+  now: Date,
+): Promise<boolean> {
+  if (config.nextPacingAt && now.getTime() < new Date(config.nextPacingAt).getTime()) return false;
   const last = await DevelopmentLetter.findOne({
-    automationCampaignId: campaignId,
+    automationCampaignId: config._id,
     status: { $in: ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying'] },
   }).sort({ sentAt: -1, createdAt: -1 }).select('createdAt sentAt').lean();
   const at = last?.sentAt ?? last?.createdAt;
-  return !at || now.getTime() - new Date(at).getTime() >= 60_000;
+  const minFloorMs = Math.max(60_000, Number(config.minPacingSeconds ?? 60) * 1000);
+  return !at || now.getTime() - new Date(at).getTime() >= minFloorMs;
 }
 
 async function ensureEnrollment(
@@ -547,6 +573,9 @@ export async function saveOutreachAutomationConfig(
         windowStart: input.windowStart,
         windowEnd: input.windowEnd,
         timezone: input.timezone,
+        ...(input.useBuyerTimezone !== undefined ? { useBuyerTimezone: input.useBuyerTimezone } : {}),
+        ...(input.minPacingSeconds !== undefined ? { minPacingSeconds: input.minPacingSeconds } : {}),
+        ...(input.maxPacingSeconds !== undefined ? { maxPacingSeconds: Math.max(input.maxPacingSeconds, input.minPacingSeconds ?? 90) } : {}),
         ...(input.rolloutMode ? { rolloutMode: input.rolloutMode } : {}),
       },
       $inc: { version: 1 },
@@ -567,6 +596,56 @@ export async function getOutreachResults(actor: AuthUser, targetUserId?: string)
   const config = await getConfig(actor, target.id);
   const project = await Project.findById(config.projectId).select('organizationId').lean();
   return campaignResults(config.projectId, config._id, project?.organizationId?.toString());
+}
+
+/** 升级前核对已有自动开发任务和排队邮件，明确哪些旧配置缺少 rolloutMode 字段。 */
+export async function auditLegacyOutreachCampaigns(actor: AuthUser) {
+  if (actor.role !== 'admin') throw ApiError.forbidden('仅管理员可执行自动开发升级检查');
+  const projectId = requireProjectId(actor);
+  const [configs, queuedLetters] = await Promise.all([
+    OutreachAutomationConfig.find({ projectId }).select('_id userId enabled rolloutMode dailyLimit timezone pausedReason').lean(),
+    DevelopmentLetter.find({
+      projectId,
+      automationCampaignId: { $exists: true, $ne: null },
+      status: { $in: ['queued', 'scheduled', 'retrying'] },
+    }).select('_id automationCampaignId outreachStep status nextAttemptAt').limit(500).lean(),
+  ]);
+  const legacyUnset = configs.filter((c) => !c.rolloutMode);
+  const countsByMode = {
+    shadow: configs.filter((c) => c.rolloutMode === 'shadow').length,
+    pilot: configs.filter((c) => c.rolloutMode === 'pilot').length,
+    active: configs.filter((c) => c.rolloutMode === 'active').length,
+    legacyUnset: legacyUnset.length,
+  };
+  return {
+    projectId: String(projectId),
+    totalCampaigns: configs.length,
+    countsByMode,
+    legacyUnsetCampaigns: legacyUnset.map((c) => ({
+      id: String(c._id),
+      userId: String(c.userId),
+      enabled: c.enabled,
+      dailyLimit: c.dailyLimit,
+      effectiveModeBeforeMigration: 'active',
+    })),
+    pendingQueuedLetters: queuedLetters.length,
+    recommendation: legacyUnset.length > 0
+      ? `发现 ${legacyUnset.length} 条历史自动开发配置未设置 rolloutMode（当前会按正式发送 active 处理），建议升级前显式归类到 shadow、pilot 或 active。`
+      : '全部自动开发配置均已明确设置 rolloutMode，可安全升级。',
+  };
+}
+
+export async function migrateLegacyOutreachModes(
+  targetMode: 'shadow' | 'pilot' | 'active',
+  actor: AuthUser,
+) {
+  if (actor.role !== 'admin') throw ApiError.forbidden('仅管理员可批量设置历史自动开发模式');
+  const projectId = requireProjectId(actor);
+  const result = await OutreachAutomationConfig.updateMany(
+    { projectId, $or: [{ rolloutMode: { $exists: false } }, { rolloutMode: null }] },
+    { $set: { rolloutMode: targetMode }, $inc: { version: 1 } },
+  );
+  return { modifiedCount: result.modifiedCount, targetMode };
 }
 
 async function assertMailboxReady(actor: AuthUser, targetUserId?: string) {
@@ -867,10 +946,21 @@ async function processEnrollment(
     }
     return { sent: false };
   }
-  if (!allowSend) {
-    // 夜间/周末仍然可以准备下一封草稿，但不能越过发送时段。
+  // Per-recipient local timezone, DST, and local working day check
+  const buyerSchedule = config.useBuyerTimezone || customer.timezone
+    ? resolveBuyerTimezone({ timezone: customer.timezone, country: customer.country, address: customer.address, phone: customer.phone }, config.timezone)
+    : { timezone: config.timezone, source: 'fallback' as const, workdays: [1, 2, 3, 4, 5] };
+  const recipientWindow = {
+    windowStart: config.windowStart,
+    windowEnd: config.windowEnd,
+    timezone: buyerSchedule.timezone,
+    workdays: buyerSchedule.workdays,
+  };
+  const recipientWindowOpen = isWithinSendWindow(recipientWindow, now);
+  if ((!config.useBuyerTimezone && !customer.timezone && !allowSend) || !recipientWindowOpen) {
+    // 夜间/非当地工作日仍然可以准备下一封草稿，但不能越过买家当地发送时段。
     await markEnrollment(enrollment._id, {
-      nextRunAt: nextSendWindow(configDto(config), now),
+      nextRunAt: nextSendWindow(recipientWindow, now),
       lastError: null,
     });
     return { sent: false };
@@ -906,6 +996,8 @@ async function processEnrollment(
       queuedStep: undefined,
       queuedAt: undefined,
     });
+    const nextPacingAt = new Date(now.getTime() + nextRandomizedPacingMs(config.minPacingSeconds, config.maxPacingSeconds));
+    await OutreachAutomationConfig.updateOne({ _id: config._id }, { $set: { nextPacingAt } }).catch(() => undefined);
     logger.info(`自动开发已发送：customer=${String(customer._id)} step=${sentStep}`);
     return { sent: true };
   } catch (error) {
@@ -931,7 +1023,7 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
     const configs = await OutreachAutomationConfig.find({ enabled: true }).sort({ lastTickAt: 1, _id: 1 }).limit(50);
     for (const config of configs) {
       await OutreachAutomationConfig.updateOne({ _id: config._id }, { $set: { lastTickAt: now } });
-      if (!await campaignPacingReady(config._id, now)) continue;
+      if (!await campaignPacingReady(config, now)) continue;
       let actor: AuthUser;
       try {
         actor = await getActorForConfig(config);

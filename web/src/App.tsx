@@ -12,14 +12,17 @@ import { TooltipProvider } from '@/components/ui/popover';
 import { Toaster } from '@/components/ui/sonner';
 import { router } from '@/router';
 import { AutoTranslate } from '@/components/i18n/auto-translate';
+import { ErrorBoundary } from '@/components/common/error-boundary';
 
 export function App(): React.JSX.Element {
   return (
-    <TooltipProvider delayDuration={250} skipDelayDuration={400}>
-      <RouterProvider router={router} />
-      <AutoTranslate />
-      <Toaster />
-    </TooltipProvider>
+    <ErrorBoundary>
+      <TooltipProvider delayDuration={250} skipDelayDuration={400}>
+        <RouterProvider router={router} />
+        <AutoTranslate />
+        <Toaster />
+      </TooltipProvider>
+    </ErrorBoundary>
   );
 }
 

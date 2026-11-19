@@ -1,7 +1,7 @@
 import {guardedModelFetch} from './model-transport';
 import env from '../../config/env';
 import { AGENT_CUSTOMER_FIELDS } from '../../models';
-import type { ProjectPromptContext } from '../project-profile';
+import { OUTREACH_WRITING_VERSION_LEGACY, type ProjectPromptContext } from '../project-profile';
 import {
   AgentProviderError,
   type AgentInputItem,
@@ -183,13 +183,25 @@ function playbookGuidance(profile: ProjectPromptContext): string {
 }
 
 function outreachWritingRules(profile: ProjectPromptContext): string {
+  if (profile.writingVersion === OUTREACH_WRITING_VERSION_LEGACY) {
+    return [
+      `你代表的是${profile.identity}。${profile.offerSummary} 围绕${profile.outreachFocus}写一封简洁专业的英文开发信，避开${profile.avoidTopics}。`,
+      '分三段：第一段说明为什么联系客户；第二段介绍我们能提供的产品或服务（仅引用已发布知识）；第三段提出一个礼貌的下一步问题。签名由 CRM 追加。',
+    ].join('\n');
+  }
+  const enabledOffers = (profile.approvedOffers ?? []).filter((o) => o.enabled);
+  const offerLines = enabledOffers.length
+    ? [`项目逐项授权的小提议：${enabledOffers.map((o) => `${o.label}（${o.actionText}${o.conditions ? `；条件：${o.conditions}` : ''}${!o.allowsFree ? '；不得承诺免费' : ''}${!o.allowsShipping ? '；不得承诺免运费' : ''}）`).join('｜')}。只能使用已授权且有依据的一项，禁止擅自承诺免费、寄样或运费。`]
+    : profile.approvedActions?.length
+      ? [`项目许可的沟通动作：${profile.approvedActions.join('；')}。只用与当前客户匹配的一项，能力与商务条件仍须有已发布证据。`]
+      : [];
   return [
     `你代表的是${profile.identity}。${profile.offerSummary} 围绕${profile.outreachFocus}写信，避开${profile.avoidTopics}。`,
     '英文正文以 80–120 词和三个短段为目标，称呼和系统签名另计。信息少时可以更短。已知姓名用名字，只有公司名用 Dear [Company] team，避免编造人名。',
     '第一段从一条能核实的客户观察切入，只写一个产品或系列。保留准确的名称、型号和单位。用自然承接把它带到一个待确认的合作场景，官网细节单独成句。避免机械使用 Your website shows。资料少时直接说明与已知行业相关的来意，通用邮箱可请对方转给负责人。',
     '第二段讲清我们是谁和一项买家读完就能理解的帮助，用已发布知识中的一条证明。按联系人明确职位调整表达，品牌方侧重产品体验，采购侧重规格、补货和一致性。不要从官网信息推断采购意向，也不要把能力扩写成客户专属承诺。',
     '第三段只问一个低门槛问题，客户几秒能答。可提出项目已授权的下一步。首封正文省略未经证实的报价、交期、MOQ、认证、产能和免费承诺。签名由 CRM 追加。',
-    ...(profile.approvedActions?.length ? [`项目许可的沟通动作：${profile.approvedActions.join('；')}。只用与当前客户匹配的一项，能力与商务条件仍须有已发布证据。`] : []),
+    ...offerLines,
     '主题围绕同一个方向，3–7 个词。有可信产品名可以用，没有就用实际讨论主题。避免 Re:/Fwd:、先导性群发客套话和重复表述。Playbook 只提供表达方向，证据来自客户资料和本项目确认的知识。',
   ].join('\n') + playbookGuidance(profile);
 }

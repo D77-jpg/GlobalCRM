@@ -111,12 +111,17 @@ export function createApp(): Application {
   });
   app.use(compression());
 
-  /* ---------- 请求体解析 ----------
-   * 25MB 上限：Excel 导入走前端解析后提交 JSON（5000 行客户数据通常在 3~5MB 内）；
-   * 客户附件以 base64 JSON 提交，单个文件上限 15MB（base64 膨胀约 33% → ~20MB），故放宽到 25MB。
+  /* ---------- 请求体解析（按路由分层额度） ----------
+   * 普通 API 默认上限 2MB，防止全局 25MB 放大内存/DoS 风险；
+   * 仅上传与导入相关路由显式放宽到 25MB（Excel 导入、base64 附件、项目图片、知识库文档）。
    */
-  app.use(express.json({ limit: '25mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+  const largeBodyJson = express.json({ limit: '25mb' });
+  const largeBodyUrl = express.urlencoded({ extended: true, limit: '25mb' });
+  const defaultBodyJson = express.json({ limit: '2mb' });
+  const defaultBodyUrl = express.urlencoded({ extended: true, limit: '2mb' });
+  const LARGE_BODY_ROUTE = /^\/api\/(?:customers\/import|customers\/[^/]+\/attachments|attachments|knowledge|customs\/import|prospecting\/import|projects|agent\/playbooks)/;
+  app.use((req, res, next) => (LARGE_BODY_ROUTE.test(req.path) ? largeBodyJson : defaultBodyJson)(req, res, next));
+  app.use((req, res, next) => (LARGE_BODY_ROUTE.test(req.path) ? largeBodyUrl : defaultBodyUrl)(req, res, next));
 
   /* ---------- 访问日志 ---------- */
   app.use(morgan((tokens,req,res)=>{safeLog('info','http',{status:Number(tokens.status(req,res)),durationMs:Number(tokens['response-time'](req,res))});return undefined;},{skip:req=>req.originalUrl.startsWith('/api/health')||req.originalUrl.startsWith('/api/tracking/')}));
@@ -124,20 +129,32 @@ export function createApp(): Application {
   /* ---------- 路由 ---------- */
   app.use('/api', apiLimiter, apiRoutes);
   if (env.METRICS_ENABLED) {
-    app.get('/api/metrics', (_req, res) => {
+    app.get('/api/metrics', apiLimiter, (req, res, next) => {
+      const configuredToken = process.env.METRICS_TOKEN?.trim();
+      const authHeader = req.get('authorization') ?? '';
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const headerToken = req.get('x-metrics-token')?.trim() ?? '';
+      const remote = (req.ip ?? req.socket?.remoteAddress ?? '').replace(/^::ffff:/, '');
+      const isLoopback = remote === '127.0.0.1' || remote === '::1';
+      if (configuredToken) {
+        if (bearer !== configuredToken && headerToken !== configuredToken) {
+          return next(ApiError.forbidden('监控指标访问未授权'));
+        }
+      } else if (!isLoopback && process.env.METRICS_ALLOW_PUBLIC !== 'true') {
+        return next(ApiError.forbidden('监控指标仅允许本机或配置 METRICS_TOKEN 访问'));
+      }
       res.type('text/plain; version=0.0.4; charset=utf-8').send(renderMetrics());
     });
   }
 
-  // 根路径给个友好提示，避免打开 http://localhost:5000 看到 404 一头雾水
+  // 根路径只返回最小版本提示，不暴露运行环境细节
   app.get('/', (_req, res) => {
     res.json({
       success: true,
       data: {
         name: `${PRODUCT_NAME} API`,
         version: '2.6.0',
-        docs: '/api/health, /api/meta',
-        env: env.NODE_ENV,
+        docs: '/api/health',
       },
     });
   });

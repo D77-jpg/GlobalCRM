@@ -22,6 +22,14 @@ export interface IOutreachAutomationConfig {
   windowStart: string;
   windowEnd: string;
   timezone: string;
+  /** 按每位收件人所在时区、夏令时和当地工作日排程；未填时区时按客户国家/地址推断。 */
+  useBuyerTimezone?: boolean;
+  /** 随机错峰发送最小间隔（秒），默认 90 秒 */
+  minPacingSeconds?: number;
+  /** 随机错峰发送最大间隔（秒），默认 240 秒 */
+  maxPacingSeconds?: number;
+  /** 本活动下一次允许发送的错峰时间 */
+  nextPacingAt?: Date;
   version: number;
   lastTickAt?: Date;
   createdAt: Date;
@@ -63,6 +71,10 @@ const configSchema = new Schema<IOutreachAutomationConfig>(
     windowStart: { type: String, default: '09:30', match: /^\d{2}:\d{2}$/ },
     windowEnd: { type: String, default: '17:30', match: /^\d{2}:\d{2}$/ },
     timezone: { type: String, default: 'Asia/Shanghai', maxlength: 80 },
+    useBuyerTimezone: { type: Boolean, default: false },
+    minPacingSeconds: { type: Number, default: 90, min: 30, max: 3600 },
+    maxPacingSeconds: { type: Number, default: 240, min: 60, max: 7200 },
+    nextPacingAt: Date,
     version: { type: Number, default: 0, min: 0 },
     lastTickAt: Date,
   },

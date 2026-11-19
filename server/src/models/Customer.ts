@@ -39,6 +39,18 @@ export interface ICustomer {
   address?: string;
   /** 国家 / 地区 */
   country?: string;
+  /** 买家所在 IANA 时区（如 America/New_York、Europe/Berlin）；未填时按国家/地址推断 */
+  timezone?: string;
+  /** 备选联系人（如从官网/Hunter 发现的品牌或采购负责人，不覆盖主邮箱） */
+  alternateContacts?: {
+    name?: string;
+    email: string;
+    title?: string;
+    roleCategory?: 'brand' | 'procurement' | 'other';
+    source: string;
+    confidence?: number;
+    discoveredAt?: Date;
+  }[];
   /** 官网 */
   website?: string;
   /** 客户等级，例如 A / B / C */
@@ -160,6 +172,19 @@ const CustomerSchema = new Schema<ICustomer, CustomerModel, ICustomerMethods>(
     industry: { type: String, trim: true, maxlength: 120, index: true },
     address: { type: String, trim: true, maxlength: 500 },
     country: { type: String, trim: true, maxlength: 120 },
+    timezone: { type: String, trim: true, maxlength: 80 },
+    alternateContacts: {
+      type: [{
+        name: { type: String, trim: true, maxlength: 120 },
+        email: { type: String, trim: true, lowercase: true, maxlength: 200, required: true },
+        title: { type: String, trim: true, maxlength: 120 },
+        roleCategory: { type: String, enum: ['brand', 'procurement', 'other'], default: 'other' },
+        source: { type: String, trim: true, maxlength: 60, required: true },
+        confidence: { type: Number, min: 0, max: 100 },
+        discoveredAt: { type: Date, default: Date.now },
+      }],
+      default: undefined,
+    },
     website: { type: String, trim: true, maxlength: 300 },
     grade: { type: String, trim: true, maxlength: 20 },
     notes: { type: String, trim: true, maxlength: 5000 },

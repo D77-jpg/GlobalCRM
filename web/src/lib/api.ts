@@ -200,10 +200,30 @@ interface ApiFailureLike {
 
 /* ---------------------------- 语义化请求方法 ---------------------------- */
 
-/** 请求结果统一为解包后的 data */
+const inflightGets = new Map<string, Promise<unknown>>();
+
+function getDedupeKey(url: string, config?: AxiosRequestConfig): string | null {
+  // Never dedupe aborted/custom-signal or custom-responseType requests
+  if (config?.signal || (config?.responseType && config.responseType !== 'json')) return null;
+  const projectId = projectScope ?? '';
+  const params = config?.params ? JSON.stringify(config.params) : '';
+  return `${projectId}|${url}|${params}`;
+}
+
+/** 请求结果统一为解包后的 data（相同并发 GET 自动去重，避免重复瀑布请求） */
 export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-  const response = await http.get<unknown, { data: T }>(url, config);
-  return response.data as T;
+  const key = getDedupeKey(url, config);
+  if (key && inflightGets.has(key)) {
+    return inflightGets.get(key) as Promise<T>;
+  }
+  const req = http
+    .get<unknown, { data: T }>(url, config)
+    .then((response) => response.data as T)
+    .finally(() => {
+      if (key) inflightGets.delete(key);
+    });
+  if (key) inflightGets.set(key, req);
+  return req;
 }
 
 export async function apiPost<T>(url: string, body?: unknown, config?: AxiosRequestConfig): Promise<T> {

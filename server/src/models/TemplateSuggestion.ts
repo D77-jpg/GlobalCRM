@@ -13,7 +13,7 @@ export interface TemplateSuggestionSourceSummary {
   bounceCount: number;
   minimumSampleSize: number;
   sampleSufficient: boolean;
-  evidence: 'project-scoped-letter-count';
+  evidence: 'project-scoped-letter-count' | 'project-scoped-funnel-attribution';
   referenceTemplateId: string;
 }
 
@@ -60,7 +60,7 @@ const schema = new Schema<ITemplateSuggestion>({
       bounceCount: { type: Number, required: true, min: 0 },
       minimumSampleSize: { type: Number, required: true, min: 1 },
       sampleSufficient: { type: Boolean, required: true },
-      evidence: { type: String, enum: ['project-scoped-letter-count'], required: true },
+      evidence: { type: String, enum: ['project-scoped-letter-count', 'project-scoped-funnel-attribution'], required: true },
       referenceTemplateId: { type: String, required: true, maxlength: 24 },
     }, { _id: false }), required: true,
   },

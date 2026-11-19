@@ -24,6 +24,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { apiGet, apiPost, apiPut, toErrorMessage } from '@/lib/api';
 import { formatDateTime, formatRelative } from '@/lib/format';
@@ -219,7 +220,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
   React.useEffect(() => {
     setLoading(true);
     void load();
-    const timer = window.setInterval(() => void load(true), 5000);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(true); }, 5000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -249,6 +250,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
         windowStart: form.windowStart,
         windowEnd: form.windowEnd,
         timezone: form.timezone,
+        useBuyerTimezone: Boolean(form.useBuyerTimezone),
+        minPacingSeconds: form.minPacingSeconds ?? 90,
+        maxPacingSeconds: form.maxPacingSeconds ?? 240,
       });
       setOverview(next);
       setForm(next.config);
@@ -506,13 +510,48 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       <p className="text-[11px] text-muted-foreground">仅工作日发送；时区见下方。</p>
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="auto-timezone">发送时区</Label>
+                      <Label htmlFor="auto-timezone">默认发送时区</Label>
                       <Select value={form.timezone} onValueChange={(value) => patch({ timezone: value })}>
                         <SelectTrigger id="auto-timezone"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {TIMEZONES.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="flex items-start justify-between gap-2 rounded-md border border-border/70 bg-muted/20 p-2.5">
+                      <div className="min-w-0">
+                        <Label htmlFor="auto-buyer-tz" className="cursor-pointer text-xs font-medium">按买家当地时间发送</Label>
+                        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">按收件人国家/时区与当地工作日（含夏令时）排程；缺少时区时回退上方默认时区。</p>
+                      </div>
+                      <Switch
+                        id="auto-buyer-tz"
+                        checked={Boolean(form.useBuyerTimezone)}
+                        onCheckedChange={(checked) => patch({ useBuyerTimezone: checked })}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="auto-min-pacing">最小错峰（秒）</Label>
+                        <Input
+                          id="auto-min-pacing"
+                          type="number"
+                          min={30}
+                          max={3600}
+                          value={form.minPacingSeconds ?? 90}
+                          onChange={(e) => patch({ minPacingSeconds: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="auto-max-pacing">最大错峰（秒）</Label>
+                        <Input
+                          id="auto-max-pacing"
+                          type="number"
+                          min={60}
+                          max={3600}
+                          value={form.maxPacingSeconds ?? 240}
+                          onChange={(e) => patch({ maxPacingSeconds: Number(e.target.value) })}
+                        />
+                      </div>
                     </div>
                     <Button type="button" className="w-full" disabled={!dirty || busy} onClick={() => void save()}>
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
@@ -610,7 +649,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
             </Card>
           </div>
 
-          <OutreachResultsPanel key={`${activeProjectId}-${ownerId}`} endpoint={scoped('/outreach-automation/results')} />
+          <OutreachResultsPanel key={`${activeProjectId}-${ownerId}`} endpoint={scoped('/outreach-automation/results')} isAdmin={isAdmin} />
+          {isAdmin ? <WritingReleaseCard key={`release-${activeProjectId}`} /> : null}
 
           {overview.recent.length ? (
             <Card>
@@ -657,40 +697,227 @@ export function OutreachAutomationPage(): React.JSX.Element {
   );
 }
 interface OutreachResults {
-  groups: { angle: string; step: number; version: string; sent: number; hardBounces: number; opened: number; clicked: number;
-    proxyOpens: number; scannerClicks: number; replies: number; inquiries: number; sampleRequests: number }[];
+  totalMatched?: number;
+  analyzedCount?: number;
+  truncated?: boolean;
+  denominatorNote?: string;
+  complaintCoverageNotice?: string;
+  groups: {
+    angle: string;
+    preferenceName?: string;
+    step: number;
+    version: string;
+    sent: number;
+    hardBounces: number;
+    optOuts?: number;
+    complaints?: number;
+    opened: number;
+    clicked: number;
+    proxyOpens: number;
+    scannerClicks: number;
+    replies: number;
+    interested?: number;
+    referrals?: number;
+    notInterested?: number;
+    autoReplies?: number;
+    inquiries: number;
+    sampleRequests: number;
+    humanEdited?: number;
+    quoted?: number;
+    won?: number;
+    highOpenLowReply?: boolean;
+    recommendation?: 'keep' | 'rewrite' | 'pause' | 'insufficient_sample';
+    recommendationReason?: string;
+  }[];
+  unmatchedReplies?: { total: number; note: string };
   optOuts: number;
   observedComplaints: number;
   observedBounces: number;
 }
 
-function OutreachResultsPanel({ endpoint }: { endpoint: string }) {
+const RECOMMENDATION_BADGE: Record<string, { label: string; variant: 'developed' | 'warning' | 'failed' | 'outline' }> = {
+  keep: { label: '建议保留', variant: 'developed' },
+  rewrite: { label: '建议改写', variant: 'warning' },
+  pause: { label: '建议停用', variant: 'failed' },
+  insufficient_sample: { label: '样本不足', variant: 'outline' },
+};
+
+function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin: boolean }) {
   const [data, setData] = React.useState<OutreachResults>();
   const [error, setError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
+  const [harvesting, setHarvesting] = React.useState(false);
+
   async function load() {
     setLoading(true); setError('');
     try { setData(await apiGet<OutreachResults>(endpoint)); }
     catch (reason) { setError(toErrorMessage(reason, '效果数据加载失败')); }
     finally { setLoading(false); }
   }
+
+  async function harvestExemplars() {
+    setHarvesting(true);
+    try {
+      const res = await apiPost<{ harvested: number }>('/outreach-automation/exemplars/harvest', { days: 60 });
+      toast.success(`已回流 ${res.harvested} 篇脱敏优秀邮件范本`, { description: '后续写信与英文模板建议将参考已验证表现良好的范本。' });
+    } catch (reason) {
+      toast.error('回流范本失败', { description: toErrorMessage(reason, '请稍后重试') });
+    } finally {
+      setHarvesting(false);
+    }
+  }
+
   return <Card>
-    <CardHeader className="flex flex-row items-start justify-between gap-2 pb-3">
-      <div className="space-y-1"><CardTitle className="text-sm">近 30 天自动开发效果</CardTitle>
-        <CardDescription>按切入点、步骤和写信版本统计。回复按邮件关联，投诉按收到的反馈统计。</CardDescription></div>
-      <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>{loading ? '加载中' : data ? '刷新' : '查看'}</Button>
+    <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
+      <div className="space-y-1"><CardTitle className="text-sm">近 30 天自动开发效果与归因复盘</CardTitle>
+        <CardDescription>按切入点、采购偏好、步骤和写信版本统计；自动标记「打开多、回复少」并给出保留/改写/停用建议。</CardDescription></div>
+      <div className="flex items-center gap-2">
+        {isAdmin ? (
+          <Button size="sm" variant="outline" onClick={() => void harvestExemplars()} disabled={harvesting}>
+            {harvesting ? '回流中…' : '回流优秀范本'}
+          </Button>
+        ) : null}
+        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>{loading ? '加载中' : data ? '刷新' : '查看'}</Button>
+      </div>
     </CardHeader>
     {error && <CardContent><p role="alert" className="text-sm text-destructive">{error}</p></CardContent>}
     {data && <CardContent className="space-y-3">
-      <p className="text-sm text-muted-foreground">观察到 {data.observedBounces} 个收件地址硬退信 · {data.optOuts} 个退订 · {data.observedComplaints} 个投诉</p>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <p className="text-sm text-foreground">
+          观察到 {data.observedBounces} 个收件地址硬退信 · {data.optOuts} 个退订 · {data.observedComplaints} 个投诉
+          {data.unmatchedReplies?.total ? ` · 另有 ${data.unmatchedReplies.total} 封未匹配到具体开发信的来信` : ''}
+        </p>
+        {data.denominatorNote ? <p>{data.denominatorNote}</p> : null}
+        {data.complaintCoverageNotice ? <p>{data.complaintCoverageNotice}</p> : null}
+        {data.truncated ? <p className="text-amber-700 dark:text-amber-300">注：匹配记录超出单次窗口上限，已按最新发送记录优先统计。</p> : null}
+      </div>
       {data.groups.length ? <div className="overflow-x-auto"><Table>
-        <TableHeader><TableRow>{['切入点', '已发', '有回复', '询价', '样品请求', '打开 / 点击', '代理 / 扫描'].map(title => <TableHead key={title}>{title}</TableHead>)}</TableRow></TableHeader>
-        <TableBody>{data.groups.map(row => <TableRow key={`${row.angle}-${row.step}-${row.version}`}>
-          <TableCell><p className="font-medium">{row.angle}</p><p className="text-xs text-muted-foreground">第 {row.step || '—'} 封 · {row.version}</p></TableCell>
-          <TableCell>{row.sent}</TableCell><TableCell>{row.replies}</TableCell><TableCell>{row.inquiries}</TableCell><TableCell>{row.sampleRequests}</TableCell>
-          <TableCell>{row.opened} / {row.clicked}</TableCell><TableCell>{row.proxyOpens} / {row.scannerClicks}</TableCell>
-        </TableRow>)}</TableBody>
+        <TableHeader><TableRow>{['切入点 / 偏好', '已发（改稿）', '有效回复', '询价 / 要样', '报价 / 成交', '打开 / 点击（代理）', '负反馈（退订/退信）', '复盘建议'].map(title => <TableHead key={title}>{title}</TableHead>)}</TableRow></TableHeader>
+        <TableBody>{data.groups.map(row => {
+          const rec = row.recommendation ? RECOMMENDATION_BADGE[row.recommendation] : undefined;
+          return <TableRow key={`${row.angle}-${row.preferenceName || ''}-${row.step}-${row.version}`}>
+            <TableCell>
+              <p className="font-medium">{row.angle}{row.preferenceName && row.preferenceName !== '未标定' ? ` · ${row.preferenceName}` : ''}</p>
+              <p className="text-xs text-muted-foreground">第 {row.step || '—'} 封 · {row.version}</p>
+            </TableCell>
+            <TableCell className="tabular-nums">{row.sent}{row.humanEdited ? `（改 ${row.humanEdited}）` : ''}</TableCell>
+            <TableCell className="tabular-nums">{row.replies}{row.autoReplies ? <span className="block text-[11px] text-muted-foreground">排除自动回复 {row.autoReplies}</span> : null}</TableCell>
+            <TableCell className="tabular-nums">{row.inquiries} / {row.sampleRequests}</TableCell>
+            <TableCell className="tabular-nums">{row.quoted ?? 0} / {row.won ?? 0}</TableCell>
+            <TableCell className="tabular-nums">
+              {row.opened} / {row.clicked}
+              <span className="block text-[11px] text-muted-foreground">代理 {row.proxyOpens} · 扫描 {row.scannerClicks}</span>
+            </TableCell>
+            <TableCell className="tabular-nums">{row.optOuts ?? 0} / {row.hardBounces}</TableCell>
+            <TableCell>
+              <div className="flex flex-wrap items-center gap-1">
+                {rec ? <Badge variant={rec.variant}>{rec.label}</Badge> : null}
+                {row.highOpenLowReply ? <Badge variant="warning">打开多回复少</Badge> : null}
+              </div>
+              {row.recommendationReason ? <p className="mt-1 max-w-[14rem] text-[11px] leading-4 text-muted-foreground">{row.recommendationReason}</p> : null}
+            </TableCell>
+          </TableRow>;
+        })}</TableBody>
       </Table></div> : <p className="text-sm text-muted-foreground">近 30 天暂无自动发送记录。</p>}
     </CardContent>}
+  </Card>;
+}
+
+interface WritingReleaseMetricBucket {
+  brandKey: string;
+  customerTier: string;
+  writingVersion: string;
+  totalDrafts: number;
+  rewrittenCount: number;
+  blockedCount: number;
+  sendableCount: number;
+  rewriteRate: number;
+  blockRate: number;
+  sendableRate: number;
+}
+
+interface WritingReleaseState {
+  activeVersion: string;
+  defaultVersion: string;
+  previousVersion: string;
+  paused: boolean;
+  pausedReason?: string;
+  metrics: WritingReleaseMetricBucket[];
+}
+
+function WritingReleaseCard() {
+  const [state, setState] = React.useState<WritingReleaseState | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      setState(await apiGet<WritingReleaseState>('/agent/writing-release'));
+    } catch {
+      // ignore initial optional panel error
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { void load(); }, [load]);
+
+  async function updateRelease(body: { action: 'set_version' | 'pause_new' | 'rollback' | 'resume'; version?: string; reason?: string }) {
+    setBusy(true);
+    try {
+      const next = await apiPut<WritingReleaseState>('/agent/writing-release', body);
+      setState(next);
+      toast.success('写信版本策略已更新');
+    } catch (reason) {
+      toast.error('更新失败', { description: toErrorMessage(reason, '请稍后重试') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const totals = React.useMemo(() => {
+    const rows = state?.metrics ?? [];
+    const totalDrafts = rows.reduce((sum, r) => sum + r.totalDrafts, 0);
+    const sendable = rows.reduce((sum, r) => sum + r.sendableCount, 0);
+    const blocked = rows.reduce((sum, r) => sum + r.blockedCount, 0);
+    const rewritten = rows.reduce((sum, r) => sum + r.rewrittenCount, 0);
+    return {
+      totalDrafts,
+      sendableRate: totalDrafts > 0 ? sendable / totalDrafts : 0,
+      blockRate: totalDrafts > 0 ? blocked / totalDrafts : 0,
+      rewriteRate: totalDrafts > 0 ? rewritten / totalDrafts : 0,
+    };
+  }, [state]);
+
+  return <Card>
+    <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
+      <div className="space-y-1">
+        <CardTitle className="text-sm">写信版本发版门槛与回退控制</CardTitle>
+        <CardDescription>跟踪可发送率、拦截率与人工改写率；如新版表现退步可一键切回上一版或暂停新版。</CardDescription>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Button size="sm" variant="outline" disabled={loading || busy} onClick={() => void load()}>刷新</Button>
+        {state?.paused ? (
+          <Button size="sm" disabled={busy} onClick={() => void updateRelease({ action: 'resume' })}>恢复新版写法</Button>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void updateRelease({ action: 'rollback', reason: '人工回退到上一版写法' })}>切回上一版</Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void updateRelease({ action: 'pause_new', reason: '暂停新版写法等待复盘' })}>暂停新版</Button>
+          </>
+        )}
+      </div>
+    </CardHeader>
+    {state ? (
+      <CardContent className="space-y-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={state.paused ? 'warning' : 'developed'}>当前版本：{state.activeVersion}</Badge>
+          {state.paused && state.pausedReason ? <span className="text-amber-700 dark:text-amber-300">{state.pausedReason}</span> : null}
+        </div>
+        <p className="text-muted-foreground">
+          近 30 天草稿 {totals.totalDrafts} 封 · 可发送率 {(totals.sendableRate * 100).toFixed(1)}% · 拦截率 {(totals.blockRate * 100).toFixed(1)}% · 人工改写率 {(totals.rewriteRate * 100).toFixed(1)}%
+        </p>
+      </CardContent>
+    ) : null}
   </Card>;
 }

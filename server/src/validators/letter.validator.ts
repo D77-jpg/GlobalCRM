@@ -47,6 +47,8 @@ export const sendLetterSchema = z.object({
   markAsDeveloped: z.boolean().default(true),
   /** true 时只存草稿，不触发发送 */
   saveAsDraft: z.boolean().default(false),
+  /** 可选产品/客户资料附件 ID（最多 5 个，仅允许当前客户同项目附件） */
+  attachmentIds: z.array(objectIdSchema).max(5, '单封开发信最多附加 5 个文件').optional(),
 });
 
 export const resendLetterSchema = z.object({
@@ -62,6 +64,7 @@ export const resendLetterSchema = z.object({
     .regex(/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, { message: '收件人邮箱格式不正确' })
     .optional(),
   markAsDeveloped: z.boolean().default(true),
+  attachmentIds: z.array(objectIdSchema).max(5, '单封开发信最多附加 5 个文件').optional(),
 });
 
 /** 草稿审核结论：approve 通过（可一并提交当前编辑内容）、reject 不通过、clear 撤销结论回到待审核。 */

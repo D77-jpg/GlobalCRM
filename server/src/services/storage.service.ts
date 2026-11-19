@@ -84,8 +84,20 @@ function ensureLocalDir(): string {
 
 function safeLocalPath(key: string): string {
   const root = ensureLocalDir();
-  const resolved = path.resolve(root, key);
-  if (path.dirname(resolved) !== root) throw ApiError.badRequest('非法存储路径');
+  const segments = key.split('/').filter(Boolean);
+  if (
+    !segments.length
+    || key.startsWith('/')
+    || key.includes('\\')
+    || segments.some((seg) => seg === '.' || seg === '..' || !/^[A-Za-z0-9._-]+$/.test(seg))
+  ) {
+    throw ApiError.badRequest('非法存储路径');
+  }
+  const resolved = path.resolve(root, ...segments);
+  const rel = path.relative(root, resolved);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw ApiError.badRequest('非法存储路径');
+  }
   return resolved;
 }
 
@@ -100,6 +112,7 @@ export async function putObject(key: string, body: Buffer, contentType?: string)
     return { provider: 's3', key, path: key };
   }
   const fullPath = safeLocalPath(key);
+  await fsp.mkdir(path.dirname(fullPath), { recursive: true });
   await fsp.writeFile(fullPath, body);
   return { provider: 'local', key, path: fullPath };
 }

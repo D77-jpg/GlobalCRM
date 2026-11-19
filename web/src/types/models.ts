@@ -184,7 +184,7 @@ export interface AgentCustomerPreview {
 
 export interface AgentAnalysisSource {
   sourceId: string;
-  kind: 'profile' | 'timeline' | 'mail' | 'followup' | 'quotation' | 'knowledge' | 'attachment' | 'website';
+  kind: 'profile' | 'timeline' | 'mail' | 'followup' | 'quotation' | 'knowledge' | 'attachment' | 'website' | 'customs';
   recordId: string;
   label: string;
   occurredAt?: string | Date;
@@ -522,6 +522,8 @@ export interface DevelopmentLetter {
   createdAt: string | Date;
   updatedAt: string | Date;
   tracking?: MailTrackingSummary;
+  aiSnapshot?: { subject: string; contentText: string; at: string | Date };
+  attachmentIds?: string[];
 }
 
 export interface MailTrackingSummary {
@@ -529,10 +531,14 @@ export interface MailTrackingSummary {
   opened: boolean;
   openedAt?: string | Date;
   openCount: number;
+  dedupedOpenCount?: number;
+  uncertainOpenCount?: number;
+  humanReadConfidence?: 'none' | 'uncertain' | 'likely_clicked';
   lastOpenedAt?: string | Date;
   clicked: boolean;
   clickedAt?: string | Date;
   clickCount: number;
+  dedupedClickCount?: number;
   lastClickedAt?: string | Date;
   clickedLinks: {
     url: string;
@@ -540,6 +546,7 @@ export interface MailTrackingSummary {
     clickCount: number;
     lastClickedAt?: string | Date;
   }[];
+  coverageNotice?: string;
   accuracyNotice: string;
 }
 
@@ -560,6 +567,8 @@ export interface SendLetterPayload {
   markAsDeveloped: boolean;
   /** 仅保存草稿 */
   saveAsDraft?: boolean;
+  /** 可选随信发送的客户资料附件 ID */
+  attachmentIds?: string[];
 }
 
 export interface ResendLetterPayload {
@@ -570,6 +579,7 @@ export interface ResendLetterPayload {
   content?: string;
   recipientEmail?: string;
   markAsDeveloped?: boolean;
+  attachmentIds?: string[];
 }
 
 export interface SendLetterResult {
@@ -1174,6 +1184,11 @@ export interface ProjectBrandProfile {
   subjectFocus?: string;
   signatureTitle?: string;
   signatureLines?: string[];
+  logoPath?: string;
+  defaultLetterSubject?: string;
+  defaultLetterTemplate?: string;
+  activeWritingVersion?: string;
+  writingPausedReason?: string;
 }
 
 export interface ProjectMailCompliance {
@@ -1590,6 +1605,9 @@ export interface OutreachAutomationConfig {
   windowStart: string;
   windowEnd: string;
   timezone: string;
+  useBuyerTimezone?: boolean;
+  minPacingSeconds?: number;
+  maxPacingSeconds?: number;
   version: number;
 }
 

@@ -30,6 +30,7 @@ import {
   AgentCustomerAnalysis,
   AgentMailThreadAnalysis,
   Customer,
+  CustomerAttachment,
   DevelopmentLetter,
   KnowledgeFeedback,
   LetterTemplate,
@@ -134,6 +135,8 @@ export interface LetterDto {
   createdAt: Date;
   updatedAt: Date;
   tracking?: TrackingSummary;
+  aiSnapshot?: { subject: string; contentText: string; at: Date };
+  attachmentIds?: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,6 +199,7 @@ export async function renderLetter(
   content: string,
   recipientEmailOverride?: string,
   signerName?: string,
+  options?: { mailKind?: 'outreach' | 'inbound_reply' | 'transactional' },
 ): Promise<RenderedLetter> {
   const values = await buildValues(customer, signerName);
   const recipientEmail = (recipientEmailOverride || customer.email || '').trim().toLowerCase();
@@ -223,13 +227,16 @@ export async function renderLetter(
   const bodyWithPreheader = isHtmlContent
     ? `${preheaderHtml(buildPreheader(renderedText, renderedSubject))}${renderedHtml}`
     : renderedHtml;
-  const withCompliance = appendUnsubscribeFooter(
-    bodyWithPreheader,
-    renderedText,
-    String(project?._id ?? customer.projectId ?? ''),
-    recipientEmail,
-    isHtmlContent,
-  );
+  const isInboundReply = options?.mailKind === 'inbound_reply';
+  const withCompliance = isInboundReply
+    ? { html: bodyWithPreheader, text: renderedText }
+    : appendUnsubscribeFooter(
+      bodyWithPreheader,
+      renderedText,
+      String(project?._id ?? customer.projectId ?? ''),
+      recipientEmail,
+      isHtmlContent,
+    );
 
   return {
     // 主题走纯文本渲染（不转义），正文走 HTML 渲染（转义，防存储型 XSS）
@@ -411,19 +418,28 @@ function toLetterDto(doc: Record<string, unknown>): LetterDto {
     ...(doc.senderAddress ? { senderAddress: String(doc.senderAddress) } : {}),
     ...(doc.mailAccountId ? { mailAccountId: String(doc.mailAccountId) } : {}),
     ...(tracking ? { tracking } : {}),
+    ...(doc.aiSnapshot ? { aiSnapshot: doc.aiSnapshot as { subject: string; contentText: string; at: Date } } : {}),
+    ...(Array.isArray(doc.attachmentIds) && doc.attachmentIds.length
+      ? { attachmentIds: (doc.attachmentIds as unknown[]).map((id) => String(id)) }
+      : {}),
     createdAt: doc.createdAt as Date,
     updatedAt: doc.updatedAt as Date,
   };
 }
 
-export async function listLetters(query: ListLettersQuery, actor?: AuthUser): Promise<Paginated<LetterDto>> {
+export async function listLetters(
+  query: ListLettersQuery,
+  actor?: AuthUser,
+  options?: { refScope?: Record<string, unknown> },
+): Promise<Paginated<LetterDto>> {
   if (query.customerId) await getCustomerByIdOrThrow(query.customerId, actor);
   const { page, limit, skip, sortBy, sortOrder } = parsePagination(
     query as unknown as Record<string, unknown>,
     { allowedSortFields: sortableFields.letter, defaultSortBy: 'sentAt' },
   );
 
-  const filterParts: FilterQuery<IDevelopmentLetter>[] = [buildLetterFilter(query), await customerRefScope(actor)];
+  const refScope = options?.refScope ?? await customerRefScope(actor);
+  const filterParts: FilterQuery<IDevelopmentLetter>[] = [buildLetterFilter(query), refScope as FilterQuery<IDevelopmentLetter>];
   if (query.status === 'draft' && query.review === 'todo') {
     filterParts.push(await actionableOutreachDraftFilter(actor));
   }
@@ -437,6 +453,7 @@ export async function listLetters(query: ListLettersQuery, actor?: AuthUser): Pr
 
   const [rawItems, total] = await Promise.all([
     DevelopmentLetter.find(filter)
+      .select('-deliveryContent -knowledgeRechecks')
       .sort(fallbackSort)
       .skip(skip)
       .limit(limit)
@@ -547,6 +564,8 @@ async function persistAndSend(options: {
   outreachStep?: number;
   /** 重发同一封信时不要重复计开发封数 */
   countAsOutreach?: boolean;
+  /** 可选随信发送的客户资料附件 */
+  attachmentIds?: Types.ObjectId[];
 }): Promise<SendLetterResult> {
   const {
     customer,
@@ -589,12 +608,14 @@ async function persistAndSend(options: {
   // not run the tenant plugin's save hook. Carry the project tenant key
   // explicitly so the resulting letter is visible in tenant-scoped mail lists.
   const organizationId = await organizationIdForCustomer(customer);
+  const mailKind: 'outreach' | 'inbound_reply' = options.replyToId ? 'inbound_reply' : 'outreach';
   const rendered = await renderLetter(
     customer,
     subjectTemplate,
     contentTemplate,
     recipientEmailOverride,
     await signerNameFor(customer, userId),
+    { mailKind },
   );
   const sender = await resolveSenderIdentity(String(customer.projectId), userId, saveAsDraft);
   const activeChannel = sender.channel;
@@ -656,6 +677,7 @@ async function persistAndSend(options: {
       inReplyTo,
       references,
       sentBy: userId ? new Types.ObjectId(userId) : undefined,
+      ...(options.attachmentIds?.length ? { attachmentIds: options.attachmentIds } : {}),
       ...(options.requestKey ? { requestKey: options.requestKey } : {}),
     };
     let draft;
@@ -733,6 +755,7 @@ async function persistAndSend(options: {
         ...(options.automationCampaignId ? { automationCampaignId: options.automationCampaignId } : {}),
         ...(options.automationEnrollmentId ? { automationEnrollmentId: options.automationEnrollmentId } : {}),
         ...(options.automationCampaignId ? { automationRuleVersion: options.knowledgeReview?.context.writingVersion ?? 'legacy' } : {}),
+        mailKind,
         ...(options.agentDraftId ? { agentDraftId: options.agentDraftId } : {}),
         ...(options.agentOutreachId ? { agentOutreachId: options.agentOutreachId } : {}),
         ...(knowledgeReview ? { knowledgeReview } : {}),
@@ -759,6 +782,7 @@ async function persistAndSend(options: {
         nextAttemptAt: due,
         markAsDeveloped,
         sentBy: userId ? new Types.ObjectId(userId) : undefined,
+        ...(options.attachmentIds ? { attachmentIds: options.attachmentIds } : {}),
         needsReview: false,
         effectsPending: false,
         ...(prepared.tracking ? { tracking: prepared.tracking } : {}),
@@ -773,6 +797,8 @@ async function persistAndSend(options: {
         ...(options.agentTaskId?{agentTaskId:options.agentTaskId}:{}),
         ...(options.automationCampaignId?{automationCampaignId:options.automationCampaignId}:{}),
         ...(options.automationEnrollmentId?{automationEnrollmentId:options.automationEnrollmentId}:{}),
+        ...(options.automationCampaignId ? { automationRuleVersion: options.knowledgeReview?.context.writingVersion ?? 'legacy' } : {}),
+        mailKind,
         ...(options.agentDraftId?{agentDraftId:options.agentDraftId}:{}),
         ...(options.agentOutreachId ? { agentOutreachId: options.agentOutreachId } : {}),
         ...(knowledgeReview ? {knowledgeReview} : {}),
@@ -790,6 +816,7 @@ async function persistAndSend(options: {
         ...(outreachStep ? { outreachStep } : {}),
         scheduledAt: options.scheduledAt, nextAttemptAt: due, markAsDeveloped,
         sentBy: userId ? new Types.ObjectId(userId) : undefined,
+        ...(options.attachmentIds?.length ? { attachmentIds: options.attachmentIds } : {}),
         ...(prepared.tracking ? { tracking: prepared.tracking } : {}),
         history: [{ at: new Date(), status: options.scheduledAt ? 'scheduled' : 'queued' }],
       } }, { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true });
@@ -885,6 +912,20 @@ export async function sendLetter(input: SendLetterInput, actor?: AuthUser): Prom
     references = [...(previous.references ?? []), previous.messageId];
   }
 
+  let verifiedAttachmentIds: Types.ObjectId[] | undefined;
+  if (input.attachmentIds?.length) {
+    const requested = Array.from(new Set(input.attachmentIds)).map((id) => new Types.ObjectId(id));
+    const owned = await CustomerAttachment.find({
+      _id: { $in: requested },
+      projectId: customer.projectId,
+      customerId: customer._id,
+    }).select('_id').lean();
+    if (owned.length !== requested.length) {
+      throw ApiError.badRequest('部分所选附件不存在或不属于当前客户');
+    }
+    verifiedAttachmentIds = requested;
+  }
+
   return persistAndSend({
     customer,
     subjectTemplate: subject,
@@ -902,6 +943,7 @@ export async function sendLetter(input: SendLetterInput, actor?: AuthUser): Prom
     userId: actor?.id,
     scheduledAt: input.scheduledAt,
     requestKey: input.requestKey,
+    attachmentIds: verifiedAttachmentIds,
   });
 }
 
@@ -978,6 +1020,24 @@ export async function resendLetter(
     references = [...(previous.references ?? []), previous.messageId];
   }
 
+  let verifiedAttachmentIds: Types.ObjectId[] | undefined = original.attachmentIds?.length
+    ? original.attachmentIds.map((id) => new Types.ObjectId(String(id)))
+    : undefined;
+  if (input.attachmentIds !== undefined) {
+    const requested = Array.from(new Set(input.attachmentIds)).map((id) => new Types.ObjectId(id));
+    if (requested.length) {
+      const owned = await CustomerAttachment.find({
+        _id: { $in: requested },
+        projectId: customer.projectId,
+        customerId: customer._id,
+      }).select('_id').lean();
+      if (owned.length !== requested.length) {
+        throw ApiError.badRequest('部分所选附件不存在或不属于当前客户');
+      }
+    }
+    verifiedAttachmentIds = requested;
+  }
+
   return persistAndSend({
     customer,
     subjectTemplate,
@@ -1003,6 +1063,7 @@ export async function resendLetter(
     inReplyTo,
     references,
     countAsOutreach: false,
+    attachmentIds: verifiedAttachmentIds,
   });
 }
 
@@ -1019,13 +1080,23 @@ export async function resendLetter(
  */
 export async function assertAutomaticDraftCanSend(letter: DevelopmentLetterDocument, actor: AuthUser): Promise<void> {
   const review = letter.knowledgeReview;
-  const blocker = automatedReviewIssue(review, letter.outreachStep);
+  const project = await Project.findById(letter.projectId).select('brandProfile').lean();
+  const approvedOffers = project?.brandProfile?.approvedOffers;
+  const blocker = automatedReviewIssue(review, letter.outreachStep, {
+    bodyText: letter.contentText,
+    subject: letter.subject,
+    approvedOffers,
+  });
   if (blocker) throw ApiError.conflict(`自动发送已阻止：${blocker}`);
   if (!review || review.bodyHash !== draftHash(letter.contentText)) throw ApiError.conflict('自动发送草稿在核验后发生变化');
   if (letter.aiSnapshot && letter.aiSnapshot.subject !== letter.subject) throw ApiError.conflict('自动发送主题在核验后发生变化');
-  if (letter.outreachStep === 2) {
-    const previous = await previousOutreachDrafts(String(letter.projectId), String(letter.customerId), 2);
-    const repeated = repeatedOutreachIssue(review, previous.map(item => item.bodyText));
+  if (letter.outreachStep && letter.outreachStep >= 2) {
+    const previous = await previousOutreachDrafts(String(letter.projectId), String(letter.customerId), letter.outreachStep);
+    const repeated = repeatedOutreachIssue(review, previous, {
+      bodyText: letter.contentText,
+      step: letter.outreachStep,
+      approvedOffers,
+    });
     if (repeated) throw ApiError.conflict(repeated);
   }
   const current = await knowledgeFreshness(review, actor);
@@ -1230,12 +1301,15 @@ export interface LetterStats {
 }
 
 /** 开发信维度的统计，供仪表盘使用 */
-export async function getLetterStats(actor?: AuthUser): Promise<LetterStats> {
+export async function getLetterStats(
+  actor?: AuthUser,
+  precomputedRefScope?: Record<string, unknown>,
+): Promise<LetterStats> {
   const now = Date.now();
   const sevenDaysAgo = new Date(now - 7 * 24 * 3600 * 1000);
   const thirtyDaysAgo = new Date(now - 30 * 24 * 3600 * 1000);
   // 严格分配制：业务员的开发信统计只覆盖自己名下客户
-  const refScope = await customerRefScope(actor);
+  const refScope = precomputedRefScope ?? await customerRefScope(actor);
 
   const [total, sent, draft, failed, sent7d, sent30d, byDayRaw] = await Promise.all([
     DevelopmentLetter.countDocuments({ ...refScope }),

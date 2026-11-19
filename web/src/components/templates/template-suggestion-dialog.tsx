@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { toast } from 'sonner';
 import { apiGet, apiPost, toErrorMessage } from '@/lib/api';
+import { createClientId } from '@/lib/utils';
 import { stripHtml } from '@/lib/format';
 import { useProjectStore } from '@/store/project.store';
 import type { LetterTemplate, TemplateSuggestion } from '@/types';
@@ -45,7 +46,7 @@ export function TemplateSuggestionDialog({ template, onClose, onCopied }: Props)
     if (!template || !projectId) return;
     const token = sequence.current;
     const owner = projectId;
-    const key = crypto.randomUUID();
+    const key = createClientId();
     setBusy(true);
     void (async () => {
       try {
@@ -66,7 +67,7 @@ export function TemplateSuggestionDialog({ template, onClose, onCopied }: Props)
     if (!template || !suggestion || !checked || confirmation.trim() !== '确认创建副本' || busy || suggestion.status !== 'preview') return;
     const token = sequence.current;
     const owner = projectId;
-    const requestKey = confirmationKey.current ?? crypto.randomUUID();
+    const requestKey = confirmationKey.current ?? createClientId();
     confirmationKey.current = requestKey;
     setBusy(true);
     setError(null);

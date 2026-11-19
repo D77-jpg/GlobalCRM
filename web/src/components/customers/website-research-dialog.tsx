@@ -5,6 +5,7 @@ import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription,DialogBo
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {apiGet,apiPost,toErrorMessage} from '@/lib/api';
+import {createClientId} from '@/lib/utils';
 import {useProjectStore} from '@/store/project.store';
 import {useAuthStore} from '@/store/auth.store';
 import {useCustomerStore} from '@/store/customer.store';
@@ -29,7 +30,7 @@ function ResearchWorkspace({open,onOpenChange,customer}:{open:boolean;onOpenChan
  const request=React.useRef<{url:string;key:string}|null>(null);
  React.useEffect(()=>{if(!open)return;let stopped=false;const path=customer?'/website-research/customer/'+customer.id:'/website-research';
   void apiGet<{items:Research[]}>(path).then(r=>{if(!stopped)setRecent(r.items);}).catch(e=>{if(!stopped)setError(toErrorMessage(e));});return()=>{stopped=true;};},[open,customer?.id,customer]);
- React.useEffect(()=>{if(!open||!job||!['queued','running'].includes(job.state))return;let stopped=false;const timer=setInterval(()=>{void apiGet<Research>('/website-research/'+job.id).then(r=>{if(!stopped)setJob(r);}).catch(e=>{if(!stopped)setError(toErrorMessage(e));});},2000);return()=>{stopped=true;clearInterval(timer);};},[open,job?.id,job?.state,job]);
+ React.useEffect(()=>{if(!open||!job||!['queued','running'].includes(job.state))return;let stopped=false;const timer=setInterval(()=>{if(document.visibilityState!=='visible')return;void apiGet<Research>('/website-research/'+job.id).then(r=>{if(!stopped)setJob(r);}).catch(e=>{if(!stopped)setError(toErrorMessage(e));});},2000);return()=>{stopped=true;clearInterval(timer);};},[open,job?.id,job?.state,job]);
  React.useEffect(()=>{if(!job?.report||!['ready','partial'].includes(job.state))return;let stopped=false;
   setCompany(job.report.company);setName('');setEmail(job.report.emails[0]??'');setChecked(false);setLinkId(customer?.id??'');
   if(!job.customerId&&!customer)void apiGet<{items:{id:string;name:string;company?:string}[]}>('/website-research/'+job.id+'/duplicates').then(r=>{if(!stopped){setMatches(r.items);setLinkId(r.items[0]?.id??'');}}).catch(e=>{if(!stopped)setError(toErrorMessage(e));});
@@ -38,9 +39,9 @@ function ResearchWorkspace({open,onOpenChange,customer}:{open:boolean;onOpenChan
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[job?.id,job?.state,customer?.id]);
  const taskId=job?.draftTaskId;
- React.useEffect(()=>{if(!open||!taskId)return;let stopped=false;let done=false;const read=()=>apiGet<AgentTask>('/agent/tasks/'+taskId).then(t=>{if(!stopped){setTask(t);done=['awaiting_review','completed','failed','cancelled','waiting_input','paused'].includes(t.status);}}).catch(e=>{if(!stopped)setError(toErrorMessage(e));});void read();const timer=setInterval(()=>{if(!done)void read();},2000);return()=>{stopped=true;clearInterval(timer);};},[open,taskId]);
+ React.useEffect(()=>{if(!open||!taskId)return;let stopped=false;let done=false;const read=()=>apiGet<AgentTask>('/agent/tasks/'+taskId).then(t=>{if(!stopped){setTask(t);done=['awaiting_review','completed','failed','cancelled','waiting_input','paused'].includes(t.status);}}).catch(e=>{if(!stopped)setError(toErrorMessage(e));});void read();const timer=setInterval(()=>{if(!done&&document.visibilityState==='visible')void read();},2000);return()=>{stopped=true;clearInterval(timer);};},[open,taskId]);
  async function start(){setBusy(true);setError('');setNotice('');setMatches([]);setTask(null);try{
-  if(!request.current||request.current.url!==url.trim())request.current={url:url.trim(),key:crypto.randomUUID()};
+  if(!request.current||request.current.url!==url.trim())request.current={url:url.trim(),key:createClientId()};
   setJob(await apiPost<Research>('/website-research',{url:url.trim(),requestKey:request.current.key}));request.current=null;
  }catch(e){setError(toErrorMessage(e));}finally{setBusy(false);}}
  async function action(kind:'retry'|'cancel'){if(!job)return;setBusy(true);setError('');try{setJob(await apiPost<Research>('/website-research/'+job.id+'/'+kind,{version:job.version}));}catch(e){setError(toErrorMessage(e));}finally{setBusy(false);}}

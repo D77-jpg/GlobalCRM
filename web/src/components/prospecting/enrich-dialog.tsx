@@ -93,6 +93,7 @@ export function EnrichDialog({ open, onOpenChange, onCompleted }: EnrichDialogPr
     if (!open || !run?.id || !running) return;
     let alive = true;
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
       apiGet<RunState>(`/prospecting/enrich/${run.id}`)
         .then((next) => {
           if (!alive) return;

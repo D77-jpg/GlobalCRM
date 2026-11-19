@@ -19,7 +19,8 @@ import { createAgentSession } from '../agent/agent.service';
 import { createAgentTask } from '../agent/task.service';
 import { normalizeCountry } from '../../utils/country';
 import { dedupeLeads, domainOf, enrichLead, serperSearch, type RawLead } from './lead-source';
-import { hunterDomainSearch } from './hunter';
+import { classifyContactRole, hunterDomainSearch, isGenericRoleEmail } from './hunter';
+import { persistExternalWebsiteSnapshot } from '../website/research.service';
 import { mergeScores, scoreLeadsWithLlm, type LlmScore } from './llm-scoring';
 import { loadProfileText } from './profile';
 import { scoreLead } from './scoring';
@@ -221,22 +222,40 @@ async function executeRun(runId: string, actor: AuthUser) {
       try {
         const remaining = Math.max(1, enrichDeadline - Date.now());
         result = await withTimeout(enrichLead(lead), Math.min(75_000, remaining), '官网补全超时（75秒），已保留搜索到的候选');
+        if (result.scrapedPages?.length) {
+          void persistExternalWebsiteSnapshot({
+            projectId: String(projectId),
+            userId: actor.id,
+            url: result.website,
+            pages: result.scrapedPages,
+            sourceTag: 'firecrawl',
+          });
+        }
         run.enriched += 1;
         if (run.enriched % 3 === 0) await run.save().catch(() => undefined);
       } catch (error) {
         run.failed.push({ domain: lead.domain, reason: error instanceof Error ? error.message : '补全失败，已保留搜索到的候选' });
       }
-      // Hunter only fills the gap: the site exposed no email and today's credit budget allows it.
-      if (!result.emails?.length && hunterUsed < hunterLimit && Date.now() < enrichDeadline) {
+      // Hunter fills the gap when no email was found, OR when a lead only exposes generic
+      // role mailboxes (info@/hello@) and looks promising by rule score so we can reach a
+      // brand or procurement decision-maker.
+      const onlyGenericEmails = Boolean(result.emails?.length) && result.emails!.every((mail) => isGenericRoleEmail(mail));
+      const preliminaryHighScore = onlyGenericEmails && scoreLead(result, config.minScore).score >= Math.max(55, config.minScore);
+      if ((!result.emails?.length || preliminaryHighScore) && hunterUsed < hunterLimit && Date.now() < enrichDeadline) {
         hunterUsed += 1;
         try {
           const found = await hunterDomainSearch(result.domain);
           if (found.emails.length) {
-            result.emails = found.emails.slice(0, 3).map((item) => item.value);
-            result.emailSource = 'hunter';
-            result.emailConfidence = found.emails[0].confidence;
-            result.contactName = found.contactName;
-            result.contactTitle = found.contactTitle;
+            const personalFirst = found.emails.filter((item) => !isGenericRoleEmail(item.value));
+            const picked = personalFirst.length ? personalFirst : found.emails;
+            const mergedEmails = [...new Set([...picked.map((item) => item.value), ...(result.emails ?? [])])].slice(0, 4);
+            result.emails = mergedEmails;
+            if (personalFirst.length || !result.emailSource) {
+              result.emailSource = 'hunter';
+              result.emailConfidence = picked[0].confidence;
+              result.contactName ??= found.contactName;
+              result.contactTitle ??= found.contactTitle;
+            }
             result.company??=found.organization;result.phone??=found.phone;result.linkedin??=found.linkedin;
             result.contactSources=[...(result.contactSources??[]),{source:'hunter',url:'https://hunter.io/search/'+result.domain,fields:['emails',...(found.organization?['company']:[]),...(found.contactName?['contactName']:[]),...(found.contactTitle?['contactTitle']:[]),...(found.phone?['phone']:[]),...(found.linkedin?['linkedin']:[])]}];
             run.hunterFound += 1;
@@ -565,11 +584,23 @@ export async function approveProspect(actor: AuthUser, id: string) {
   if (!claimed) throw ApiError.conflict('这条线索刚刚被其他业务员领取，请刷新后再试');
   try {
     const customer = await createCustomer(prospectCustomerInput(claimed), actor, { source: 'prospecting', ownerId: ownerForCustomer });
+    const extraUpdates: Record<string, unknown> = {};
     if (claimed.customsCompanyId) {
-      await Customer.updateOne(
-        { _id: customer.id, projectId },
-        { $set: { customsCompanyId: claimed.customsCompanyId, customsMatchConfidence: 1, customsMatchedAt: new Date() } },
-      );
+      extraUpdates.customsCompanyId = claimed.customsCompanyId;
+      extraUpdates.customsMatchConfidence = 1;
+      extraUpdates.customsMatchedAt = new Date();
+    }
+    if (claimed.emails.length > 1) {
+      extraUpdates.alternateContacts = claimed.emails.slice(1).map((email) => ({
+        email: email.toLowerCase(),
+        roleCategory: classifyContactRole(claimed.contactTitle),
+        source: claimed.emailSource ?? 'prospecting',
+        confidence: claimed.emailConfidence,
+        discoveredAt: new Date(),
+      }));
+    }
+    if (Object.keys(extraUpdates).length) {
+      await Customer.updateOne({ _id: customer.id, projectId }, { $set: extraUpdates });
     }
     claimed.status = 'converted';
     claimed.customerId = new Types.ObjectId(customer.id);
