@@ -21,6 +21,7 @@ import {
   createOutreachExperiment,
   evaluateOutreachExperiment,
   listOutreachExperiments,
+  stopOutreachExperiment,
 } from '../services/outreach-experiment.service';
 import { harvestWinningExemplars, listWinningExemplars } from '../services/winning-exemplar.service';
 
@@ -80,6 +81,9 @@ router.post('/experiments', requireRole('admin'), validate({
 }));
 router.get('/experiments/:id', validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
   sendSuccess(res, await evaluateOutreachExperiment(req.params.id, req.user!));
+}));
+router.post('/experiments/:id/stop', requireRole('admin'), validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
+  sendSuccess(res, await stopOutreachExperiment(req.params.id, req.user!));
 }));
 router.get('/exemplars', asyncHandler(async (req, res) => {
   const segmentCode = typeof req.query.segmentCode === 'string' ? req.query.segmentCode : undefined;

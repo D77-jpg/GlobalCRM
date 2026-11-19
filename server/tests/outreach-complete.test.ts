@@ -35,14 +35,17 @@ import {
   nextRandomizedPacingMs,
 } from '../src/services/outreach-automation.service';
 import { computeMailboxWarmupLimit } from '../src/services/mail-account.service';
-import { renderLetter } from '../src/services/letter.service';
+import { renderLetter, resendLetter, reviewLetter, sendLetter } from '../src/services/letter.service';
 import { prepareTrackedHtml, recordOpen, trackingSummary } from '../src/services/mail-tracking.service';
 import { campaignResults, classifyReplySignal } from '../src/services/outreach-results.service';
 import {
   assignExperimentArm,
   createOutreachExperiment,
   evaluateOutreachExperiment,
+  resolveActiveExperimentAssignment,
+  stopOutreachExperiment,
 } from '../src/services/outreach-experiment.service';
+import { updateCustomerSchema } from '../src/validators/customer.validator';
 import { redactExemplarText } from '../src/services/winning-exemplar.service';
 import { guardedModelFetch, modelTransportStatus } from '../src/services/agent/model-transport';
 import {
@@ -651,5 +654,70 @@ test('Section 7: migration 016 is idempotent and legacy rolloutMode audit detect
   await runWithTenant({ organizationId: String(orgA) }, async () => {
     const audit = await auditLegacyOutreachCampaigns(actorA);
     assert.ok(audit.countsByMode.legacyUnset >= 1);
+  });
+});
+
+test('P0 Polish: inbound_reply drafts preserve clean formatting across review/resend; active experiment auto-assigns arm; customer timezone validates IANA', async () => {
+  // 1. Customer timezone validation
+  assert.equal(updateCustomerSchema.safeParse({ timezone: 'America/New_York' }).success, true);
+  assert.equal(updateCustomerSchema.safeParse({ timezone: 'Not/A_Zone' }).success, false);
+
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const buyer = await Customer.create({
+      organizationId: orgA,
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: new Types.ObjectId(userAId),
+      name: 'Clara Inquiry',
+      company: 'Atelier Clara',
+      email: 'clara@atelier.example.test',
+      timezone: 'Europe/Paris',
+      status: 'replied',
+    });
+
+    // 2. Inbound inquiry draft -> review -> resend preserves mailKind='inbound_reply' without marketing unsubscribe footer
+    const drafted = await sendLetter({
+      customerId: buyer.id,
+      subject: 'Re: Your jewelry box inquiry',
+      content: '<p>Hi Clara, attached are the dimensions for your rigid box.</p>',
+      recipientEmail: buyer.email,
+      saveAsDraft: true,
+      markAsDeveloped: false,
+      mailKind: 'inbound_reply',
+    }, actorA);
+    assert.equal(drafted.letter.mailKind, 'inbound_reply');
+    assert.ok(!/unsubscribe|opt out|不再接收/i.test(drafted.letter.content));
+
+    const approved = await reviewLetter(drafted.letter.id, {
+      decision: 'approve',
+      subject: drafted.letter.subject,
+      content: drafted.letter.template,
+      recipientEmail: drafted.letter.recipientEmail,
+    }, actorA);
+    assert.equal(approved.review?.decision, 'approved');
+
+    const sent = await resendLetter(drafted.letter.id, {
+      saveAsDraft: false,
+      markAsDeveloped: false,
+    }, actorA);
+    assert.equal(sent.letter.mailKind, 'inbound_reply');
+    assert.ok(!/unsubscribe|opt out|不再接收/i.test(sent.letter.content));
+
+    // 3. Active running experiment auto-assigns a deterministic arm and persists it; stop marks completed
+    const exp = await createOutreachExperiment({
+      name: 'Auto-assign polish test',
+      controlVersion: OUTREACH_WRITING_VERSION_LEGACY,
+      treatmentVersion: OUTREACH_WRITING_VERSION,
+      stratifyBy: ['data_tier'],
+      observationWindowDays: 14,
+      minSamplePerArm: 10,
+    }, actorA);
+    const assigned1 = await resolveActiveExperimentAssignment(new Types.ObjectId(projectAId), buyer, 'genesis');
+    assert.ok(assigned1);
+    assert.equal(assigned1!.experimentId, exp.id);
+    assert.ok(assigned1!.writingVersion === OUTREACH_WRITING_VERSION || assigned1!.writingVersion === OUTREACH_WRITING_VERSION_LEGACY);
+    const assigned2 = await resolveActiveExperimentAssignment(new Types.ObjectId(projectAId), buyer, 'genesis');
+    assert.equal(assigned2?.arm, assigned1!.arm);
+    const stopped = await stopOutreachExperiment(exp.id, actorA);
+    assert.equal(stopped.status, 'completed');
   });
 });

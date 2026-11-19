@@ -33,6 +33,8 @@ export interface KnowledgeReview {
   questions: {question:string;topic?:PolicyTopic;status:'answered'|'unanswered';sourceIds:string[]}[];
   issues: KnowledgeIssue[]; context: {
     writingVersion?:string;
+    experimentId?:string;
+    experimentArm?:'control'|'treatment';
     brandRevision?:number;
     customerTier?:'rich'|'sparse'|'generic_email'|'brand_role'|'procurement_role';
     customerWebsites?:CustomerWebsiteSnapshot[];

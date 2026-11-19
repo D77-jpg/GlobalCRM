@@ -2,6 +2,7 @@ import {ensureCustomerResearch,type CustomerResearchStatus} from '../website/cus
 import {websiteCustomerEvidence} from '../website/research.service';
 import {getCustomerCustomsEvidence} from '../customs.service';
 import {listWinningExemplars} from '../winning-exemplar.service';
+import {resolveActiveExperimentAssignment} from '../outreach-experiment.service';
 import {prepareSalesEvidence,assertSalesEvidenceCurrent,salesMailKind,salesSubjects,type SalesMailKind} from './sales-evidence';
 import {workflowStage,type EvidenceWorkflow} from './evidence-workflow';
 import {verifyGroundedEmail,providerFactVerifier} from './fact-verifier';
@@ -116,12 +117,13 @@ function clipped(value: unknown, max = 3000): string {
   return String(value ?? '').trim().slice(0, max);
 }
 
-async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledgeIds?:string[], goal='', workflow?:EvidenceWorkflow, taskKind?:SalesMailKind, outreachStep?:number, previousOutreach?:CustomerAnalysisInput['previousOutreach'], forcedSegmentCode?:string): Promise<{ input: CustomerAnalysisInput; sources: AgentAnalysisSource[]; knowledgeBundle:KnowledgeBundle; signature: LetterSignature; brandRevision?: number; writingVersion: string; customerTier: CustomerTierBucket; approvedOffers?: ProjectApprovedOffer[]; importedPlaybook?: Awaited<ReturnType<typeof loadImportedPlaybook>>; playbookBaseInput: Parameters<typeof selectOutreachPlaybook>[0] }> {
+async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledgeIds?:string[], goal='', workflow?:EvidenceWorkflow, taskKind?:SalesMailKind, outreachStep?:number, previousOutreach?:CustomerAnalysisInput['previousOutreach'], forcedSegmentCode?:string): Promise<{ input: CustomerAnalysisInput; sources: AgentAnalysisSource[]; knowledgeBundle:KnowledgeBundle; signature: LetterSignature; brandRevision?: number; writingVersion: string; experimentId?: string; experimentArm?: 'control' | 'treatment'; customerTier: CustomerTierBucket; approvedOffers?: ProjectApprovedOffer[]; importedPlaybook?: Awaited<ReturnType<typeof loadImportedPlaybook>>; playbookBaseInput: Parameters<typeof selectOutreachPlaybook>[0] }> {
   const customer = await getCustomerByIdOrThrow(customerId, actor);
   const projectId = requireProjectId(actor);
   const project = await Project.findById(projectId).select('code slug name industry companyName website mailFrom senderName brandProfile').lean();
   const salesProfile = resolveProjectSalesProfile(project);
-  const writingVersion = resolveEffectiveWritingVersion(project);
+  const experiment = await resolveActiveExperimentAssignment(projectId, customer, salesProfile.key).catch(() => null);
+  const writingVersion = experiment?.writingVersion ?? resolveEffectiveWritingVersion(project);
   const oid = new Types.ObjectId(customerId);
   const [timeline, inbound, outbound, followups] = await Promise.all([
     getCustomerTimeline(customerId, 30, actor),
@@ -276,6 +278,8 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
     signature: salesProfile.signature,
     brandRevision: importedPlaybook?.revision,
     writingVersion,
+    experimentId: experiment?.experimentId,
+    experimentArm: experiment?.arm,
     customerTier,
     approvedOffers: salesProfile.approvedOffers,
     importedPlaybook,
@@ -479,6 +483,8 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
     });
     if (options?.firstOutreach || options?.outreachStep) {
       grounded.review.context.writingVersion = context.writingVersion;
+      if (context.experimentId) grounded.review.context.experimentId = context.experimentId;
+      if (context.experimentArm) grounded.review.context.experimentArm = context.experimentArm;
       grounded.review.context.brandRevision = context.brandRevision ?? 0;
       grounded.review.context.customerTier = context.customerTier === 'unknown' ? undefined : context.customerTier;
       grounded.review.context.qualityReport = qualityReport;

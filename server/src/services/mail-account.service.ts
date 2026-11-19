@@ -40,6 +40,15 @@ export interface MailAccountDto {
   lastImapVerificationError?: string;
   dailyLimit: number;
   usedToday: number;
+  warmup?: {
+    enabled: boolean;
+    effectiveLimit: number;
+    activeSendDays: number;
+    recentSentCount: number;
+    recentHardBounceCount: number;
+    cooledDownUntil?: Date;
+    reason?: string;
+  };
   /** 改了发件地址后，旧地址邮件的去向（只在本次保存时返回） */
   legacyMail?: { moved: number; archived: number; address: string; to?: string };
   createdAt: Date;
@@ -80,6 +89,12 @@ async function usedToday(accountId: Types.ObjectId): Promise<number> {
 }
 
 async function toDto(account: UserMailAccountDocument): Promise<MailAccountDto> {
+  const [used, project] = await Promise.all([
+    usedToday(account._id),
+    Project.findById(account.projectId).select('mailCompliance').lean(),
+  ]);
+  const cap = computeMailboxWarmupLimit(account, project);
+  const w = account.warmup;
   return {
     id: String(account._id),
     projectId: String(account.projectId),
@@ -106,7 +121,16 @@ async function toDto(account: UserMailAccountDocument): Promise<MailAccountDto> 
     ...(account.imapVerifiedAt ? { imapVerifiedAt: account.imapVerifiedAt } : {}),
     ...(account.lastImapVerificationError ? { lastImapVerificationError: account.lastImapVerificationError } : {}),
     dailyLimit: account.dailyLimit,
-    usedToday: await usedToday(account._id),
+    usedToday: used,
+    warmup: {
+      enabled: Boolean(w?.enabled),
+      effectiveLimit: cap.limit,
+      activeSendDays: Number(w?.activeSendDays ?? 0),
+      recentSentCount: Number(w?.recentSentCount ?? 0),
+      recentHardBounceCount: Number(w?.recentHardBounceCount ?? 0),
+      ...(w?.cooledDownUntil ? { cooledDownUntil: w.cooledDownUntil } : {}),
+      ...(cap.reason ? { reason: cap.reason } : {}),
+    },
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
   };

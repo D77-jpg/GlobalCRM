@@ -375,6 +375,17 @@ export interface Customer {
   owner?: OwnerSummary | null;
   /** 下一次跟进时间（可空） */
   nextFollowUpAt?: string | Date | null;
+  /** 客户显式 IANA 时区（留空则按国家/地区自动推断） */
+  timezone?: string;
+  /** 联系人补全发现的候选决策人列表 */
+  alternateContacts?: {
+    name?: string;
+    title?: string;
+    email?: string;
+    source?: string;
+    confidence?: number;
+    verifiedAt?: string | Date;
+  }[];
   /** 关联的海关公司 */
   customsCompanyId?: string;
   customsMatchConfidence?: number;
@@ -1169,9 +1180,33 @@ export interface UpdateUserInput {
 
 /* ---------------------------- 多项目工作空间 ---------------------------- */
 
+export interface ProjectApprovedOffer {
+  id: string;
+  label: string;
+  actionText: string;
+  category: 'spec_sheet' | 'drawing' | 'swatch' | 'sample' | 'quote_range' | 'other';
+  requiresEvidence: boolean;
+  allowsFree: boolean;
+  allowsSample: boolean;
+  allowsShipping: boolean;
+  conditions?: string;
+  enabled: boolean;
+}
+
+export interface ProjectIndustryRule {
+  code: string;
+  name: string;
+  requiredPattern?: string;
+  excludedPattern?: string;
+  keywords: string[];
+  priority?: number;
+}
+
 export interface ProjectBrandProfile {
   brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
   approvedActions?: string[];
+  approvedOffers?: ProjectApprovedOffer[];
+  industryRules?: ProjectIndustryRule[];
   label?: string;
   identity?: string;
   offerSummary?: string;
@@ -1619,6 +1654,15 @@ export interface OutreachAutomationMailbox {
   reason?: string;
   usedToday: number;
   dailyLimit: number;
+  warmup?: {
+    enabled: boolean;
+    effectiveLimit: number;
+    activeSendDays: number;
+    recentSentCount: number;
+    recentHardBounceCount: number;
+    cooledDownUntil?: string;
+    reason?: string;
+  };
 }
 
 export interface OutreachAutomationQueueRow {

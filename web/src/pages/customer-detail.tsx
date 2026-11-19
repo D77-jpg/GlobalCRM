@@ -27,6 +27,7 @@ import {
   CalendarClock,
   ChevronDown,
   ChevronUp,
+  Clock,
   Contact,
   Eraser,
   Facebook,
@@ -47,6 +48,7 @@ import {
   Package,
   Pencil,
   Phone,
+  Search,
   Send,
   Sparkles,
   Star,
@@ -295,6 +297,7 @@ export function CustomerDetailPage(): React.JSX.Element {
   const [cleanupOpen, setCleanupOpen] = React.useState(false);
   const [handoffOpen, setHandoffOpen] = React.useState(false);
   const [quickGenerating, setQuickGenerating] = React.useState(false);
+  const [enrichingContact, setEnrichingContact] = React.useState(false);
   const [composeDraft, setComposeDraft] = React.useState<{ analysisId: string; subject: string; content: string; outreachStep?: number } | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const composeAnalysisId = searchParams.get('composeAnalysis');
@@ -739,7 +742,38 @@ export function CustomerDetailPage(): React.JSX.Element {
           ) : null}
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <section aria-labelledby="customer-contact-title" className="min-w-0">
-              <h3 id="customer-contact-title" className="mb-4 text-sm font-semibold">联系资料</h3>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <h3 id="customer-contact-title" className="text-sm font-semibold">联系资料</h3>
+                {(() => {
+                  const isGeneric = Boolean(customer.email && /^(?:info|hello|hi|sales|contact|support|admin|office|team|enquiries|inquiries)@/i.test(customer.email.trim()));
+                  return (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={!customer.email || isGeneric ? 'secondary' : 'outline'}
+                      className="h-7 px-2.5 text-xs"
+                      disabled={enrichingContact || (!customer.website && !customer.email)}
+                      onClick={() => {
+                        if (!customer.id) return;
+                        setEnrichingContact(true);
+                        void apiPost<{ added: number; promoted?: boolean; message?: string }>(`/customers/${customer.id}/enrich-contact`, {})
+                          .then(async (res) => {
+                            await reloadCustomer();
+                            toast.success(res.message || (res.added > 0 ? `已补充 ${res.added} 位候选联系人` : '暂未发现更多决策人邮箱'));
+                          })
+                          .catch((caught) => {
+                            toast.error('补查联系人失败', { description: toErrorMessage(caught, '请检查官网或 Hunter 配置') });
+                          })
+                          .finally(() => setEnrichingContact(false));
+                      }}
+                      title="针对缺失邮箱或 info@/hello@ 通用邮箱，尝试从官网与 Hunter 查找品牌/采购决策人"
+                    >
+                      {enrichingContact ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Search className="h-3.5 w-3.5" aria-hidden />}
+                      {isGeneric ? '通用邮箱 · 补查决策人' : '补查联系人'}
+                    </Button>
+                  );
+                })()}
+              </div>
               <dl className="grid min-w-0 gap-x-8 gap-y-5 sm:grid-cols-2 2xl:grid-cols-3">
                   <EditableInfoRow
                     icon={<Building2 className="h-3.5 w-3.5" />}
@@ -794,6 +828,31 @@ export function CustomerDetailPage(): React.JSX.Element {
                     onSave={textSaver('country')}
                   />
                   <EditableInfoRow
+                    icon={<Clock className="h-3.5 w-3.5" />}
+                    label="买家时区"
+                    value={customer.timezone}
+                    placeholder="留空按国家自动识别，如 America/New_York"
+                    datalistId="detail-timezone-options"
+                    datalist={[
+                      'America/New_York',
+                      'America/Chicago',
+                      'America/Los_Angeles',
+                      'America/Toronto',
+                      'Europe/London',
+                      'Europe/Paris',
+                      'Europe/Berlin',
+                      'Asia/Dubai',
+                      'Asia/Riyadh',
+                      'Asia/Singapore',
+                      'Asia/Tokyo',
+                      'Australia/Sydney',
+                      'Pacific/Auckland',
+                    ]}
+                    maxLength={80}
+                    hint="用于按买家当地工作日排程发送"
+                    onSave={textSaver('timezone')}
+                  />
+                  <EditableInfoRow
                     icon={<Building2 className="h-3.5 w-3.5" />}
                     label="行业"
                     value={customer.industry}
@@ -804,6 +863,33 @@ export function CustomerDetailPage(): React.JSX.Element {
                     onSave={textSaver('industry')}
                   />
               </dl>
+              {customer.alternateContacts?.length ? (
+                <div className="mt-4 rounded-lg border border-border/70 bg-muted/20 p-3">
+                  <p className="text-xs font-medium text-foreground">发现的候选联系人（{customer.alternateContacts.length}）</p>
+                  <ul className="mt-2 space-y-1.5">
+                    {customer.alternateContacts.map((alt, idx) => (
+                      <li key={`${alt.email || alt.name || idx}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <span className="font-medium text-foreground">{alt.name || '未命名联系人'}</span>
+                          {alt.title ? <span className="text-muted-foreground"> · {alt.title}</span> : null}
+                          {alt.email ? <span className="block truncate text-[11px] text-muted-foreground">{alt.email}{alt.source ? ` · ${alt.source}` : ''}</span> : null}
+                        </div>
+                        {alt.email && alt.email.toLowerCase() !== (customer.email ?? '').toLowerCase() ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-[11px]"
+                            onClick={() => void saveEmail(alt.email!)}
+                          >
+                            设为主邮箱
+                          </Button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </section>
             <section aria-labelledby="customer-development-title" className="min-w-0 border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
               <h3 id="customer-development-title" className="mb-4 text-sm font-semibold">开发与跟进</h3>

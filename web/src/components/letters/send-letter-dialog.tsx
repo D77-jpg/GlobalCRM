@@ -1162,9 +1162,14 @@ export function SendLetterDialog({
                     ))}
                   </div>
                 ) : null}
-                {activeLetter.knowledgeReview.context.playbook.dualAngleComparison?.comparisonReason ? (
+                {activeLetter.knowledgeReview.context.playbook.dualAngleComparison?.rationale ? (
                   <p className="rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground">
-                    双角度比稿：{activeLetter.knowledgeReview.context.playbook.dualAngleComparison.comparisonReason}
+                    {activeLetter.knowledgeReview.context.playbook.dualAngleComparison.rationale}
+                  </p>
+                ) : null}
+                {activeLetter.knowledgeReview.context.experimentArm ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    试发实验分组：<Badge variant="outline" className="text-[10px]">{activeLetter.knowledgeReview.context.experimentArm === 'treatment' ? '新版实验组' : '对照组'}</Badge>（{activeLetter.knowledgeReview.context.writingVersion}）
                   </p>
                 ) : null}
                 {isDraftReview && activeLetter.id ? (
