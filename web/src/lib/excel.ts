@@ -9,7 +9,7 @@
  *  3. 行级校验尽量与后端 zod 规则对齐，减少「前端过了后端拒」的情况。
  */
 import { format, isValid } from 'date-fns';
-import * as XLSX from 'xlsx';
+import type * as XLSXTypes from 'xlsx';
 import { CUSTOMER_STATUS_VALUES, EMAIL_PATTERN, IMPORT_FIELDS, PRIORITY_TEXT_MAP, STATUS_TEXT_MAP } from '@/constants';
 import type { CustomerPriority, CustomerStatus, ImportField } from '@/types';
 
@@ -176,7 +176,11 @@ export function validateSpreadsheetFile(file: File): string | null {
 
 /* ---------------------------- 解析 ---------------------------- */
 
-function parseSheet(name: string, sheet: XLSX.WorkSheet | undefined): ParsedSheet | null {
+function parseSheet(
+  XLSX: typeof XLSXTypes,
+  name: string,
+  sheet: XLSXTypes.WorkSheet | undefined,
+): ParsedSheet | null {
   if (!sheet) return null;
 
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
@@ -239,16 +243,16 @@ function parseSheet(name: string, sheet: XLSX.WorkSheet | undefined): ParsedShee
 
 /** 读取并解析工作簿，只保留「有数据」的工作表 */
 export async function readWorkbookFile(file: File): Promise<ParsedWorkbook> {
-  const buffer = await file.arrayBuffer();
+  const [buffer, XLSX] = await Promise.all([file.arrayBuffer(), import('xlsx')]);
 
-  let workbook: XLSX.WorkBook;
+  let workbook: XLSXTypes.WorkBook;
   try {
     workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
   } catch {
     throw new Error('文件解析失败，请确认它是有效的 Excel 文件（未加密、未损坏）');
   }
 
-  const sheets = workbook.SheetNames.map((name) => parseSheet(name, workbook.Sheets[name]))
+  const sheets = workbook.SheetNames.map((name) => parseSheet(XLSX, name, workbook.Sheets[name]))
     .filter((sheet): sheet is ParsedSheet => sheet !== null);
 
   if (sheets.length === 0) {

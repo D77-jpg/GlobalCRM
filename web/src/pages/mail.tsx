@@ -165,7 +165,7 @@ export function MailPage(): React.JSX.Element {
     } catch (e) { setError(toErrorMessage(e)); }
     finally { setLoading(false); }
   }, [folder, page]);
-  React.useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 15000); return () => clearInterval(timer); }, [refresh]);
+  React.useEffect(() => { void refresh(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 15000); return () => clearInterval(timer); }, [refresh]);
 
   const loadDetail = React.useCallback(async () => {
     const version = ++detailRequest.current;

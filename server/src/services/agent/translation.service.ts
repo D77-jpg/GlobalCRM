@@ -80,14 +80,17 @@ function parseTranslation(raw: string, hasSubject: boolean): LetterTranslation {
   return { subject: hasSubject ? subject : undefined, body };
 }
 
+import { guardedModelFetch } from './model-transport';
+import { validateAiBaseUrl } from './ai-settings.service';
 /** Index-Translate 使用 OpenAI-compatible chat/completions，不占用主 Agent 模型。 */
 async function translateWithIndex(input: { subject?: string; body: string }): Promise<LetterTranslation> {
+  const baseUrl = await validateAiBaseUrl(env.TRANSLATE_BASE_URL);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), env.TRANSLATE_TIMEOUT_MS);
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (env.TRANSLATE_API_KEY) headers.Authorization = `Bearer ${env.TRANSLATE_API_KEY}`;
-    const response = await fetch(`${env.TRANSLATE_BASE_URL.replace(/\/+$/, '')}/chat/completions`, {
+    const response = await guardedModelFetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers,
       body: JSON.stringify({

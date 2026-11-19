@@ -56,7 +56,7 @@ export function GlobalSiteNotifications() {
         count: number;
     }>('/globalsite-inquiries/notifications').then(r => { if (live)
         setData(r); }).catch(() => undefined); }; if (projectId)
-        load(); const timer = setInterval(load, 30000); return () => { live = false; clearInterval(timer); }; }, [projectId]);
+        load(); const timer = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 30000); return () => { live = false; clearInterval(timer); }; }, [projectId]);
     return <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="relative min-h-11 min-w-11 px-2" aria-label={t('j1.notifications')}><Bell className="h-4 w-4" aria-hidden/>{data.count > 0 ? <Badge className="absolute -right-1 -top-1 px-1 text-[10px]">{data.count}</Badge> : null}</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="max-w-[calc(100vw-2rem)]"><DropdownMenuLabel>{t('j1.notifications')}</DropdownMenuLabel>{data.items.length ? data.items.map(r => <DropdownMenuItem key={r.id} asChild><Link className="max-w-xs whitespace-normal break-words" to={r.url}>{t('j1.from')} · {r.siteName}</Link></DropdownMenuItem>) : <DropdownMenuLabel className="text-muted-foreground">{t('j1.noNotices')}</DropdownMenuLabel>}</DropdownMenuContent></DropdownMenu>;
 }
 export function GlobalSiteInquiries({ customerId, onDraft }: {

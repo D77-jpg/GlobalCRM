@@ -43,14 +43,25 @@ jobs:
         run: npm ci
       - name: Integration API 契约测试（23 项，mongodb-memory-server 自举）
         run: npm run test:integration
-      - name: 服务端测试（mail / scratchpad / agent / security / health）
+      - name: 服务端测试（核心业务 / 开发信 / 海关 / 租户 / 安全 / 健康检查）
         run: |
+          npm run test:name
+          npm run test:dedupe
+          npm run test:country
+          npm run test:import
+          npm run test:lead-import
           npm run test:mail
           npm run test:scratchpad
           npm run test:agent
           npm run test:prospecting
+          npm run test:customs
+          npm run test:product-quote
           npm run test:outreach-automation
           npm run test:outreach-quality
+          npm run test:outreach-complete
+          npm run eval:outreach
+          npm run test:p1
+          npm run test:p2
           npm run test:oauth
           npm run test:security
           npm run test:health
@@ -92,8 +103,6 @@ jobs:
           npx tsc --noEmit --strict --esModuleInterop --skipLibCheck --target ES2022 --module CommonJS --moduleResolution Node tests/knowledge-ingestion.test.ts tests/knowledge-ui-fixture.ts tests/knowledge-index.test.ts tests/knowledge-retrieval.test.ts tests/knowledge-retrieval-ui-fixture.ts tests/knowledge-index-ui-fixture.ts tests/fixtures/knowledge-s2/worker.ts tests/knowledge-operations.test.ts evaluation/knowledge/operations.ts
       - name: Template feedback regression (H-05)
         run: npm run test:template-feedback
-      - name: Security boundary regression tests
-        run: npm run test:security
       - name: P3 migration and revenue-path E2E gate
         run: npm run test:p3
       - name: TypeScript typecheck
@@ -178,6 +187,10 @@ jobs:
         run: npm run test:customer-fields
       - name: Agent reply Markdown and security regression
         run: npm run test:agent-content
+      - name: Agent workflow regression
+        run: npm run test:agent-workflow
+      - name: ESLint（前端代码检查）
+        run: npm run lint
       - name: Production build（含 typecheck）
         run: npm run build
 

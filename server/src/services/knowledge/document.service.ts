@@ -163,25 +163,70 @@ async function storeDocument(value: z.infer<typeof uploadInput>, data: Buffer, e
 
 export async function listDocuments(actor: AuthUser, before?: string) {
   admin(actor);
-  const documents = await KnowledgeDocument.find({ ...scope(actor), ...(before ? { _id: { $lt: id(before) } } : {}) }).sort({ _id: -1 }).limit(30).lean();
-  const result = [];
-  for (const d of documents) {
-    const parsing = await KnowledgeParsing.findOne({ documentId: d._id, ...scope(actor) }).sort({ revision: -1 }).lean();
-    const linked=await AgentKnowledge.find({...scope(actor),'revisions.sourceRefs.documentId':String(d._id)}).lean();
-    const matchesDoc=(v:{sourceRefs?:Record<string,unknown>[]}|undefined)=>v?.sourceRefs?.some(ref=>String(ref.documentId)===String(d._id));
-    const related=linked.flatMap(k=>k.revisions.filter(v=>(v.version===k.version||v.version===k.approvedVersion)&&matchesDoc(v)).map(v=>({v,archived:k.archived,published:v.version===k.approvedVersion})));
-    const products=[...new Set(related.flatMap(({v})=>v.products??[]))];
-    const current=related.filter(x=>!x.archived&&x.published);
-    const effective=current.some(({v})=>!!v.validFrom&&v.validFrom<=new Date()&&(!v.validUntil||v.validUntil>new Date()));
-    const expires=current.flatMap(({v})=>v.validUntil?[v.validUntil]:[]);
-    const validity=effective?(expires.some(d=>d>new Date()&&d<=new Date(Date.now()+30*86400000))?'expiring':'active'):expires.some(d=>d<=new Date())?'expired':'unconfirmed';
-    const reviewState=current.length?'published':related.some(x=>!x.archived)?'draft':related.length?'disabled':'unreviewed';
-    // Surface the actual advisories (mostly per-paragraph) instead of a vague "partial".
-    const chunkWarnings = parsing ? await KnowledgeChunk.distinct('warnings', { ...scope(actor), documentId: d._id, parsingRevisionId: parsing._id, artifactHash: parsing.artifactHash }) as string[] : [];
-    result.push({products,reviewState,validity, ...d, id: String(d._id), blobKey: undefined,
-      parsing: parsing ? { ...parsing, id: String(parsing._id), artifact: undefined, leaseToken: undefined,
-        warnings: [...new Set([...(parsing.warnings ?? []), ...chunkWarnings])] } : null });
+  const projectFilter = scope(actor);
+  const documents = await KnowledgeDocument.find({ ...projectFilter, ...(before ? { _id: { $lt: id(before) } } : {}) }).sort({ _id: -1 }).limit(30).lean();
+  if (!documents.length) return { documents: [], next: null };
+
+  const docOids = documents.map((d) => d._id);
+  const docIdStrings = docOids.map(String);
+
+  // Batch-load latest parsing revisions and linked knowledge entries in 2 queries (eliminating 3*30 N+1).
+  const [allParsings, allLinked] = await Promise.all([
+    KnowledgeParsing.find({ ...projectFilter, documentId: { $in: docOids } }).sort({ revision: -1 }).lean(),
+    AgentKnowledge.find({ ...projectFilter, 'revisions.sourceRefs.documentId': { $in: docIdStrings } }).lean(),
+  ]);
+
+  const latestParsingByDoc = new Map<string, (typeof allParsings)[number]>();
+  for (const p of allParsings) {
+    const key = String(p.documentId);
+    if (!latestParsingByDoc.has(key)) latestParsingByDoc.set(key, p);
   }
+
+  const parsingIds = [...latestParsingByDoc.values()].map((p) => p._id);
+  const warningsAgg = parsingIds.length
+    ? await KnowledgeChunk.aggregate([
+      { $match: { ...projectFilter, parsingRevisionId: { $in: parsingIds }, warnings: { $exists: true, $ne: [] } } },
+      { $unwind: '$warnings' },
+      { $group: { _id: { doc: '$documentId', rev: '$parsingRevisionId', hash: '$artifactHash' }, warnings: { $addToSet: '$warnings' } } },
+    ])
+    : [];
+  const warningsByKey = new Map<string, string[]>();
+  for (const row of warningsAgg as { _id: { doc: unknown; rev: unknown; hash: unknown }; warnings: string[] }[]) {
+    warningsByKey.set(`${String(row._id.doc)}:${String(row._id.rev)}:${String(row._id.hash ?? '')}`, row.warnings);
+  }
+
+  const now = new Date();
+  const soon = new Date(now.getTime() + 30 * 86400000);
+  const result = documents.map((d) => {
+    const docIdStr = String(d._id);
+    const parsing = latestParsingByDoc.get(docIdStr) ?? null;
+    const matchesDoc = (v: { sourceRefs?: Record<string, unknown>[] } | undefined) => v?.sourceRefs?.some((ref) => String(ref.documentId) === docIdStr);
+    const related = allLinked.flatMap((k) => k.revisions
+      .filter((v) => (v.version === k.version || v.version === k.approvedVersion) && matchesDoc(v))
+      .map((v) => ({ v, archived: k.archived, published: v.version === k.approvedVersion })));
+    const products = [...new Set(related.flatMap(({ v }) => v.products ?? []))];
+    const current = related.filter((x) => !x.archived && x.published);
+    const effective = current.some(({ v }) => !!v.validFrom && v.validFrom <= now && (!v.validUntil || v.validUntil > now));
+    const expires = current.flatMap(({ v }) => (v.validUntil ? [v.validUntil] : []));
+    const validity = effective ? (expires.some((dt) => dt > now && dt <= soon) ? 'expiring' : 'active') : expires.some((dt) => dt <= now) ? 'expired' : 'unconfirmed';
+    const reviewState = current.length ? 'published' : related.some((x) => !x.archived) ? 'draft' : related.length ? 'disabled' : 'unreviewed';
+    const chunkWarnings = parsing ? (warningsByKey.get(`${docIdStr}:${String(parsing._id)}:${String(parsing.artifactHash ?? '')}`) ?? []) : [];
+    return {
+      products,
+      reviewState,
+      validity,
+      ...d,
+      id: docIdStr,
+      blobKey: undefined,
+      parsing: parsing ? {
+        ...parsing,
+        id: String(parsing._id),
+        artifact: undefined,
+        leaseToken: undefined,
+        warnings: [...new Set([...(parsing.warnings ?? []), ...chunkWarnings])],
+      } : null,
+    };
+  });
   return { documents: result, next: documents.length === 30 ? String(documents.at(-1)!._id) : null };
 }
 

@@ -77,7 +77,10 @@ function toBrief(doc: CustomerDocument): CustomerBrief {
 }
 
 /** 汇总销售工作区所需的全部只读数据（尽量并行） */
-export async function getSalesWorkspace(actor?: AuthUser): Promise<SalesWorkspace> {
+export async function getSalesWorkspace(
+  actor?: AuthUser,
+  precomputedRefScope?: Record<string, unknown>,
+): Promise<SalesWorkspace> {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const startOfTomorrow = new Date(startOfToday);
@@ -85,7 +88,7 @@ export async function getSalesWorkspace(actor?: AuthUser): Promise<SalesWorkspac
 
   // 严格分配制：业务员的工作区只覆盖自己名下客户（及其开发信 / 跟进）
   const scope = customerScope(actor);
-  const refScope = await customerRefScope(actor);
+  const refScope = precomputedRefScope ?? await customerRefScope(actor);
 
   const [
     followUpToday,

@@ -79,6 +79,10 @@ export interface IDevelopmentLetter {
   };
   markAsDeveloped: boolean;
   effectsPending: boolean;
+  /** 邮件类型：outreach=开发信（带退订与合规头）；inbound_reply=回复客户主动来信（不拼营销退订尾部） */
+  mailKind?: 'outreach' | 'inbound_reply' | 'transactional';
+  /** 附加的产品资料附件 ID 列表 */
+  attachmentIds?: Types.ObjectId[];
   /** 这是本轮开发中的第几封（1=首次开发信，2/3=跟进；回复类邮件不记） */
   outreachStep?: number;
   tracking?: {
@@ -87,14 +91,19 @@ export interface IDevelopmentLetter {
     openTokenHash?: string;
     openedAt?: Date;
     openCount: number;
+    dedupedOpenCount?: number;
     automatedOpenCount?: number;
+    uncertainOpenCount?: number;
     unclassifiedOpenedAt?: Date;
     lastOpenedAt?: Date;
+    lastOpenFingerprint?: string;
     clickedAt?: Date;
     clickCount: number;
+    dedupedClickCount?: number;
     automatedClickCount?: number;
     unclassifiedClickedAt?: Date;
     lastClickedAt?: Date;
+    lastClickFingerprint?: string;
     links: {
       tokenHash: string;
       originalUrl: string;
@@ -198,6 +207,8 @@ const DevelopmentLetterSchema = new Schema<IDevelopmentLetter>(
       note: {type: String, maxlength: 500},
     },
     markAsDeveloped: { type: Boolean, default: true },
+    mailKind: { type: String, enum: ['outreach', 'inbound_reply', 'transactional'], default: 'outreach' },
+    attachmentIds: [{ type: Schema.Types.ObjectId, ref: 'CustomerAttachment' }],
     outreachStep: { type: Number, min: 1, max: 3 },
     effectsPending: { type: Boolean, default: false },
     tracking: {
@@ -206,14 +217,19 @@ const DevelopmentLetterSchema = new Schema<IDevelopmentLetter>(
       openTokenHash: { type: String, select: false },
       openedAt: Date,
       openCount: { type: Number, default: 0, min: 0 },
+      dedupedOpenCount: { type: Number, default: 0, min: 0 },
       automatedOpenCount: { type: Number, default: 0, min: 0 },
+      uncertainOpenCount: { type: Number, default: 0, min: 0 },
       unclassifiedOpenedAt: Date,
       lastOpenedAt: Date,
+      lastOpenFingerprint: { type: String, select: false },
       clickedAt: Date,
       clickCount: { type: Number, default: 0, min: 0 },
+      dedupedClickCount: { type: Number, default: 0, min: 0 },
       automatedClickCount: { type: Number, default: 0, min: 0 },
       unclassifiedClickedAt: Date,
       lastClickedAt: Date,
+      lastClickFingerprint: { type: String, select: false },
       links: {
         type: [{
           tokenHash: { type: String, required: true, select: false },

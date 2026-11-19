@@ -1,6 +1,36 @@
 import { z } from 'zod';
 
+export const approvedOfferSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  label: z.string().trim().min(1).max(120),
+  actionText: z.string().trim().min(1).max(400),
+  category: z.enum(['spec_sheet', 'drawing', 'swatch', 'sample', 'quote_range', 'other']).default('other'),
+  requiresEvidence: z.boolean().default(true),
+  allowsFree: z.boolean().default(false),
+  allowsSample: z.boolean().default(false),
+  allowsShipping: z.boolean().default(false),
+  conditions: z.string().trim().max(500).optional(),
+  enabled: z.boolean().default(true),
+}).strict();
+
+export const industryRuleSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(120),
+  requiredPattern: z.string().trim().max(400).optional(),
+  excludedPattern: z.string().trim().max(400).optional(),
+  keywords: z.array(z.string().trim().min(2).max(80)).max(50).default([]),
+  priority: z.number().int().min(-100).max(100).optional(),
+}).strict();
+
 export const brandProfileSchema = z.object({
+  approvedActions: z.array(z.string().trim().min(1).max(400)).max(20).optional(),
+  approvedOffers: z.array(approvedOfferSchema).max(30).optional(),
+  industryRules: z.array(industryRuleSchema).max(100).optional(),
+  activeWritingVersion: z.string().trim().max(60).optional(),
+  writingPausedReason: z.string().trim().max(300).optional(),
+  logoPath: z.string().trim().max(500).nullable().optional(),
+  defaultLetterSubject: z.string().trim().max(300).optional(),
+  defaultLetterTemplate: z.string().max(20000).optional(),
   label: z.string().trim().max(200).optional(),
   identity: z.string().trim().max(500).optional(),
   offerSummary: z.string().trim().max(2000).optional(),

@@ -6,6 +6,8 @@ import { DevelopmentLetter } from '../models';
 const TOKEN_BYTES = 32;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const MAX_TRACKED_LINKS = 100;
+const DEDUPE_WINDOW_MS = 60_000;
+const FAST_BURST_AFTER_SEND_MS = 5_000;
 
 export interface PreparedTrackingLink {
   tokenHash: string;
@@ -30,17 +32,26 @@ export interface TrackingSummary {
   opened: boolean;
   openedAt?: Date;
   openCount: number;
+  dedupedOpenCount: number;
+  automatedOpenCount: number;
+  uncertainOpenCount: number;
   lastOpenedAt?: Date;
   clicked: boolean;
   clickedAt?: Date;
   clickCount: number;
+  dedupedClickCount: number;
+  automatedClickCount: number;
   lastClickedAt?: Date;
+  /** 真实人是否看过：打开仅标「无法确定」，非扫描点击才标「可能已互动」 */
+  humanReadConfidence: 'none' | 'uncertain' | 'likely_clicked';
+  humanReadLabel: string;
   clickedLinks: {
     url: string;
     clickedAt?: Date;
     clickCount: number;
     lastClickedAt?: Date;
   }[];
+  coverageNotice: string;
   accuracyNotice: string;
 }
 
@@ -90,8 +101,6 @@ export function shouldTrackLink(value: string): boolean {
  * 纯文本、无标签内容直接返回，追踪失败也由上层降级为原始 HTML。
  */
 export function prepareTrackedHtml(html: string): PreparedTracking {
-  // A plain-text letter only gained our compliance footer at render time; it
-  // is still plain text and must not silently turn into a tracked HTML mail.
   const contentWithoutCompliance = html.replace(/<div\b[^>]*data-compliance=["']unsubscribe["'][\s\S]*?<\/div>/i, '');
   if (!/<[a-z][\s\S]*>/i.test(contentWithoutCompliance)) return { deliveryHtml: html };
 
@@ -131,51 +140,125 @@ export function prepareTrackedHtml(html: string): PreparedTracking {
 export function trackingSummary(value: unknown): TrackingSummary | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const tracking = value as {
-    enabled?: boolean; openedAt?: Date; openCount?: number; lastOpenedAt?: Date;
-    clickedAt?: Date; clickCount?: number; lastClickedAt?: Date;
+    enabled?: boolean;
+    openedAt?: Date;
+    openCount?: number;
+    dedupedOpenCount?: number;
+    automatedOpenCount?: number;
+    uncertainOpenCount?: number;
+    lastOpenedAt?: Date;
+    clickedAt?: Date;
+    clickCount?: number;
+    dedupedClickCount?: number;
+    automatedClickCount?: number;
+    unclassifiedClickedAt?: Date;
+    lastClickedAt?: Date;
     links?: { originalUrl: string; clickedAt?: Date; clickCount?: number; lastClickedAt?: Date }[];
   };
   if (!tracking.enabled) return undefined;
   const openCount = tracking.openCount ?? 0;
   const clickCount = tracking.clickCount ?? 0;
+  const automatedOpenCount = tracking.automatedOpenCount ?? 0;
+  const automatedClickCount = tracking.automatedClickCount ?? 0;
+  const dedupedOpenCount = tracking.dedupedOpenCount ?? (openCount > 0 ? 1 : 0);
+  const dedupedClickCount = tracking.dedupedClickCount ?? (clickCount > 0 ? 1 : 0);
+  const uncertainOpenCount = tracking.uncertainOpenCount ?? Math.max(0, openCount - automatedOpenCount);
+
+  const humanReadConfidence: TrackingSummary['humanReadConfidence'] =
+    tracking.unclassifiedClickedAt || (clickCount > automatedClickCount)
+      ? 'likely_clicked'
+      : openCount > 0 || clickCount > 0
+        ? 'uncertain'
+        : 'none';
+  const humanReadLabel =
+    humanReadConfidence === 'likely_clicked'
+      ? '存在非已知扫描器点击（仍建议以回复为准）'
+      : humanReadConfidence === 'uncertain'
+        ? '无法确定是否由真人阅读'
+        : '暂无互动信号';
+
   return {
     enabled: true,
     opened: openCount > 0,
     openedAt: tracking.openedAt,
     openCount,
+    dedupedOpenCount,
+    automatedOpenCount,
+    uncertainOpenCount,
     lastOpenedAt: tracking.lastOpenedAt,
     clicked: clickCount > 0,
     clickedAt: tracking.clickedAt,
     clickCount,
+    dedupedClickCount,
+    automatedClickCount,
     lastClickedAt: tracking.lastClickedAt,
+    humanReadConfidence,
+    humanReadLabel,
     clickedLinks: (tracking.links ?? []).filter((link) => (link.clickCount ?? 0) > 0).map((link) => ({
       url: link.originalUrl,
       clickedAt: link.clickedAt,
       clickCount: link.clickCount ?? 0,
       lastClickedAt: link.lastClickedAt,
     })),
-    accuracyNotice: '邮件客户端、图片代理或隐私保护可能影响统计，数据仅作互动参考。',
+    coverageNotice: '仅识别部分已知图片代理与安全扫描器（如 Google/Yahoo Proxy、Apple MPP 特征、SafeLinks、Proofpoint、Mimecast、Barracuda 及发信后 5 秒内极速预取）；未命中规则的代理仍可能混入普通计数。',
+    accuracyNotice: '邮件客户端、图片代理或隐私保护会影响统计，无法确定是否由真人阅读，且打开数据不能说明邮件进入了主收件箱。',
   };
 }
 
-function automatedTrackingRequest(req?: Request): boolean {
-  return Boolean(req && (/imageproxy|safelinks|proofpoint|mimecast|barracuda|urlscan|headlesschrome/i.test(req.get('user-agent') ?? '') ||
-    /prefetch|preview/i.test(req.get('sec-purpose') ?? req.get('purpose') ?? '')));
+const AUTOMATED_UA_PATTERN = /googleimageproxy|imageproxy|yahoomailproxy|safelinks|proofpoint|mimecast|barracuda|urlscan|headlesschrome|applemail|cfnetwork.*darwin|mozilla\/5\.0\s*\(windows nt 10\.0.*edg\/.*bingpreview|bot|crawler|spider|scanner|virustotal|fortiguard|symantec/i;
+
+export function classifyTrackingRequest(req?: Request, sentAt?: Date, now = new Date()): { automated: boolean; reason?: string } {
+  if (sentAt && now.getTime() - sentAt.getTime() >= 0 && now.getTime() - sentAt.getTime() <= FAST_BURST_AFTER_SEND_MS) {
+    return { automated: true, reason: 'post_send_fast_burst' };
+  }
+  if (!req) return { automated: false };
+  const ua = req.get('user-agent') ?? '';
+  if (AUTOMATED_UA_PATTERN.test(ua)) return { automated: true, reason: 'known_proxy_or_scanner' };
+  if (/prefetch|preview/i.test(req.get('sec-purpose') ?? req.get('purpose') ?? '')) {
+    return { automated: true, reason: 'prefetch_header' };
+  }
+  return { automated: false };
+}
+
+function requestFingerprint(req?: Request): string {
+  const ua = (req?.get('user-agent') ?? 'unknown').slice(0, 200);
+  const ip = (req?.ip ?? req?.socket?.remoteAddress ?? 'unknown').slice(0, 64);
+  return createHash('sha256').update(`${ip}|${ua}`).digest('hex').slice(0, 24);
 }
 
 export async function recordOpen(token: string, req?: Request): Promise<boolean> {
   if (!TOKEN_PATTERN.test(token)) return false;
   const now = new Date();
-  const automated = automatedTrackingRequest(req);
+  const tokenHash = hashTrackingToken(token);
+  const existing = await DevelopmentLetter.findOne({
+    'tracking.openTokenHash': tokenHash,
+    'tracking.enabled': true,
+    status: { $in: ['sent', 'opened'] },
+  }).select('+tracking.lastOpenFingerprint').lean();
+  if (!existing) return false;
+
+  const { automated } = classifyTrackingRequest(req, existing.sentAt, now);
+  const fingerprint = requestFingerprint(req);
+  const lastAt = existing.tracking?.lastOpenedAt ? new Date(existing.tracking.lastOpenedAt) : undefined;
+  const isDuplicateBurst = Boolean(
+    lastAt
+    && now.getTime() - lastAt.getTime() <= DEDUPE_WINDOW_MS
+    && (!existing.tracking?.lastOpenFingerprint || existing.tracking.lastOpenFingerprint === fingerprint),
+  );
+
   const result = await DevelopmentLetter.updateOne({
-    'tracking.openTokenHash': hashTrackingToken(token),
+    _id: existing._id,
     'tracking.enabled': true,
     status: { $in: ['sent', 'opened'] },
   }, {
-    $set: { status: 'opened' },
+    $set: { status: 'opened', 'tracking.lastOpenFingerprint': fingerprint },
     $min: { 'tracking.openedAt': now, ...(!automated ? { 'tracking.unclassifiedOpenedAt': now } : {}) },
     $max: { 'tracking.lastOpenedAt': now },
-    $inc: { 'tracking.openCount': 1, ...(automated ? { 'tracking.automatedOpenCount': 1 } : {}) },
+    $inc: {
+      'tracking.openCount': 1,
+      ...(!isDuplicateBurst ? { 'tracking.dedupedOpenCount': 1 } : {}),
+      ...(automated ? { 'tracking.automatedOpenCount': 1 } : { 'tracking.uncertainOpenCount': 1 }),
+    },
   });
   return result.modifiedCount === 1;
 }
@@ -187,21 +270,35 @@ export async function recordClick(token: string, req?: Request): Promise<string 
     'tracking.links.tokenHash': tokenHash,
     'tracking.enabled': true,
     status: { $in: ['sent', 'opened'] },
-  }).select('+tracking.links.tokenHash');
+  }).select('+tracking.links.tokenHash +tracking.lastClickFingerprint');
   const link = doc?.tracking?.links.find((item) => item.tokenHash === tokenHash);
   if (!doc || !link || !isSafeRedirectUrl(link.originalUrl)) return null;
 
   const now = new Date();
-  const automated = automatedTrackingRequest(req);
+  const { automated } = classifyTrackingRequest(req, doc.sentAt, now);
+  const fingerprint = requestFingerprint(req);
+  const lastAt = doc.tracking?.lastClickedAt ? new Date(doc.tracking.lastClickedAt) : undefined;
+  const isDuplicateBurst = Boolean(
+    lastAt
+    && now.getTime() - lastAt.getTime() <= DEDUPE_WINDOW_MS
+    && (!doc.tracking?.lastClickFingerprint || doc.tracking.lastClickFingerprint === fingerprint),
+  );
+
   const result = await DevelopmentLetter.updateOne({
     _id: doc._id,
     'tracking.links.tokenHash': tokenHash,
     'tracking.enabled': true,
     status: { $in: ['sent', 'opened'] },
   }, {
+    $set: { 'tracking.lastClickFingerprint': fingerprint },
     $min: { 'tracking.clickedAt': now, 'tracking.links.$.clickedAt': now, ...(!automated ? { 'tracking.unclassifiedClickedAt': now } : {}) },
     $max: { 'tracking.lastClickedAt': now, 'tracking.links.$.lastClickedAt': now },
-    $inc: { 'tracking.clickCount': 1, 'tracking.links.$.clickCount': 1, ...(automated ? { 'tracking.automatedClickCount': 1 } : {}) },
+    $inc: {
+      'tracking.clickCount': 1,
+      'tracking.links.$.clickCount': 1,
+      ...(!isDuplicateBurst ? { 'tracking.dedupedClickCount': 1 } : {}),
+      ...(automated ? { 'tracking.automatedClickCount': 1 } : {}),
+    },
   });
   return result.modifiedCount === 1 ? link.originalUrl : null;
 }

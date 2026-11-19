@@ -36,6 +36,8 @@ export interface SendMailPayload {
   references?: string[];
   /** RFC 2369 / RFC 8058 compliance headers, set server-side only. */
   headers?: Record<string, string>;
+  /** 可选随信发送的附件（已由服务端校验归属与大小） */
+  attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
 
 export interface SendMailResult {
@@ -138,6 +140,7 @@ async function sendViaSmtp(payload: SendMailPayload, config: ProjectMailConfig):
       inReplyTo: payload.inReplyTo,
       references: payload.references,
       headers: payload.headers,
+      ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
     });
 
     logger.info(`[smtp] 开发信发送成功 -> ${payload.to} | messageId=${info.messageId}`);

@@ -72,6 +72,9 @@ import {
   attachmentIdParamsSchema,
   createAttachmentSchema,
 } from '../validators/attachment.validator';
+import { asyncHandler } from '../utils/asyncHandler';
+import { sendSuccess } from '../utils/pagination';
+import { enrichCustomerContact } from '../services/prospecting/customer-contact.service';
 import {
   deleteAttachmentHandler,
   downloadAttachmentHandler,
@@ -129,6 +132,10 @@ router.post('/bulk/draft-cleanup', validate({ body: bulkDraftCleanupSchema }), b
 /* ---------- 单条操作 ---------- */
 // 转交跟进：管理员把客户和后续跟进交给另一位业务员，并停止原自动开发。
 router.post('/:id/handoff', requireRole('admin'), validate({ params: idParamsSchema, body: handoffCustomerSchema }), handoffCustomerHandler);
+router.post('/:id/enrich-contact', validate({ params: idParamsSchema }), asyncHandler(async (req, res) => {
+  const { useHunter, promoteIfGeneric } = (req.body ?? {}) as { useHunter?: boolean; promoteIfGeneric?: boolean };
+  sendSuccess(res, await enrichCustomerContact(req.params.id, req.user!, { useHunter, promoteIfGeneric }));
+}));
 router.get('/:id', validate({ params: idParamsSchema }), getCustomerHandler);
 router.put('/:id', validate({ params: idParamsSchema, body: updateCustomerSchema }), updateCustomerHandler);
 router.delete('/:id', validate({ params: idParamsSchema }), deleteCustomerHandler);

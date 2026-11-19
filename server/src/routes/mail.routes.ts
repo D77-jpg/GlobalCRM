@@ -14,6 +14,7 @@ import { MailMessage, MailSyncState } from '../models/MailMessage';
 import { DevelopmentLetter, Customer } from '../models';
 import { Prospect } from '../models/Prospect';
 import { getCustomerByIdOrThrow } from '../services/customer.service';
+import { getObject } from '../services/storage.service';
 import { findThread, mailboxKey, personalMailboxKey, relinkMailCustomers, syncInbox, syncPersonalInbox } from '../services/mail-sync.service';
 import { sendLetterSchema } from '../validators/letter.validator';
 import { sendLetter } from '../services/letter.service';
@@ -225,7 +226,9 @@ router.get('/:id/attachments/:attachmentId', validate({ params: params.extend({ 
   const att = doc?.attachments.id(new Types.ObjectId(req.params.attachmentId));
   if (!att?.filename || att.blocked || path.basename(att.filename) !== att.filename) throw ApiError.notFound('附件不存在或被安全策略拦截');
   let buffer: Buffer;
-  try { buffer = await fs.readFile(path.join(env.UPLOAD_DIR, 'mail', String(doc.projectId), att.filename)); } catch {
+  try {
+    buffer = await getObject(`mail/${String(doc.projectId)}/${att.filename}`);
+  } catch {
     // V2.5 以前附件位于 mail 根目录；只对已通过项目权限校验的记录回退读取。
     try { buffer = await fs.readFile(path.join(env.UPLOAD_DIR, 'mail', att.filename)); } catch { throw ApiError.notFound('附件文件不存在'); }
   }

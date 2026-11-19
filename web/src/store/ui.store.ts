@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import type {KnowledgeHandoff} from '@/lib/knowledge-sales';
 import { STORAGE_KEYS } from '@/constants';
-import { readStorage, writeStorage } from '@/lib/utils';
+import { createClientId, readStorage, writeStorage } from '@/lib/utils';
 
 export type Theme = 'light' | 'dark';
 
@@ -75,7 +75,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   scratchpadOpen: false,
   agentOpen: false,
   agentKnowledgeHandoff: null,
-  prepareKnowledgeEmail: value => set({agentKnowledgeHandoff:{...value,requestId:crypto.randomUUID()},agentOpen:true,scratchpadOpen:false,agentCustomerPreviewId:null,agentCustomerAnalysisId:null,agentCustomerAnalysisCustomerId:null,agentMailAnalysisId:null,agentMailAnalysisMailId:null,agentMailAnalysisDirection:null}),
+  prepareKnowledgeEmail: value => set({agentKnowledgeHandoff:{...value,requestId:createClientId()},agentOpen:true,scratchpadOpen:false,agentCustomerPreviewId:null,agentCustomerAnalysisId:null,agentCustomerAnalysisCustomerId:null,agentMailAnalysisId:null,agentMailAnalysisMailId:null,agentMailAnalysisDirection:null}),
   clearKnowledgeHandoff: requestId => set(state=>state.agentKnowledgeHandoff?.requestId===requestId?{agentKnowledgeHandoff:null}:{}),
   agentBatchCustomerIds:[],
   openAgentBatch:(ids)=>set({agentOpen:true,agentBatchCustomerIds:ids}),

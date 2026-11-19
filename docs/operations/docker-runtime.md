@@ -26,6 +26,16 @@ The API and worker share `knowledge_index`. To enable local parsing and semantic
 
 Test packaging without production credentials: `node --test scripts/docker-runtime.test.cjs scripts/mongo-backup.test.cjs`, `docker compose --env-file production.env.example config --quiet`, and `docker compose --env-file production.env.example build` (build only; placeholder env MUST NOT be used for production startup). For a real smoke use an isolated test env with generated random strong secrets and no business database; remove test volumes explicitly only after verifying project name/volume ownership.
 
+## Production upgrade & outreach rollout checklist
+
+Before promoting an existing deployment to automated outreach:
+
+1. **Backup & isolated restore rehearsal:** run `scripts/mongo-backup.cjs` to back up Mongo, copy `/data/uploads` separately, and rehearse restore into an isolated `*_rehearsal` database.
+2. **Migrations `014` / `015` / `016`:** verify `npm run migrate:status --prefix server` and run `npm run ops:verify-upgrade --prefix server` to confirm replica-set transactions, zero `organizationId: null` knowledge chunks/index items, brand package binding, and new analytics/TTL indexes.
+3. **Audit legacy automated campaigns:** inspect `GET /api/outreach-automation/upgrade-audit` (admin) before enabling live sending; explicitly migrate any legacy campaigns missing `rolloutMode` into `shadow`, `pilot`, or `active` via `POST /api/outreach-automation/migrate-legacy-modes`.
+4. **Private brand packages:** for clean generic installations set `BRAND_PACKAGES_MODE=strict`, export private brand packages via `npm run brand:export --prefix server -- <private-dir>`, and import them per workspace through the Playbook Admin UI or API.
+5. **Live verification:** confirm public HTTPS certificates, real verified sender mailboxes (`SMTP`), published project knowledge entries for all active brands, and run `npm run eval:outreach:live --prefix server` with live model credentials before scaling beyond pilot cohorts.
+
 ## H-14 release candidate operations (not yet accepted)
 
 Keep the existing v1.0 contract and v1.1 quotation-extension hashes immutable. H-14 starts from reviewed `origin/main@2213b45` (Genesis) plus `origin/main@7b29a04` (AutoForceAI); these are **pre-closure snapshots**, not future release tag commits. The H-14 local full server suite, web build, isolated backup tests and Compose validation have passed with skip=0; remote PR and merged-main Actions must pass again. Do not delete historical branches without repository-owner review and do not create a release tag until remote gates, history scan, compatibility record, and required branch cleanup are complete. The combined operations and 24-hour production trial checklist lives at AutoForceAI `deploy/H14_RELEASE_CHECKLIST.md`. Public HTTPS certificates, clean-volume login/business E2E, independent database restore rehearsals and uninterrupted production trial remain unverified; local test success does not qualify them as passed.

@@ -36,19 +36,33 @@ export function outreachDueAt(sentAt: Date, step: number): Date {
   return new Date(sentAt.getTime() + outreachIntervalDays(step) * DAY);
 }
 
-/** 判断客户在指定时间之后是否发来入站邮件。 */
+import { freshReplyText } from '../utils/text';
+import { detectProtectedMailSignal } from './agent/mail-thread-analysis.service';
+
+const AUTO_REPLY_PATTERN = /\b(?:out of office|automatic reply|auto[- ]?reply|vacation reply|away from (?:the )?office|i am currently out|auto[- ]?response|delivery status notification|undeliverable)\b|自动回复|休假中|外出自动回复|无法投递|退信/i;
+
+/** 判断客户在指定时间之后是否发来真实有效入站邮件（过滤自动回复/OOO 与系统退信）。 */
 export async function hasInboundReplySince(
   projectId: string | mongoose.Types.ObjectId,
   customerId: string | mongoose.Types.ObjectId,
   since: Date | null | undefined,
 ): Promise<boolean> {
   if (!since) return false;
-  return Boolean(await MailMessage.exists({
+  const rows = await MailMessage.find({
     projectId,
     customerId,
     deleted: { $ne: true },
     sentAt: { $gt: since },
-  }));
+  }).select('from subject text html').sort({ sentAt: -1 }).limit(20).lean();
+  for (const row of rows) {
+    const body = freshReplyText(row.text, row.html);
+    const subj = row.subject ?? '';
+    if (AUTO_REPLY_PATTERN.test(subj) || AUTO_REPLY_PATTERN.test(body.slice(0, 300))) continue;
+    const signal = detectProtectedMailSignal({ from: row.from, subject: subj, text: body });
+    if (signal.classification === 'bounce') continue;
+    return true;
+  }
+  return false;
 }
 
 /**

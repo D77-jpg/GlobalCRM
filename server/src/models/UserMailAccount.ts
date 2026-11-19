@@ -4,6 +4,20 @@ import { Schema, model, Types, type HydratedDocument } from 'mongoose';
 export type MailAccountStatus = 'active' | 'disabled';
 export type MailVerificationStatus = 'unverified' | 'verified' | 'failed';
 
+export interface MailboxWarmupState {
+  enabled: boolean;
+  startedAt?: Date;
+  startLimit: number;
+  dailyIncrement: number;
+  maxLimit: number;
+  /** 该邮箱实际发送过的独立自然日数，按自身节奏递增而非跟项目共用。 */
+  activeSendDays: number;
+  lastSendDay?: string;
+  recentSentCount: number;
+  recentHardBounceCount: number;
+  cooledDownUntil?: Date;
+}
+
 export interface IUserMailAccount {
   projectId: Types.ObjectId;
   userId: Types.ObjectId;
@@ -32,6 +46,7 @@ export interface IUserMailAccount {
   imapVerifiedAt?: Date;
   lastImapVerificationError?: string;
   dailyLimit: number;
+  warmup?: MailboxWarmupState;
   createdBy: Types.ObjectId;
   updatedBy: Types.ObjectId;
   createdAt: Date;
@@ -69,6 +84,18 @@ const UserMailAccountSchema = new Schema<IUserMailAccount>(
     imapVerifiedAt: Date,
     lastImapVerificationError: { type: String, maxlength: 500 },
     dailyLimit: { type: Number, default: 100, min: 1, max: 5000 },
+    warmup: {
+      enabled: { type: Boolean, default: false },
+      startedAt: Date,
+      startLimit: { type: Number, default: 10, min: 1, max: 500 },
+      dailyIncrement: { type: Number, default: 5, min: 1, max: 200 },
+      maxLimit: { type: Number, default: 100, min: 1, max: 5000 },
+      activeSendDays: { type: Number, default: 0, min: 0 },
+      lastSendDay: { type: String, maxlength: 16 },
+      recentSentCount: { type: Number, default: 0, min: 0 },
+      recentHardBounceCount: { type: Number, default: 0, min: 0 },
+      cooledDownUntil: Date,
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },

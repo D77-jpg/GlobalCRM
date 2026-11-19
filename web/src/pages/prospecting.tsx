@@ -241,7 +241,7 @@ export function ProspectingPage(): React.JSX.Element {
 
   React.useEffect(() => {
     if (data?.run?.status !== 'running') return;
-    const timer = window.setInterval(() => { void load(); }, 3000);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 3000);
     return () => window.clearInterval(timer);
   }, [data?.run?.status, load]);
 

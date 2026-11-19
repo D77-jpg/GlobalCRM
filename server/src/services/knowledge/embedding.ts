@@ -1,16 +1,23 @@
 import {LocalProcessPool,RuntimeFailure} from './process-pool';
 import {createHash} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {readFile,stat} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {z} from 'zod';
 import type {IndexIdentity} from '../../models/KnowledgeIndex';
 export const sha=(text:string|Buffer)=>createHash('sha256').update(text).digest('hex');
 export class IndexError extends Error { constructor(public code:string,message:string){super(message);} }
 const root=resolve(__dirname,'../../../semantic');
+const identityFiles=['model.json','runtime.py','retrieval.py','reranker.json'] as const;
+let cachedIdentity: { sig: string; value: IndexIdentity } | undefined;
 export async function embeddingIdentity():Promise<IndexIdentity>{
- const raw=await readFile(join(root,'model.json'),'utf8');
- const lock=JSON.parse(raw) as {model:string;revision:string;files:Record<string,string>;weight:string;dimension:number;maxTokens:number;adapter:string};
- return {id:sha(raw+sha(await readFile(join(root,'runtime.py')))+sha(await readFile(join(root,'retrieval.py')))+sha(await readFile(join(root,'reranker.json')))),model:lock.model,revision:lock.revision,weightHash:lock.files[lock.weight],dimension:lock.dimension,adapter:lock.adapter,maxTokens:lock.maxTokens};
+ const stats=await Promise.all(identityFiles.map(file=>stat(join(root,file))));
+ const sig=stats.map(s=>`${s.mtimeMs}:${s.size}`).join('|');
+ if(cachedIdentity&&cachedIdentity.sig===sig)return cachedIdentity.value;
+ const [raw,runtimePy,retrievalPy,rerankerJson]=await Promise.all(identityFiles.map((file,i)=>i===0?readFile(join(root,file),'utf8'):readFile(join(root,file))));
+ const lock=JSON.parse(raw as string) as {model:string;revision:string;files:Record<string,string>;weight:string;dimension:number;maxTokens:number;adapter:string};
+ const value:IndexIdentity={id:sha((raw as string)+sha(runtimePy)+sha(retrievalPy)+sha(rerankerJson)),model:lock.model,revision:lock.revision,weightHash:lock.files[lock.weight],dimension:lock.dimension,adapter:lock.adapter,maxTokens:lock.maxTokens};
+ cachedIdentity={sig,value};
+ return value;
 }
 const output=z.object({identity:z.string(),dimension:z.number().int(),adapter:z.string(),elapsedMs:z.number().finite(),rssMiB:z.number().finite(),
  vectors:z.array(z.array(z.number().finite()).min(1).max(4096)).max(16).optional(),

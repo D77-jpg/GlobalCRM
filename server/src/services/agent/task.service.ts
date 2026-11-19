@@ -108,8 +108,50 @@ async function owned(id: string, actor: AuthUser) {
 export async function getAgentTask(id: string, actor: AuthUser) { return dto(await owned(id,actor),actor); }
 export async function listAgentTasks(actor: AuthUser) {
  const rows = await AgentTask.find(scope(actor)).sort({createdAt: -1}).limit(30);
+ if (!rows.length) return [];
+ // Batch-fetch accessible customers and candidate names instead of N+1 queries and per-row taskContextStamp.
+ const customerIds = [...new Set(rows.flatMap((t) => [
+  ...(t.customerId ? [String(t.customerId)] : []),
+  ...t.candidates.map((c) => String(c.id)),
+ ]))];
+ const customers = customerIds.length
+  ? await Customer.find({ ...customerScope(actor), _id: { $in: customerIds } }).select('_id name company').lean()
+  : [];
+ const customerMap = new Map(customers.map((c) => [String(c._id), c]));
+ const sourceMailIds = [...new Set(rows.map((t) => t.sourceMailId?.toString()).filter((x): x is string => Boolean(x)))];
+ const accessibleMails = new Set<string>();
+ for (const mailId of sourceMailIds) {
+  try { await agentMailOrThrow(mailId, actor); accessibleMails.add(mailId); } catch { /* skip unauthorized */ }
+ }
  const result = [];
- for (const task of rows) { try { result.push(await dto(task,actor)); } catch (error) { if (!(error instanceof ApiError && error.statusCode === 404)) throw error; } }
+ for (const task of rows) {
+  if (task.customerId && !customerMap.has(String(task.customerId))) continue;
+  if (task.sourceMailId && !accessibleMails.has(String(task.sourceMailId))) continue;
+  const customer = task.customerId ? customerMap.get(String(task.customerId)) : undefined;
+  const candidates = task.candidates
+   .map((c) => customerMap.get(String(c.id)))
+   .filter((c): c is NonNullable<typeof c> => Boolean(c));
+  result.push({
+   id: task.id, sessionId: String(task.sessionId), goal: task.goal, status: task.status, version: task.version,
+   customerId: task.customerId?.toString(), customerName: customer?.name,
+   analysisId: task.analysisId?.toString(), draftId: task.draftId?.toString(), needsRefresh: false,
+   staleDraftId: undefined, sentLetterId: task.sentLetterId?.toString(),
+   completedSteps: task.completedSteps, currentStep: task.currentStep,
+   workflowEpoch: task.workflowEpoch ?? 0, workflowCalls: task.workflowCalls ?? 0, workflowActiveMs: task.workflowActiveMs ?? 0,
+   previousArtifacts: task.previousArtifacts ?? [],
+   workflow: (task.workflowRecords ?? []).map(({ payload, ...record }) => ({
+    ...record, label: workflowLabels[record.key] ?? record.key, metrics: stepMetrics(record.key, payload),
+    partial: record.key === 'audit_claims' && (payload as { review?: { completeness?: string } } | undefined)?.review?.completeness === 'partial',
+   })),
+   events: task.events, error: task.error?.code ? task.error : undefined, attempts: task.attempts,
+   candidates: candidates.map((c) => ({ id: String(c._id), name: c.name, company: c.company })),
+   kind: task.kind, outreachStep: task.outreachStep, sourceMailId: task.sourceMailId?.toString(),
+   mailAnalysisId: task.mailAnalysisId?.toString(), automatic: Boolean(task.automationRuleId),
+   parentBatchId: task.parentBatchId?.toString(), skillVersion: task.skillVersion,
+   contextSummary: task.contextSummary, tokenBudget: task.tokenBudget, budgetCharged: task.budgetCharged,
+   createdAt: task.createdAt, updatedAt: task.updatedAt,
+  });
+ }
  return result;
 }
 export async function createAgentTask(input: {sessionId: string; goal: string; requestKey: string; customerId?:string; parentBatchId?:string; knowledgeIds?:string[]; tokenBudget?:number; outreachStep?:1|2|3}, actor: AuthUser) {

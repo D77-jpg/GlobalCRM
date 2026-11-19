@@ -13,23 +13,35 @@ export function MailInteractionSummary({
   detailed?: boolean;
 }): React.JSX.Element {
   if (!detailed) {
+    const openDisplay = tracking?.opened
+      ? `打开 × ${tracking.dedupedOpenCount ?? tracking.openCount}${tracking.humanReadConfidence === 'uncertain' ? '（无法确定真实阅读）' : ''}`
+      : '未记录打开';
+    const clickDisplay = tracking?.clicked
+      ? `点击 × ${tracking.dedupedClickCount ?? tracking.clickCount}`
+      : '未记录点击';
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground" aria-label="邮件互动情况">
         {tracking ? (
           <>
-            <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" aria-hidden />{tracking.opened ? `打开 × ${tracking.openCount}` : '未记录打开'}</span>
-            <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" aria-hidden />{tracking.clicked ? `点击 × ${tracking.clickCount}` : '未记录点击'}</span>
+            <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" aria-hidden />{openDisplay}</span>
+            <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" aria-hidden />{clickDisplay}</span>
           </>
         ) : <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" aria-hidden />未开启打开/点击统计</span>}
       </div>
     );
   }
 
+  const confidenceLabel = tracking?.humanReadConfidence === 'likely_clicked'
+    ? '高（存在非扫描器点击）'
+    : tracking?.humanReadConfidence === 'uncertain'
+      ? '无法确定（可能含代理/预加载）'
+      : '暂无互动信号';
+
   const tiles: { label: string; value: string; tone?: string }[] = [
-    { label: '打开次数', value: tracking ? String(tracking.openCount) : '—', tone: tracking?.opened ? 'text-mint' : undefined },
-    { label: '点击次数', value: tracking ? String(tracking.clickCount) : '—', tone: tracking?.clicked ? 'text-violet' : undefined },
-    { label: '最近打开', value: tracking?.lastOpenedAt ? formatDateTime(tracking.lastOpenedAt) : '暂无记录' },
-    { label: '最近点击', value: tracking?.lastClickedAt ? formatDateTime(tracking.lastClickedAt) : '暂无记录' },
+    { label: '去重打开（原始）', value: tracking ? `${tracking.dedupedOpenCount ?? tracking.openCount}（${tracking.openCount}）` : '—', tone: tracking?.opened ? 'text-mint' : undefined },
+    { label: '去重点击（原始）', value: tracking ? `${tracking.dedupedClickCount ?? tracking.clickCount}（${tracking.clickCount}）` : '—', tone: tracking?.clicked ? 'text-violet' : undefined },
+    { label: '真实阅读判断', value: tracking ? confidenceLabel : '—' },
+    { label: '最近互动', value: tracking?.lastClickedAt ? formatDateTime(tracking.lastClickedAt) : tracking?.lastOpenedAt ? formatDateTime(tracking.lastOpenedAt) : '暂无记录' },
   ];
 
   return (
@@ -42,7 +54,7 @@ export function MailInteractionSummary({
         {tiles.map(tile => (
           <div key={tile.label} className="rounded-xl bg-card px-3 py-2 shadow-card">
             <p className="text-[11px] text-muted-foreground">{tile.label}</p>
-            <p className={`mt-0.5 truncate text-[0.8125rem] font-semibold tabular-nums ${tile.tone ?? 'text-foreground'}`}>{tile.value}</p>
+            <p className={`mt-0.5 truncate text-[0.8125rem] font-semibold tabular-nums ${tile.tone ?? 'text-foreground'}`} title={tile.value}>{tile.value}</p>
           </div>
         ))}
       </div>
@@ -55,6 +67,7 @@ export function MailInteractionSummary({
         )) : <p className="text-[11px] text-muted-foreground">暂无记录</p>}
       </div>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{tracking?.accuracyNotice || '纯文本邮件或追踪未启用，不会产生打开与点击数据。'}</p>
+      {tracking?.coverageNotice ? <p className="text-[11px] leading-relaxed text-muted-foreground">{tracking.coverageNotice}</p> : null}
     </section>
   );
 }

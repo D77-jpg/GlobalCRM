@@ -8,6 +8,7 @@ import {Textarea} from '@/components/ui/textarea';
 import {Switch} from '@/components/ui/switch';
 import {Select,SelectContent,SelectItem,SelectTrigger,SelectValue} from '@/components/ui/select';
 import {apiGet,apiPost,apiPut,toErrorMessage} from '@/lib/api';
+import {createClientId} from '@/lib/utils';
 import type {ProspectingConfig,SearchProfile} from '@/types';
 
 function ProfileSelect({id,label,value,profiles,onChange,disabled=false}:{disabled?:boolean;id:string;label:string;value:string;profiles:SearchProfile[];onChange:(id:string)=>void}){
@@ -34,7 +35,7 @@ export function ProspectingSettingsDialog({open,onOpenChange,onCompleted}:Props)
  const {config,setConfig,error,setError,retry}=useConfig(open),[selected,setSelected]=React.useState(''),[saving,setSaving]=React.useState(false);
  const profile=config?.profiles.find(p=>p.id===selected)??config?.profiles.find(p=>p.id===config.activeProfileId)??config?.profiles[0];
  const patch=(value:Partial<SearchProfile>)=>setConfig(current=>current&&profile?{...current,profiles:current.profiles.map(p=>p.id===profile.id?{...p,...value}:p)}:current);
- const add=(copy:boolean)=>{if(!config||!profile)return;const id=crypto.randomUUID();let n=config.profiles.length+1;let name=(copy?profile.name.slice(0,40)+' 副本 ':'新方案 ')+n;while(config.profiles.some(p=>p.name===name))name=(copy?profile.name.slice(0,40)+' 副本 ':'新方案 ')+(++n);
+ const add=(copy:boolean)=>{if(!config||!profile)return;const id=createClientId();let n=config.profiles.length+1;let name=(copy?profile.name.slice(0,40)+' 副本 ':'新方案 ')+n;while(config.profiles.some(p=>p.name===name))name=(copy?profile.name.slice(0,40)+' 副本 ':'新方案 ')+(++n);
  setConfig({...config,profiles:[...config.profiles,{...profile,id,name,queries:copy?[...profile.queries]:['']}]});setSelected(id);setError('');};
  const remove=()=>{if(!config||!profile||config.profiles.length===1)return;const profiles=config.profiles.filter(p=>p.id!==profile.id);setConfig({...config,profiles,activeProfileId:config.activeProfileId===profile.id?profiles[0].id:config.activeProfileId});setSelected(profiles[0].id);};
  async function save(){if(!config)return;const clean=config.profiles.map(p=>({...p,name:p.name.trim(),queries:p.queries.map(q=>q.trim()).filter(Boolean)}));const invalid=profileError(clean);if(invalid){setError(invalid);return;}setSaving(true);setError('');

@@ -1,0 +1,853 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "2026-11-19.1",
+  "description": "Fictional repeatable outreach evaluation samples across Genesis, IronHue, and Velaturo covering rich, sparse, generic_email, brand_role, procurement_role, and tricky_angle scenarios.",
+  "samples": [
+    {
+      "id": "gen-01-rich",
+      "brandKey": "genesis",
+      "scenario": "rich",
+      "customer": {
+        "name": "Clara Lindqvist",
+        "company": "Nordic Lume Jewelry",
+        "email": "clara@nordiclume.example.test",
+        "title": "Product & Packaging Manager",
+        "country": "Sweden",
+        "industry": "Fine Jewelry",
+        "interestedProducts": "velvet jewelry pouches and rigid gift boxes",
+        "websiteText": "Nordic Lume Jewelry crafts 18k vermeil necklaces, oval signet rings, and pearl earrings across 40 retail stockists. Every order ships in a keepsake pouch and gift box."
+      },
+      "knowledgeProof": "We manufacture color-matched rigid gift boxes and microfiber pouches in the same facility with 100-piece standard MOQ and pre-production physical samples.",
+      "expectedSegmentPrefix": "I",
+      "forbiddenSegmentCodes": ["I33", "I31"],
+      "expectedCues": ["ring", "necklace", "earring", "pouch", "box"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Introduction from Genesis Bags - High Quality Packaging",
+          "bodyText": "Dear Clara,\n\nI am reaching out to introduce our company Genesis Bags. We are a leading manufacturer of high quality and competitive prices custom packaging boxes and pouches in China. Our factory has many years of experience serving clients worldwide with excellent quality and best service.\n\nWe can provide all kinds of jewelry boxes, velvet pouches, paper bags, and custom displays with fast delivery and low MOQ. Please send us your full specifications, annual forecast, target pricing, and drawings so we can quote you immediately.\n\nLook forward to your early reply."
+        },
+        "step2": {
+          "subject": "Re: Introduction from Genesis Bags - High Quality Packaging",
+          "bodyText": "Dear Clara,\n\nFollowing up on my email of last week. We are a leading manufacturer of high quality and competitive prices custom packaging boxes and pouches.\n\nPlease send us your full specifications, annual forecast, target pricing, and drawings so we can quote you immediately?"
+        },
+        "step3": {
+          "subject": "Re: Introduction from Genesis Bags - High Quality Packaging",
+          "bodyText": "Dear Clara,\n\nFollowing up again. We still hope to work with you on boxes and pouches. Please let us know when you have time to send your specifications."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Nordic Lume jewelry pouch and box match",
+          "bodyText": "Hi Clara,\n\nYour 18k vermeil necklaces and oval signet rings ship in both a keepsake pouch and a gift box, which can make shade consistency across two items tricky during restocks.\n\nWe produce rigid boxes and microfiber pouches under one roof, color-matched from the same production run with pre-production physical samples before bulk.\n\nWould it help if I sent a quick spec comparison for matched ring boxes and pouches?"
+        },
+        "step2": {
+          "subject": "Nordic Lume jewelry pouch and box match",
+          "bodyText": "Hi Clara,\n\nQuick follow-up on your retail stockist packaging.\n\nFor multi-SKU lines like yours, one outer rigid box paired with interchangeable inserts keeps unit cartons uniform while holding necklaces, rings, and earrings.\n\nWorth a look at a two-insert layout note?"
+        },
+        "step3": {
+          "subject": "Nordic Lume jewelry pouch and box match",
+          "bodyText": "Hi Clara,\n\nI do not want to keep filling your inbox, so this will be my last note for now.\n\nIf packaging replenishment comes up later this season, or if another teammate handles packaging sourcing, feel free to point me their way.\n\nThank you for your time."
+        }
+      }
+    },
+    {
+      "id": "gen-02-sparse",
+      "brandKey": "genesis",
+      "scenario": "sparse",
+      "customer": {
+        "name": "Elena Rossi",
+        "company": "Vela Fragrance Studio",
+        "email": "elena@velafragrance.example.test",
+        "title": "",
+        "country": "Italy",
+        "industry": "Fragrance & Perfume",
+        "interestedProducts": "perfume boxes",
+        "websiteText": "Vela Fragrance Studio - artisanal eau de parfum bottles."
+      },
+      "knowledgeProof": "We make rigid fragrance boxes with custom EVA or paperboard inserts, starting at 100 pieces for standard structures.",
+      "expectedSegmentPrefix": "I",
+      "forbiddenSegmentCodes": ["I31", "I35"],
+      "expectedCues": ["fragrance", "perfume", "parfum"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Custom Perfume Packaging Manufacturer",
+          "bodyText": "Dear Elena,\n\nHope this email finds you well. I am reaching out to introduce our factory. We are a leading manufacturer of perfume boxes with high quality and competitive pricing. Could you please send us your bottle dimensions, quantity, target price, and full artwork files?"
+        },
+        "step2": {
+          "subject": "Re: Custom Perfume Packaging Manufacturer",
+          "bodyText": "Dear Elena,\n\nFollowing up on my email of Tuesday. Did you get a chance to check our perfume box capabilities? Could you please send us your bottle dimensions, quantity, target price, and full artwork files?"
+        },
+        "step3": {
+          "subject": "Re: Custom Perfume Packaging Manufacturer",
+          "bodyText": "Dear Elena,\n\nChecking in one more time regarding perfume boxes. Please reply with your specs."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Rigid boxes for Vela eau de parfum",
+          "bodyText": "Hi Elena,\n\nWriting because you produce artisanal eau de parfum bottles and may review box suppliers between batches.\n\nWe build rigid fragrance boxes with custom protective inserts starting at 100 pieces for standard structures.\n\nAre you open to a short backup-supplier comparison for your next bottle run?"
+        },
+        "step2": {
+          "subject": "Rigid boxes for Vela eau de parfum",
+          "bodyText": "Hi Elena,\n\nCircling back briefly on fragrance box options.\n\nOur production team confirms physical samples with your bottle weight before bulk runs so the insert fits snugly in transit.\n\nWorth seeing a quick insert-option note?"
+        },
+        "step3": {
+          "subject": "Rigid boxes for Vela eau de parfum",
+          "bodyText": "Hi Elena,\n\nI will pause here so I do not crowd your inbox.\n\nIf you revisit fragrance box sourcing later this year, I am glad to reconnect whenever timing fits.\n\nThanks again for reading."
+        }
+      }
+    },
+    {
+      "id": "gen-03-generic",
+      "brandKey": "genesis",
+      "scenario": "generic_email",
+      "customer": {
+        "name": "Solstice Candle Co",
+        "company": "Solstice Candle Co",
+        "email": "info@solsticecandle.example.test",
+        "title": "",
+        "country": "United Kingdom",
+        "industry": "Scented Candles",
+        "interestedProducts": "candle boxes",
+        "websiteText": "Solstice Candle Co makes hand-poured soy wax candles in 220g amber glass jars."
+      },
+      "knowledgeProof": "We produce heavy-board candle rigid boxes with reinforced inner collars and signed pre-production samples for repeat orders.",
+      "expectedSegmentPrefix": "I",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["candle", "soy wax", "jar"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Candle Box Supplier Introduction",
+          "bodyText": "Dear Sir/Madam,\n\nI am reaching out to introduce our packaging factory. We supply high quality and competitive prices candle boxes for many brands. Could you share your annual demand and target pricing?"
+        },
+        "step2": {
+          "subject": "Re: Candle Box Supplier Introduction",
+          "bodyText": "Dear Sir/Madam,\n\nFollowing up on my email of last week about candle boxes. Could you share your annual demand and target pricing?"
+        },
+        "step3": {
+          "subject": "Re: Candle Box Supplier Introduction",
+          "bodyText": "Dear Sir/Madam,\n\nJust checking in again about candle packaging."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Packaging for 220g amber candle jars",
+          "bodyText": "Dear Solstice Candle Co team,\n\nYour 220g amber glass soy candles are heavier than standard gift items, so box rigidity during shipping often matters as much as finish.\n\nWe manufacture rigid candle boxes with reinforced inner collars and lock specifications against a signed sample for consistent reorders.\n\nCould you point me to the person who handles packaging sourcing for your candle range?"
+        },
+        "step2": {
+          "subject": "Packaging for 220g amber candle jars",
+          "bodyText": "Dear Solstice Candle Co team,\n\nQuick note in case my earlier message missed the right desk.\n\nWe also run single-factory box and dust-bag sets so seasonal gift editions keep the same board tone.\n\nWho is best to send a brief spec sheet to?"
+        },
+        "step3": {
+          "subject": "Packaging for 220g amber candle jars",
+          "bodyText": "Dear Solstice Candle Co team,\n\nI do not want to keep filling your inbox, so I will close the loop here.\n\nIf packaging comes up before your next seasonal pour, feel free to pass my note along.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "gen-04-brand-role",
+      "brandKey": "genesis",
+      "scenario": "brand_role",
+      "customer": {
+        "name": "Maya Chen",
+        "company": "Aurelia Skincare",
+        "email": "maya@aureliaskin.example.test",
+        "title": "Founder & Creative Director",
+        "country": "United States",
+        "industry": "Skincare",
+        "interestedProducts": "skincare gift set boxes",
+        "websiteText": "Aurelia Skincare launches botanical serum trios and holiday gift sets with FSC recycled paper unboxing."
+      },
+      "knowledgeProof": "We are FSC-certified and produce matched rigid gift boxes and cotton travel pouches under one roof with pre-production color sign-off.",
+      "expectedSegmentPrefix": "I",
+      "forbiddenSegmentCodes": ["I31"],
+      "expectedCues": ["skincare", "serum", "fsc", "gift"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Skincare Packaging Factory",
+          "bodyText": "Hi Maya,\n\nWe are a leading manufacturer of skincare boxes with high quality and competitive pricing. We can offer cheap prices and fast delivery. Please send your BOM and target price."
+        },
+        "step2": {
+          "subject": "Re: Skincare Packaging Factory",
+          "bodyText": "Hi Maya,\n\nFollowing up on my email of Monday. Please send your BOM and target price?"
+        },
+        "step3": {
+          "subject": "Re: Skincare Packaging Factory",
+          "bodyText": "Hi Maya,\n\nOne more follow-up on skincare boxes."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "FSC unboxing for Aurelia serum trios",
+          "bodyText": "Hi Maya,\n\nYour botanical serum trios highlight FSC recycled paper unboxing, where texture and color continuity between box and travel pouch shape first impressions.\n\nWe are FSC-certified and produce rigid gift boxes alongside matched cotton pouches in one facility with pre-production color sign-off.\n\nAre you exploring packaging updates for an upcoming set launch?"
+        },
+        "step2": {
+          "subject": "FSC unboxing for Aurelia serum trios",
+          "bodyText": "Hi Maya,\n\nFollowing up briefly on your holiday gift sets.\n\nUsing one outer box footprint with tailored pulp inserts lets seasonal serum bundles stay cohesive without new outer tooling.\n\nWould a quick insert-layout reference be useful?"
+        },
+        "step3": {
+          "subject": "FSC unboxing for Aurelia serum trios",
+          "bodyText": "Hi Maya,\n\nI do not want to keep filling your inbox, so this is my final follow-up.\n\nWhenever you plan your next skincare gift run, happy to share material options then.\n\nWishing you a smooth launch season."
+        }
+      }
+    },
+    {
+      "id": "gen-05-procurement",
+      "brandKey": "genesis",
+      "scenario": "procurement_role",
+      "customer": {
+        "name": "Henrik Lind",
+        "company": "Krona Watch Group",
+        "email": "henrik.lind@kronawatch.example.test",
+        "title": "Head of Procurement & Supply Chain",
+        "country": "Germany",
+        "industry": "Watches",
+        "interestedProducts": "watch presentation boxes",
+        "websiteText": "Krona Watch Group distributes Swiss quartz watches across 120 European jewelry retailers and requires repeatable batch specs."
+      },
+      "knowledgeProof": "We manufacture rigid watch boxes with signed golden-sample standards and written batch specifications for repeat retail replenishment.",
+      "expectedSegmentPrefix": "I",
+      "forbiddenSegmentCodes": ["I02"],
+      "expectedCues": ["watch", "batch", "retail"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Watch Box Wholesale China",
+          "bodyText": "Dear Henrik,\n\nI am reaching out to introduce our company. We make luxury watch boxes with considered craftsmanship to elevate your brand seamlessly. Please send us your full specifications and annual volume."
+        },
+        "step2": {
+          "subject": "Re: Watch Box Wholesale China",
+          "bodyText": "Dear Henrik,\n\nFollowing up on my email of last week. We make luxury watch boxes with considered craftsmanship to elevate your brand seamlessly."
+        },
+        "step3": {
+          "subject": "Re: Watch Box Wholesale China",
+          "bodyText": "Dear Henrik,\n\nStill waiting for your watch box specifications."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Batch consistency for Krona watch boxes",
+          "bodyText": "Hi Henrik,\n\nSupplying 120 European retailers makes batch-to-batch color and cushion fit critical on every watch box reorder.\n\nWe produce rigid watch presentation boxes locked to a signed golden sample and written material specification so repeat shipments stay uniform.\n\nAre you open to qualifying a backup packaging factory alongside your current supplier?"
+        },
+        "step2": {
+          "subject": "Batch consistency for Krona watch boxes",
+          "bodyText": "Hi Henrik,\n\nQuick follow-up on watch box replenishment.\n\nStandard structures start from 100 pieces, which makes small pilot runs straightforward before committing seasonal volume.\n\nWorth reviewing a spec checklist for your next reorder window?"
+        },
+        "step3": {
+          "subject": "Batch consistency for Krona watch boxes",
+          "bodyText": "Hi Henrik,\n\nI do not want to keep filling your inbox, so this is my last note.\n\nIf you review secondary packaging suppliers later this year, feel free to reach back out.\n\nThank you for your time."
+        }
+      }
+    },
+    {
+      "id": "gen-06-tricky",
+      "brandKey": "genesis",
+      "scenario": "tricky_angle",
+      "customer": {
+        "name": "Sophie Martin",
+        "company": "Atelier Lumiere Boutique",
+        "email": "sophie@atelierlumiere.example.test",
+        "title": "Brand Director",
+        "country": "France",
+        "industry": "Handmade Silver Jewelry",
+        "interestedProducts": "handmade jewelry pouches",
+        "websiteText": "Atelier Lumiere Boutique is a boutique gift destination for handmade sterling silver rings, charm bracelets, and bridal pendants."
+      },
+      "knowledgeProof": "We make anti-tarnish microfiber jewelry pouches and matching compact gift boxes with 100-piece standard MOQ.",
+      "expectedSegmentPrefix": "I",
+      "forbiddenSegmentCodes": ["I33", "I26", "I31"],
+      "expectedCues": ["jewelry", "silver", "ring", "bracelet"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Hotel & Boutique Gift Packaging",
+          "bodyText": "Hi Sophie,\n\nI am reaching out to introduce our hotel and boutique gift packaging. We are a leading manufacturer with high quality and competitive pricing. Could you send us your requirements?"
+        },
+        "step2": {
+          "subject": "Re: Hotel & Boutique Gift Packaging",
+          "bodyText": "Hi Sophie,\n\nFollowing up on my email of last week. Could you send us your requirements?"
+        },
+        "step3": {
+          "subject": "Re: Hotel & Boutique Gift Packaging",
+          "bodyText": "Hi Sophie,\n\nPlease let us know if you need boutique gift boxes."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Matched pouches for sterling silver rings",
+          "bodyText": "Hi Sophie,\n\nHandmade sterling silver rings and charm bracelets often need soft protection that fits neatly inside a compact gift box without bulk.\n\nWe produce microfiber jewelry pouches and color-matched rigid boxes in the same facility starting at 100 pieces for standard styles.\n\nWould you like a quick material overview for silver-friendly pouches?"
+        },
+        "step2": {
+          "subject": "Matched pouches for sterling silver rings",
+          "bodyText": "Hi Sophie,\n\nQuick follow-up on your silver jewelry range.\n\nWe run pre-production physical samples before bulk so logo debossing and fabric tone are verified firsthand.\n\nWorth a quick look?"
+        },
+        "step3": {
+          "subject": "Matched pouches for sterling silver rings",
+          "bodyText": "Hi Sophie,\n\nI do not want to keep filling your inbox, so I will leave it here.\n\nIf your team plans a fresh batch of jewelry pouches later this year, happy to reconnect then.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "ih-01-rich",
+      "brandKey": "ironhue",
+      "scenario": "rich",
+      "customer": {
+        "name": "Marcus Cole",
+        "company": "Apex Strength Gear",
+        "email": "marcus@apexstrength.example.test",
+        "title": "Head of Product",
+        "country": "United States",
+        "industry": "Fitness Equipment",
+        "interestedProducts": "PU dumbbells and bumper plates",
+        "websiteText": "Apex Strength Gear sells commercial PU hex dumbbells, competition bumper plates, and powder-coated kettlebells under a private label across US gyms."
+      },
+      "knowledgeProof": "Our Jiangsu factory manufactures OEM bumper plates and PU dumbbells with custom logo molding, mixed-container loading, and itemized unit/carton/tooling quotes.",
+      "expectedSegmentPrefix": "IH",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["dumbbell", "bumper", "kettlebell", "private label"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Fitness Equipment Factory in China",
+          "bodyText": "Dear Marcus,\n\nI am reaching out to introduce IRONHUE. We are a leading manufacturer of gym equipment with high quality and competitive prices. We make dumbbells, barbells, kettlebells, and racks. Please send us your full specifications, annual volume, target pricing, and delivery schedule."
+        },
+        "step2": {
+          "subject": "Re: Fitness Equipment Factory in China",
+          "bodyText": "Dear Marcus,\n\nFollowing up on my email of last week. We are a leading manufacturer of dumbbells and bumper plates. Please send us your full specifications, annual volume, target pricing, and delivery schedule?"
+        },
+        "step3": {
+          "subject": "Re: Fitness Equipment Factory in China",
+          "bodyText": "Dear Marcus,\n\nJust checking in again about gym equipment."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Private-label bumper plates for Apex",
+          "bodyText": "Hi Marcus,\n\nYour private-label PU dumbbells and competition bumper plates span several weight increments, where consistent molded logo crispness across restocks matters.\n\nOur Jiangsu factory produces OEM bumper plates and free weights with mixed-container loading and pre-shipment sample sign-off.\n\nAre you reviewing secondary plate or dumbbell lines for upcoming restocks?"
+        },
+        "step2": {
+          "subject": "Private-label bumper plates for Apex",
+          "bodyText": "Hi Marcus,\n\nQuick follow-up on your commercial free-weight range.\n\nWe itemize unit price, net weight, carton dimensions, and mold fees separately so container cost math is clear upfront.\n\nWorth a look at a sample spec sheet?"
+        },
+        "step3": {
+          "subject": "Private-label bumper plates for Apex",
+          "bodyText": "Hi Marcus,\n\nI do not want to keep filling your inbox, so this is my last note.\n\nIf you qualify another OEM free-weight factory later this year, happy to pick this up then.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "ih-02-sparse",
+      "brandKey": "ironhue",
+      "scenario": "sparse",
+      "customer": {
+        "name": "Liam Byrne",
+        "company": "Emerald Gym Supply",
+        "email": "liam@emeraldgym.example.test",
+        "title": "",
+        "country": "Ireland",
+        "industry": "Gym Equipment Distribution",
+        "interestedProducts": "kettlebells",
+        "websiteText": "Emerald Gym Supply distributes commercial strength equipment and cast-iron kettlebells."
+      },
+      "knowledgeProof": "We supply factory-direct cast-iron kettlebells and free weights with mixed-container loading across weight sizes.",
+      "expectedSegmentPrefix": "IH",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["kettlebell", "strength", "gym"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Kettlebell Supplier China",
+          "bodyText": "Dear Liam,\n\nHope this email finds you well. We are a leading manufacturer of kettlebells with high quality and competitive pricing. Could you send us your full order list?"
+        },
+        "step2": {
+          "subject": "Re: Kettlebell Supplier China",
+          "bodyText": "Dear Liam,\n\nFollowing up on my email of Monday. Could you send us your full order list?"
+        },
+        "step3": {
+          "subject": "Re: Kettlebell Supplier China",
+          "bodyText": "Dear Liam,\n\nChecking in again on kettlebells."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Mixed-container kettlebell supply",
+          "bodyText": "Hi Liam,\n\nReaching out because Emerald Gym Supply distributes commercial cast-iron kettlebells across multiple weights.\n\nWe supply factory-direct kettlebells and free weights with mixed-container loading so distributors do not have to overstock slow weights.\n\nAre you open to comparing a factory-direct option for your next container?"
+        },
+        "step2": {
+          "subject": "Mixed-container kettlebell supply",
+          "bodyText": "Hi Liam,\n\nBrief follow-up on your strength equipment range.\n\nWe also support custom logo engraving and color-band weight coding on cast-iron kettlebells.\n\nWorth seeing our weight-increment spec table?"
+        },
+        "step3": {
+          "subject": "Mixed-container kettlebell supply",
+          "bodyText": "Hi Liam,\n\nI will stop here so I do not crowd your inbox.\n\nIf you compare new free-weight factories later in the year, feel free to reply anytime.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "ih-03-generic",
+      "brandKey": "ironhue",
+      "scenario": "generic_email",
+      "customer": {
+        "name": "Nordic Barbell",
+        "company": "Nordic Barbell",
+        "email": "hello@nordicbarbell.example.test",
+        "title": "",
+        "country": "Norway",
+        "industry": "Strength Training",
+        "interestedProducts": "olympic barbells and plates",
+        "websiteText": "Nordic Barbell supplies 20kg Olympic barbells and calibrated weight plates for strength clubs."
+      },
+      "knowledgeProof": "We produce OEM Olympic barbells and bumper plates with pre-production sample verification and itemized carton specifications.",
+      "expectedSegmentPrefix": "IH",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["barbell", "weight plate", "strength"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Olympic Barbell Factory",
+          "bodyText": "Dear Sir/Madam,\n\nI am reaching out to introduce our barbell factory. We provide high quality and competitive prices. Please send your full specifications and annual forecast."
+        },
+        "step2": {
+          "subject": "Re: Olympic Barbell Factory",
+          "bodyText": "Dear Sir/Madam,\n\nFollowing up on my email of last week about barbells."
+        },
+        "step3": {
+          "subject": "Re: Olympic Barbell Factory",
+          "bodyText": "Dear Sir/Madam,\n\nLast check-in on barbells."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "OEM supply for 20kg Olympic barbells",
+          "bodyText": "Dear Nordic Barbell team,\n\nYour 20kg Olympic barbells and calibrated plates serve strength clubs where knurling feel and weight tolerance matter on repeat orders.\n\nWe manufacture OEM barbells and weight plates with physical sample approval before bulk production.\n\nCould you direct me to the buyer who manages your strength hardware sourcing?"
+        },
+        "step2": {
+          "subject": "OEM supply for 20kg Olympic barbells",
+          "bodyText": "Dear Nordic Barbell team,\n\nQuick follow-up in case my earlier message landed in the general inbox.\n\nWe combine plates, barbells, and collars in mixed containers with itemized net-weight and carton specs.\n\nWho would be best to receive a short spec sheet?"
+        },
+        "step3": {
+          "subject": "OEM supply for 20kg Olympic barbells",
+          "bodyText": "Dear Nordic Barbell team,\n\nI do not want to keep filling your inbox, so I will close out here.\n\nIf you evaluate new OEM strength suppliers down the road, glad to reconnect.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "ih-04-brand-role",
+      "brandKey": "ironhue",
+      "scenario": "brand_role",
+      "customer": {
+        "name": "Chloe Vance",
+        "company": "Forma Studio Fitness",
+        "email": "chloe@formastudio.example.test",
+        "title": "Founder & Brand Lead",
+        "country": "Australia",
+        "industry": "Boutique Home Fitness",
+        "interestedProducts": "colored neoprene and PU dumbbells",
+        "websiteText": "Forma Studio Fitness builds design-led home dumbbells and kettlebells in muted earth tones for boutique pilates and strength studios."
+      },
+      "knowledgeProof": "We offer OEM/ODM custom Pantone coatings and molded private-label logos on dumbbells and kettlebells with sample approval before production.",
+      "expectedSegmentPrefix": "IH",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["dumbbell", "kettlebell", "fitness", "studio"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Custom Dumbbell Manufacturer",
+          "bodyText": "Hi Chloe,\n\nWe are a leading manufacturer of dumbbells with deliberate, considered quality to elevate your fitness brand seamlessly. Please send us your full specifications and annual volume."
+        },
+        "step2": {
+          "subject": "Re: Custom Dumbbell Manufacturer",
+          "bodyText": "Hi Chloe,\n\nFollowing up on my email of last week. We elevate your fitness brand with deliberate quality."
+        },
+        "step3": {
+          "subject": "Re: Custom Dumbbell Manufacturer",
+          "bodyText": "Hi Chloe,\n\nChecking in again on custom dumbbells."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Earth-tone coatings for Forma dumbbells",
+          "bodyText": "Hi Chloe,\n\nYour earth-tone studio dumbbells stand out through finish and color consistency, which can drift easily between factory batches.\n\nWe run custom color coatings and molded private-label logos on dumbbells and kettlebells, verifying physical samples before bulk production.\n\nAre you planning any new colorways or weight pairs this season?"
+        },
+        "step2": {
+          "subject": "Earth-tone coatings for Forma dumbbells",
+          "bodyText": "Hi Chloe,\n\nQuick follow-up on your boutique strength line.\n\nMixing multiple dumbbell weights and kettlebells in a single container helps test new colors without locking up heavy inventory.\n\nWorth a quick look at our finish options?"
+        },
+        "step3": {
+          "subject": "Earth-tone coatings for Forma dumbbells",
+          "bodyText": "Hi Chloe,\n\nI do not want to keep filling your inbox, so this is my last follow-up.\n\nIf you expand your home-fitness range later this year, happy to share finish details then.\n\nThanks for reading."
+        }
+      }
+    },
+    {
+      "id": "ih-05-procurement",
+      "brandKey": "ironhue",
+      "scenario": "procurement_role",
+      "customer": {
+        "name": "David Morales",
+        "company": "Titan Fitness Wholesale",
+        "email": "dmorales@titanwholesale.example.test",
+        "title": "Senior Sourcing Manager",
+        "country": "Canada",
+        "industry": "Commercial Gym Equipment",
+        "interestedProducts": "bulk bumper plates and dumbbells",
+        "websiteText": "Titan Fitness Wholesale imports full containers of rubber hex dumbbells and bumper plates for 85 Canadian gym franchises."
+      },
+      "knowledgeProof": "Our Jiangsu factory supplies direct OEM bumper plates and dumbbells with itemized unit/net-weight/carton/tooling pricing and pre-shipment sample sign-off.",
+      "expectedSegmentPrefix": "IH",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["dumbbell", "bumper", "gym", "franchise"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Gym Equipment Direct Factory",
+          "bodyText": "Dear David,\n\nI am reaching out to introduce our fitness factory. High quality and competitive prices guaranteed. Please send your full BOM, target price, and annual forecast."
+        },
+        "step2": {
+          "subject": "Re: Gym Equipment Direct Factory",
+          "bodyText": "Dear David,\n\nFollowing up on my email of Tuesday regarding gym equipment."
+        },
+        "step3": {
+          "subject": "Re: Gym Equipment Direct Factory",
+          "bodyText": "Dear David,\n\nPlease let us know when you want a quote."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Second-source bumper plates for Titan",
+          "bodyText": "Hi David,\n\nSupplying 85 gym franchises means container weight distribution and repeatable plate tolerance directly impact landed cost.\n\nOur Jiangsu factory supplies OEM bumper plates and hex dumbbells directly, with itemized unit, net-weight, carton, and mold-fee breakdowns.\n\nAre you open to benchmarking a backup factory for your next plate container?"
+        },
+        "step2": {
+          "subject": "Second-source bumper plates for Titan",
+          "bodyText": "Hi David,\n\nQuick follow-up on franchise free-weight replenishment.\n\nWe also load mixed containers across plates, dumbbells, and collars so regional restocks stay balanced.\n\nWorth checking a sample container-loading breakdown?"
+        },
+        "step3": {
+          "subject": "Second-source bumper plates for Titan",
+          "bodyText": "Hi David,\n\nI do not want to keep filling your inbox, so this will be my last note.\n\nIf you open a backup supplier review next quarter, I am glad to reconnect.\n\nThank you for your time."
+        }
+      }
+    },
+    {
+      "id": "ih-06-tricky",
+      "brandKey": "ironhue",
+      "scenario": "tricky_angle",
+      "customer": {
+        "name": "Nadia Patel",
+        "company": "Pulse Wellness & Gym Club",
+        "email": "nadia@pulseclub.example.test",
+        "title": "Operations Director",
+        "country": "United Kingdom",
+        "industry": "Luxury Fitness & Strength Club",
+        "interestedProducts": "custom logo dumbbells and training rigs",
+        "websiteText": "Pulse Wellness & Gym Club runs 6 luxury fitness clubs with spa recovery lounges and custom-branded urethane dumbbells and kettlebells."
+      },
+      "knowledgeProof": "We manufacture private-label urethane dumbbells and kettlebells with in-mold club logo customization and pre-production sample verification.",
+      "expectedSegmentPrefix": "IH",
+      "forbiddenSegmentCodes": ["I33"],
+      "expectedCues": ["dumbbell", "kettlebell", "fitness", "gym"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Spa & Hotel Amenities Supply",
+          "bodyText": "Hi Nadia,\n\nI am reaching out to introduce our spa gift packaging and wellness kits. We offer high quality and competitive pricing. Could you send your requirements?"
+        },
+        "step2": {
+          "subject": "Re: Spa & Hotel Amenities Supply",
+          "bodyText": "Hi Nadia,\n\nFollowing up on my email of last week about spa amenities."
+        },
+        "step3": {
+          "subject": "Re: Spa & Hotel Amenities Supply",
+          "bodyText": "Hi Nadia,\n\nChecking in again on spa kits."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Club-branded urethane dumbbells for Pulse",
+          "bodyText": "Hi Nadia,\n\nEquipping six clubs with custom-branded urethane dumbbells makes clean logo molding and repeatable weight finishes important as locations expand.\n\nWe manufacture private-label urethane dumbbells and kettlebells with physical sample approval before bulk production.\n\nAre you planning equipment additions for an upcoming club opening or refresh?"
+        },
+        "step2": {
+          "subject": "Club-branded urethane dumbbells for Pulse",
+          "bodyText": "Hi Nadia,\n\nQuick follow-up on your club strength floor.\n\nWe pack complete weight runs with itemized carton specs so multi-site rollouts are easier to stage.\n\nWorth a brief look at our urethane spec sheet?"
+        },
+        "step3": {
+          "subject": "Club-branded urethane dumbbells for Pulse",
+          "bodyText": "Hi Nadia,\n\nI do not want to keep filling your inbox, so I will pause here.\n\nIf another club expansion comes up later this year, happy to share factory specs then.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "vel-01-rich",
+      "brandKey": "velaturo",
+      "scenario": "rich",
+      "customer": {
+        "name": "Julian Mercer",
+        "company": "Mercer Interior Art",
+        "email": "julian@mercerinteriors.example.test",
+        "title": "Art Consultant",
+        "country": "United States",
+        "industry": "Hospitality Wall Art & Interiors",
+        "interestedProducts": "large hand-painted acrylic canvas paintings",
+        "websiteText": "Mercer Interior Art curates large-scale hand-painted abstract canvas paintings and textured wall art for boutique hotels and residential lobbies."
+      },
+      "knowledgeProof": "Our Xiamen studio paints original hand-painted acrylic canvases to project briefs, confirming size, medium, and painted sample approval before full production.",
+      "expectedSegmentPrefix": "VA",
+      "forbiddenSegmentCodes": ["I01", "IH01"],
+      "expectedCues": ["wall art", "painting", "canvas", "art consultant"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Oil Painting Factory China",
+          "bodyText": "Dear Julian,\n\nI am reaching out to introduce our painting factory. We are a leading manufacturer of hand-painted oil and acrylic paintings with high quality and competitive pricing. Please send us your full project drawings, budget, and schedule."
+        },
+        "step2": {
+          "subject": "Re: Oil Painting Factory China",
+          "bodyText": "Dear Julian,\n\nFollowing up on my email of last week. We make all kinds of paintings at low prices. Please send your full project drawings, budget, and schedule?"
+        },
+        "step3": {
+          "subject": "Re: Oil Painting Factory China",
+          "bodyText": "Dear Julian,\n\nChecking in again about canvas paintings."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Hand-painted canvases for Mercer hospitality briefs",
+          "bodyText": "Hi Julian,\n\nCurating large-scale textured acrylic canvases for hotel lobbies often hinges on keeping brushwork depth consistent across multi-room specs.\n\nOur Xiamen studio creates hand-painted acrylic originals to your project brief, confirming medium and painted sample approval before full production.\n\nDo you have any upcoming hospitality wall-art briefs where a studio partner could help?"
+        },
+        "step2": {
+          "subject": "Hand-painted canvases for Mercer hospitality briefs",
+          "bodyText": "Hi Julian,\n\nQuick follow-up on your commercial wall-art projects.\n\nWe work directly from designer size and palette briefs so custom dimensions match lobby elevations without forcing stock prints.\n\nWorth seeing a short medium-and-texture reference?"
+        },
+        "step3": {
+          "subject": "Hand-painted canvases for Mercer hospitality briefs",
+          "bodyText": "Hi Julian,\n\nI do not want to keep filling your inbox, so this is my final follow-up.\n\nIf a custom canvas brief opens up later this quarter, happy to reconnect then.\n\nThank you for your time."
+        }
+      }
+    },
+    {
+      "id": "vel-02-sparse",
+      "brandKey": "velaturo",
+      "scenario": "sparse",
+      "customer": {
+        "name": "Hanna Berg",
+        "company": "Klara Home Decor",
+        "email": "hanna@klaradecor.example.test",
+        "title": "",
+        "country": "Denmark",
+        "industry": "Home Decor & Wall Art",
+        "interestedProducts": "framed canvas art",
+        "websiteText": "Klara Home Decor sells Nordic wall art and hand-painted canvas pieces."
+      },
+      "knowledgeProof": "Our Xiamen painting studio produces original hand-painted acrylic canvases aligned to custom size and palette briefs with sample review before production.",
+      "expectedSegmentPrefix": "VA",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["wall art", "canvas", "home decor"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Canvas Art Wholesale",
+          "bodyText": "Dear Hanna,\n\nHope this email finds you well. We are a leading manufacturer of wall art with high quality and competitive pricing. Send us your specs and quantity."
+        },
+        "step2": {
+          "subject": "Re: Canvas Art Wholesale",
+          "bodyText": "Dear Hanna,\n\nFollowing up on my email of last week. Send us your specs and quantity?"
+        },
+        "step3": {
+          "subject": "Re: Canvas Art Wholesale",
+          "bodyText": "Dear Hanna,\n\nChecking in again on wall art."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Original acrylic canvases for Klara Decor",
+          "bodyText": "Hi Hanna,\n\nWriting because Klara Home Decor features Nordic wall art and hand-painted canvas pieces.\n\nOur Xiamen studio paints original acrylic canvases to custom size and palette briefs, sharing a painted sample before production.\n\nAre you open to exploring hand-painted originals for an upcoming collection?"
+        },
+        "step2": {
+          "subject": "Original acrylic canvases for Klara Decor",
+          "bodyText": "Hi Hanna,\n\nBrief follow-up on hand-painted canvas pieces.\n\nStarting from a small curated test batch makes it easier to gauge customer response to textured originals alongside prints.\n\nWorth a quick look at our studio brief process?"
+        },
+        "step3": {
+          "subject": "Original acrylic canvases for Klara Decor",
+          "bodyText": "Hi Hanna,\n\nI will pause here so I do not crowd your inbox.\n\nIf you source hand-painted wall art later this year, feel free to reply anytime.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "vel-03-generic",
+      "brandKey": "velaturo",
+      "scenario": "generic_email",
+      "customer": {
+        "name": "Atelier Marais Gallery",
+        "company": "Atelier Marais Gallery",
+        "email": "info@ateliermarais.example.test",
+        "title": "",
+        "country": "France",
+        "industry": "Art Gallery & Trade",
+        "interestedProducts": "custom portrait and acrylic paintings",
+        "websiteText": "Atelier Marais Gallery represents contemporary wall art, custom portraits, and canvas paintings for interior designers."
+      },
+      "knowledgeProof": "Our studio paints custom acrylic portraits and trade canvas works to confirmed client briefs with pre-shipment visual approval.",
+      "expectedSegmentPrefix": "VA",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["art gallery", "portrait", "painting", "wall art"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Hand Painted Art Studio",
+          "bodyText": "Dear Sir/Madam,\n\nI am reaching out to introduce our art studio. We offer high quality and competitive prices. Please send your full requirements."
+        },
+        "step2": {
+          "subject": "Re: Hand Painted Art Studio",
+          "bodyText": "Dear Sir/Madam,\n\nFollowing up on my email of last week."
+        },
+        "step3": {
+          "subject": "Re: Hand Painted Art Studio",
+          "bodyText": "Dear Sir/Madam,\n\nChecking in again."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Trade studio for custom portraits and canvases",
+          "bodyText": "Dear Atelier Marais Gallery team,\n\nYour gallery pairs contemporary wall art with custom portrait commissions for interior designers, where approval checkpoints matter before framing.\n\nOur Xiamen studio paints original acrylic canvases and portraits from confirmed briefs with painted-sample review prior to finishing.\n\nCould you point me to the curator or buyer who handles trade studio commissions?"
+        },
+        "step2": {
+          "subject": "Trade studio for custom portraits and canvases",
+          "bodyText": "Dear Atelier Marais Gallery team,\n\nQuick follow-up in case my earlier note missed the trade desk.\n\nWe confirm canvas dimensions and brushwork references upfront so commissioned pieces match interior palettes.\n\nWho is the best person to receive our studio overview?"
+        },
+        "step3": {
+          "subject": "Trade studio for custom portraits and canvases",
+          "bodyText": "Dear Atelier Marais Gallery team,\n\nI do not want to keep filling your inbox, so this is my last note.\n\nIf you add a hand-painting studio partner later this year, feel free to pass my contact along.\n\nThank you for your time."
+        }
+      }
+    },
+    {
+      "id": "vel-04-brand-role",
+      "brandKey": "velaturo",
+      "scenario": "brand_role",
+      "customer": {
+        "name": "Camille Laurent",
+        "company": "Maison Solaire Interiors",
+        "email": "camille@maisonsolaire.example.test",
+        "title": "Creative Director",
+        "country": "France",
+        "industry": "Interior Design & Wall Art",
+        "interestedProducts": "hand-painted wall art",
+        "websiteText": "Maison Solaire Interiors designs Mediterranean villas featuring custom oversized linen and acrylic wall paintings."
+      },
+      "knowledgeProof": "Our studio paints oversized hand-painted acrylic works on canvas tailored to interior palettes with painted sample sign-off before execution.",
+      "expectedSegmentPrefix": "VA",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["wall art", "painting", "canvas"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Luxury Wall Art Supplier",
+          "bodyText": "Hi Camille,\n\nWe craft considered, restrained, coherent wall art to elevate your interior spaces seamlessly. Please send us your full specifications and budget."
+        },
+        "step2": {
+          "subject": "Re: Luxury Wall Art Supplier",
+          "bodyText": "Hi Camille,\n\nFollowing up on my email of last week. We elevate your spaces with restrained, coherent art."
+        },
+        "step3": {
+          "subject": "Re: Luxury Wall Art Supplier",
+          "bodyText": "Hi Camille,\n\nChecking in again on wall art."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Oversized acrylic canvases for villa interiors",
+          "bodyText": "Hi Camille,\n\nYour Mediterranean villa projects rely on oversized canvas paintings whose warmth and texture anchor open rooms.\n\nOur Xiamen studio paints original acrylic works tailored to your room palette, confirming a painted sample before finishing the full canvas.\n\nDo you have any upcoming residential projects calling for custom-scale wall art?"
+        },
+        "step2": {
+          "subject": "Oversized acrylic canvases for villa interiors",
+          "bodyText": "Hi Camille,\n\nQuick follow-up on custom interior canvases.\n\nWorking directly from your wall dimensions and mood board avoids compromising proportions with fixed gallery sizes.\n\nWorth a brief look at how we stage sample approvals?"
+        },
+        "step3": {
+          "subject": "Oversized acrylic canvases for villa interiors",
+          "bodyText": "Hi Camille,\n\nI do not want to keep filling your inbox, so I will close out here.\n\nWhenever a villa project calls for custom hand-painted canvases, happy to reconnect.\n\nThanks for your time."
+        }
+      }
+    },
+    {
+      "id": "vel-05-procurement",
+      "brandKey": "velaturo",
+      "scenario": "procurement_role",
+      "customer": {
+        "name": "Owen Gallagher",
+        "company": "Harbor FF&E Procurement",
+        "email": "owen@harborffe.example.test",
+        "title": "FF&E Procurement Manager",
+        "country": "United Kingdom",
+        "industry": "Hospitality Art Procurement",
+        "interestedProducts": "hand-painted hotel wall art packages",
+        "websiteText": "Harbor FF&E Procurement sources framed canvas paintings and custom wall art packages for 150-room hotel openings on strict handover dates."
+      },
+      "knowledgeProof": "Our studio produces hand-painted acrylic canvas packages to brief specifications with sample-piece approval prior to batch painting.",
+      "expectedSegmentPrefix": "VA",
+      "forbiddenSegmentCodes": ["I01"],
+      "expectedCues": ["wall art", "painting", "canvas"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Hotel Artwork Supplier",
+          "bodyText": "Dear Owen,\n\nI am reaching out to introduce our art factory. High quality and competitive pricing for hotel paintings. Please send us your full project schedule, room count, and target price."
+        },
+        "step2": {
+          "subject": "Re: Hotel Artwork Supplier",
+          "bodyText": "Dear Owen,\n\nFollowing up on my email of last week. Please send your full project schedule, room count, and target price?"
+        },
+        "step3": {
+          "subject": "Re: Hotel Artwork Supplier",
+          "bodyText": "Dear Owen,\n\nChecking in on hotel art packages."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Sample-approved canvas packages for hotel openings",
+          "bodyText": "Hi Owen,\n\nDelivering wall-art packages for 150-room hotel handovers leaves little margin for surprises between approval and batch execution.\n\nOur Xiamen studio paints original acrylic canvas packages to brief, locking size and brushwork on a sample piece before batch painting.\n\nAre you sourcing wall art for any upcoming hotel handover windows?"
+        },
+        "step2": {
+          "subject": "Sample-approved canvas packages for hotel openings",
+          "bodyText": "Hi Owen,\n\nQuick follow-up on FF&E wall-art sourcing.\n\nWe organize brief confirmation by room type and dimension so multi-piece packages stay consistent across floors.\n\nWorth reviewing a short studio specification checklist?"
+        },
+        "step3": {
+          "subject": "Sample-approved canvas packages for hotel openings",
+          "bodyText": "Hi Owen,\n\nI do not want to keep filling your inbox, so this is my last note.\n\nIf an upcoming hospitality package needs a backup painting studio, glad to reconnect.\n\nThank you for your time."
+        }
+      }
+    },
+    {
+      "id": "vel-06-tricky",
+      "brandKey": "velaturo",
+      "scenario": "tricky_angle",
+      "customer": {
+        "name": "Tessa Lind",
+        "company": "Velvet & Oak Gift Gallery",
+        "email": "tessa@velvetoak.example.test",
+        "title": "Merchandising Director",
+        "country": "Netherlands",
+        "industry": "Home Decor & Canvas Wall Art",
+        "interestedProducts": "hand-painted botanical canvas paintings",
+        "websiteText": "Velvet & Oak Gift Gallery curates boutique home decor, hand-painted botanical canvas paintings, and framed wall art for concept stores."
+      },
+      "knowledgeProof": "Our studio paints original hand-painted botanical and abstract acrylic canvases to brief with painted-sample sign-off before production.",
+      "expectedSegmentPrefix": "VA",
+      "forbiddenSegmentCodes": ["I01", "I32"],
+      "expectedCues": ["canvas", "painting", "wall art", "home decor"],
+      "legacyDrafts": {
+        "step1": {
+          "subject": "Gift Box Packaging for Velvet & Oak",
+          "bodyText": "Hi Tessa,\n\nI am reaching out to introduce our velvet gift boxes and jewelry pouches. We are a leading manufacturer with high quality and competitive pricing. Could you share your packaging specs?"
+        },
+        "step2": {
+          "subject": "Re: Gift Box Packaging for Velvet & Oak",
+          "bodyText": "Hi Tessa,\n\nFollowing up on my email of last week about velvet gift boxes."
+        },
+        "step3": {
+          "subject": "Re: Gift Box Packaging for Velvet & Oak",
+          "bodyText": "Hi Tessa,\n\nChecking in again on gift boxes."
+        }
+      },
+      "v2Drafts": {
+        "step1": {
+          "subject": "Botanical canvas originals for Velvet & Oak",
+          "bodyText": "Hi Tessa,\n\nYour concept-store selection pairs home decor with hand-painted botanical canvases, where tactile brushwork distinguishes originals from flat prints.\n\nOur Xiamen studio paints original acrylic botanical canvases to your palette brief with painted-sample approval before production.\n\nAre you exploring hand-painted canvas editions for your next seasonal wall-art drop?"
+        },
+        "step2": {
+          "subject": "Botanical canvas originals for Velvet & Oak",
+          "bodyText": "Hi Tessa,\n\nQuick follow-up on your botanical wall-art range.\n\nWe accommodate trial batches across two or three hero sizes so stores can test textured originals before scaling.\n\nWorth a quick look at our trial-batch workflow?"
+        },
+        "step3": {
+          "subject": "Botanical canvas originals for Velvet & Oak",
+          "bodyText": "Hi Tessa,\n\nI do not want to keep filling your inbox, so I will pause here.\n\nIf you plan fresh hand-painted wall art later in the year, happy to share studio notes then.\n\nThanks for your time."
+        }
+      }
+    }
+  ]
+}

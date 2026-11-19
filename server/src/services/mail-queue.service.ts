@@ -15,8 +15,10 @@ import {
   scheduleOutreachFollowUp,
 } from './outreach-followup.service';
 import { appendUnsubscribeFooter, isEmailSuppressed, suppressEmail, unsubscribeHeaders } from './mail-compliance.service';
+import { getAttachmentForDownload } from './attachment.service';
 import { stripReplySubjectPrefix } from '../utils/text';
-import { automatedReviewIssue } from './agent/knowledge-send-gate';
+import { automatedReviewIssue, repeatedOutreachIssue } from './agent/knowledge-send-gate';
+import { previousOutreachDrafts } from './agent/outreach-history';
 import { draftHash, knowledgeFreshness } from './agent/knowledge-grounding';
 import type { AuthUser } from '../types/express';
 
@@ -35,17 +37,31 @@ async function checkAutomaticDelivery(job: DevelopmentLetterDocument, customerEm
   const [campaign, enrollment, project] = await Promise.all([
     OutreachAutomationConfig.exists({ _id: campaignId, projectId: job.projectId, userId: job.sentBy, enabled: true, rolloutMode: { $ne: 'shadow' } }),
     OutreachAutomationEnrollment.exists({ _id: job.automationEnrollmentId, campaignId, projectId: job.projectId, customerId: job.customerId, status: 'active' }),
-    Project.findOne({ _id: job.projectId, status: 'active' }).select('organizationId').lean(),
+    Project.findOne({ _id: job.projectId, status: 'active' }).select('organizationId brandProfile').lean(),
   ]);
   if (!campaign || !enrollment || !project || (project.organizationId && String(project.organizationId) !== user.organizationId)) {
     return '自动开发已暂停或所属项目权限发生变化';
   }
   if (customerEmail?.trim().toLowerCase() !== job.recipientEmail.trim().toLowerCase()) return '客户邮箱已变化，需重新准备开发信';
   const review = job.knowledgeReview;
-  const issue = automatedReviewIssue(review, job.outreachStep);
+  const approvedOffers = project.brandProfile?.approvedOffers;
+  const issue = automatedReviewIssue(review, job.outreachStep, {
+    bodyText: job.contentText,
+    subject: job.subject,
+    approvedOffers,
+  });
   if (issue) return issue;
   if (!review || review.bodyHash !== draftHash(job.contentText) || review.context.customerId !== String(job.customerId)) {
     return '草稿正文或证据与当前客户不一致';
+  }
+  if (job.outreachStep && job.outreachStep >= 2) {
+    const previous = await previousOutreachDrafts(String(job.projectId), String(job.customerId), job.outreachStep);
+    const repeated = repeatedOutreachIssue(review, previous, {
+      bodyText: job.contentText,
+      step: job.outreachStep,
+      approvedOffers,
+    });
+    if (repeated) return repeated;
   }
   const freshness = await knowledgeFreshness(review, user);
   if (freshness.failed || freshness.changed.length) return '发信前未能确认依据仍有效';
@@ -58,7 +74,7 @@ async function reconcile(id: string): Promise<void> {
   const letter = await DevelopmentLetter.findById(id);
   if (!letter || !['sent', 'opened'].includes(letter.status)) return;
   await Customer.updateOne({ _id: letter.customerId, projectId: letter.projectId, mailEffectIds: { $ne: letter._id } }, {
-    $inc: { letterCount: 1 }, $addToSet: { mailEffectIds: letter._id },
+    $inc: { letterCount: 1 }, $push: { mailEffectIds: { $each: [letter._id], $slice: -500 } },
     $max: { lastContactAt: letter.sentAt || letter.createdAt },
   });
   if (letter.agentOutreachId && letter.channel === 'smtp' && letter.sentBy) {
@@ -166,24 +182,40 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
   } else {
     try {
       if (accountId && senderUserId) await reserveMailAttempt(accountId, String(job.projectId), senderUserId);
-      // 兼容升级前创建的旧任务：即使正文生成时还没有合规尾部，
-      // 真正投递前也补上可见退订链接和纯文本退订说明。
+      const isInboundReply = job.mailKind === 'inbound_reply';
       const html = job.deliveryContent || job.content;
-      const withUnsubscribe = appendUnsubscribeFooter(
-        html,
-        job.contentText,
-        String(job.projectId),
-        job.recipientEmail,
-        /<[a-z][\s\S]*>/i.test(html),
-      );
+      const withUnsubscribe = isInboundReply
+        ? { html, text: job.contentText }
+        : appendUnsubscribeFooter(
+          html,
+          job.contentText,
+          String(job.projectId),
+          job.recipientEmail,
+          /<[a-z][\s\S]*>/i.test(html),
+        );
       const deliverySubject = job.outreachStep && job.outreachStep > 1
         ? (stripReplySubjectPrefix(job.subject) || job.subject)
         : job.subject;
+      const attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
+      if (job.attachmentIds?.length) {
+        let totalAttachmentBytes = 0;
+        for (const attachmentId of job.attachmentIds.slice(0, 5)) {
+          try {
+            const loaded = await getAttachmentForDownload(String(job.customerId), String(attachmentId), String(job.projectId));
+            if (totalAttachmentBytes + loaded.buffer.length > 10 * 1024 * 1024) continue;
+            totalAttachmentBytes += loaded.buffer.length;
+            attachments.push({ filename: loaded.originalName, content: loaded.buffer, contentType: loaded.mimeType });
+          } catch {
+            logger.warn(`跳过不可读取的开发信附件 id=${String(attachmentId)}`);
+          }
+        }
+      }
       result = await deliver({ projectId: String(job.projectId), mailAccountId: accountId, senderUserId, from: job.senderAddress,
         to: job.recipientEmail, toName: job.recipientName, subject: deliverySubject,
         html: withUnsubscribe.html, text: withUnsubscribe.text, messageId: job.messageId,
         inReplyTo: job.inReplyTo, references: job.references,
-        headers: unsubscribeHeaders(String(job.projectId), job.recipientEmail) });
+        ...(attachments.length ? { attachments } : {}),
+        ...(isInboundReply ? {} : { headers: unsubscribeHeaders(String(job.projectId), job.recipientEmail) }) });
     } catch (error) {
       result = error instanceof Error && error.name === 'ApiError'
         ? { accepted: false, channel: job.channel, error: error.message, durationMs: 0 }
@@ -191,7 +223,7 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
     }
   }
   if (accountId && senderUserId) {
-    await auditMailResult(accountId, String(job.projectId), senderUserId, result.accepted, result.error).catch(() => undefined);
+    await auditMailResult(accountId, String(job.projectId), senderUserId, result.accepted, result.error, Boolean(result.hardBounce)).catch(() => undefined);
   }
   if (result.hardBounce) {
     await suppressEmail({
@@ -215,7 +247,7 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
       needsReview: Boolean(result.uncertain), effectsPending: result.accepted,
       'tracking.enabled': Boolean(result.accepted && job.tracking?.prepared),
       nextAttemptAt: new Date(at.getTime() + env.MAIL_RETRY_DELAY_MS * 2 ** (job.attempts - 1)) },
-    $push: { history: { at, status, error: result.accepted ? undefined : result.error } },
+    $push: { history: { $each: [{ at, status, error: result.accepted ? undefined : result.error }], $slice: -50 } },
   });
   if (result.accepted) await reconcile(String(job._id));
 }

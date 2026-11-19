@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ImapFlow } from 'imapflow';
 import { Pop3Client, type Pop3Connection, type Pop3Options } from './pop3-client';
@@ -10,6 +9,7 @@ import { MailMessage, MailSyncState } from '../models/MailMessage';
 import { Customer, DevelopmentLetter, Project, User } from '../models';
 import { Prospect } from '../models/Prospect';
 import { attachmentAllowed, mailError, normalizeSubject, safeMailHtml } from './mail-security';
+import { deleteObject, putObject } from './storage.service';
 import { createLogger } from '../config/logger';
 import { freshReplyText, htmlToPlainText } from '../utils/text';
 import { getProjectMailConfig } from './project-mail-config.service';
@@ -115,7 +115,7 @@ async function isMailboxOwnerAdmin(userId: string): Promise<boolean> {
 }
 
 /**
- * 把「未关联客户」的历史邮件按发件人邮箱补上客户关联。
+ * 把「未关联客户」的历史邮件按发件人邮箱批量补上客户关联（消除逐条 N+1 查写）。
  * 只处理发件人邮箱唯一命中一个客户的情况，模糊情况留给人工。
  */
 export async function relinkMailCustomers(input: { projectId: string; limit?: number }): Promise<{
@@ -123,15 +123,79 @@ export async function relinkMailCustomers(input: { projectId: string; limit?: nu
 }> {
   const limit = Math.min(Math.max(input.limit ?? 5000, 1), 20000);
   const rows = await MailMessage.find({ projectId: input.projectId, deleted: { $ne: true }, customerId: null })
-    .select('_id from mailboxUserId').limit(limit).lean();
-  let linked = 0; let prospects = 0; let unmatched = 0;
-  for (const row of rows as { _id: Types.ObjectId; from?: string; mailboxUserId?: Types.ObjectId }[]) {
-    const from = String(row.from || '');
-    if (!from.trim()) { unmatched += 1; continue; }
-    const owner = await matchMailOwner(input.projectId, from, row.mailboxUserId ? String(row.mailboxUserId) : undefined);
-    if (!owner.customerId && !owner.prospectId) { unmatched += 1; continue; }
-    await MailMessage.updateOne({ _id: row._id }, { $set: { customerId: owner.customerId, prospectId: owner.prospectId } });
-    if (owner.customerId) linked += 1; else prospects += 1;
+    .select('_id from mailboxUserId').limit(limit).lean() as { _id: Types.ObjectId; from?: string; mailboxUserId?: Types.ObjectId }[];
+  if (!rows.length) return { scanned: 0, linked: 0, prospects: 0, unmatched: 0 };
+
+  const ownerIds = [...new Set(rows.map((r) => (r.mailboxUserId ? String(r.mailboxUserId) : '')).filter(Boolean))];
+  const owners = ownerIds.length ? await User.find({ _id: { $in: ownerIds } }).select('_id role').lean() : [];
+  const adminSet = new Set(owners.filter((u) => u.role === 'admin').map((u) => String(u._id)));
+
+  const uniqueEmails = [...new Set(rows.map((r) => String(r.from || '').trim().toLowerCase()).filter(Boolean))];
+  const [customers, prospectsList] = await Promise.all([
+    uniqueEmails.length
+      ? Customer.find({ projectId: input.projectId, email: { $in: uniqueEmails } }).select('_id email ownerId').lean()
+      : [],
+    uniqueEmails.length
+      ? Prospect.find({ projectId: input.projectId, emails: { $in: uniqueEmails } }).select('_id emails customerId ownerId').lean()
+      : [],
+  ]);
+
+  const customersByEmail = new Map<string, { _id: Types.ObjectId; ownerId?: Types.ObjectId }[]>();
+  for (const c of customers) {
+    const email = String(c.email ?? '').toLowerCase();
+    if (!email) continue;
+    const list = customersByEmail.get(email) ?? [];
+    list.push({ _id: c._id, ownerId: c.ownerId });
+    customersByEmail.set(email, list);
+  }
+  const prospectsByEmail = new Map<string, { _id: Types.ObjectId; customerId?: Types.ObjectId; ownerId?: Types.ObjectId }[]>();
+  for (const p of prospectsList) {
+    for (const rawEmail of p.emails ?? []) {
+      const email = String(rawEmail).toLowerCase();
+      const list = prospectsByEmail.get(email) ?? [];
+      list.push({ _id: p._id, customerId: p.customerId, ownerId: p.ownerId });
+      prospectsByEmail.set(email, list);
+    }
+  }
+
+  let linked = 0;
+  let prospects = 0;
+  let unmatched = 0;
+  const bulkOps: Array<{ updateOne: { filter: Record<string, unknown>; update: Record<string, unknown> } }> = [];
+
+  for (const row of rows) {
+    const email = String(row.from || '').trim().toLowerCase();
+    if (!email) { unmatched += 1; continue; }
+    const mUserId = row.mailboxUserId ? String(row.mailboxUserId) : undefined;
+    const restricted = Boolean(mUserId && !adminSet.has(mUserId));
+
+    const matchedCustomers = (customersByEmail.get(email) ?? []).filter((c) => !restricted || String(c.ownerId ?? '') === mUserId);
+    let customerId: Types.ObjectId | null = null;
+    let prospectId: Types.ObjectId | null = null;
+
+    if (matchedCustomers.length === 1) {
+      customerId = matchedCustomers[0]._id;
+    } else if (matchedCustomers.length === 0) {
+      const matchedProspects = (prospectsByEmail.get(email) ?? []).filter((p) => !restricted || String(p.ownerId ?? '') === mUserId);
+      if (matchedProspects.length === 1) {
+        prospectId = matchedProspects[0]._id;
+        if (matchedProspects[0].customerId) customerId = matchedProspects[0].customerId;
+      }
+    }
+
+    if (!customerId && !prospectId) { unmatched += 1; continue; }
+    bulkOps.push({
+      updateOne: {
+        filter: { _id: row._id, projectId: input.projectId },
+        update: { $set: { customerId, prospectId } },
+      },
+    });
+    if (customerId) linked += 1;
+    else prospects += 1;
+  }
+
+  for (let i = 0; i < bulkOps.length; i += 500) {
+    await MailMessage.bulkWrite(bulkOps.slice(i, i + 500) as never, { ordered: false });
   }
   return { scanned: rows.length, linked, prospects, unmatched };
 }
@@ -189,6 +253,20 @@ async function finishInboundCompliance(doc: InstanceType<typeof MailMessage>): P
   const reason = work.reason as 'hard_bounce' | 'unsubscribe' | 'complaint';
   for (const email of work.recipients) {
     await suppressEmail({ projectId: String(doc.projectId), email, reason, source: 'inbound', global: true });
+    if (reason === 'hard_bounce') {
+      // Backfill hardBouncedAt on the most recent sent letter to this recipient so analytics stay consistent.
+      await DevelopmentLetter.findOneAndUpdate(
+        {
+          projectId: doc.projectId,
+          recipientEmail: email.toLowerCase(),
+          status: { $in: ['sent', 'opened'] },
+          hardBouncedAt: { $exists: false },
+          sentAt: { $gte: new Date((doc.sentAt?.getTime() ?? Date.now()) - 14 * 86_400_000) },
+        },
+        { $set: { hardBouncedAt: doc.sentAt ?? new Date() } },
+        { sort: { sentAt: -1 } },
+      ).catch(() => undefined);
+    }
   }
   await MailMessage.updateOne({ _id: doc._id, projectId: doc.projectId }, { $unset: { pendingCompliance: 1 } });
   doc.pendingCompliance = undefined;
@@ -216,12 +294,10 @@ export async function importMail(source: Buffer, account?: string, projectId?: s
   const { customerId, prospectId } = await matchMailOwner(scopedProjectId, from, mailbox?.userId);
   const references = (Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []).slice(-50);
   const threadId = await findThread(customerId, parsed.subject || '', [...references, parsed.inReplyTo || ''], from, scopedProjectId, mailbox?.mailAccountId);
-  const savedFiles: string[] = [];
+  const savedKeys: string[] = [];
   const attachments: { name: string; mimeType: string; size: number; filename?: string; blocked?: string }[] = [];
   let doc: InstanceType<typeof MailMessage>;
   try {
-    const mailDir = path.join(env.UPLOAD_DIR, 'mail', scopedProjectId);
-    await fs.mkdir(mailDir, { recursive: true });
     for (const att of parsed.attachments) {
       const name = path.basename((att.filename || 'attachment').replace(/\\/g, '/')).replace(/[\x00-\x1f]/g, '').slice(0, 200) || 'attachment';
       const meta = { name, mimeType: att.contentType, size: att.size };
@@ -230,9 +306,9 @@ export async function importMail(source: Buffer, account?: string, projectId?: s
         continue;
       }
       const filename = `${randomUUID()}${path.extname(name).toLowerCase()}`;
-      const full = path.join(mailDir, filename);
-      await fs.writeFile(full, att.content, { flag: 'wx' });
-      savedFiles.push(full);
+      const storageKey = `mail/${scopedProjectId}/${filename}`;
+      await putObject(storageKey, att.content, att.contentType);
+      savedKeys.push(storageKey);
       attachments.push({ ...meta, filename });
     }
     const sentAt = parsed.date && Number.isFinite(parsed.date.getTime()) ? parsed.date : new Date();
@@ -243,7 +319,7 @@ export async function importMail(source: Buffer, account?: string, projectId?: s
       from, fromName: parsed.from?.value[0]?.name, to: addresses(parsed.to), cc: addresses(parsed.cc),
       html: safeMailHtml(parsed.html || ''), text: parsed.text || htmlToPlainText(safeMailHtml(parsed.html || '')), sentAt, attachments, pendingCompliance });
   } catch (error) {
-    await Promise.all(savedFiles.map(p => fs.unlink(p).catch(() => undefined)));
+    await Promise.all(savedKeys.map(k => deleteObject(k).catch(() => undefined)));
     const existing = (error as { code?: number }).code === 11000 ? await findExisting() : null;
     if (!existing) throw error;
     doc = existing;
@@ -330,7 +406,7 @@ async function syncMailbox(config: MailboxSyncConfig, makeClient: ClientFactory)
           logger.warn(`IMAP 单封邮件同步失败 UID=${uid}，其余邮件继续`);
         }
         cursor = Math.max(cursor, uid);
-        await MailSyncState.updateOne({ _id: key, leaseOwner: token }, { $set: { uidValidity: validity, lastUid: cursor, failedUids: [...failed] } });
+        await MailSyncState.updateOne({ _id: key, leaseOwner: token }, { $set: { uidValidity: validity, lastUid: cursor, failedUids: [...failed].slice(-500) } });
       }
       await MailSyncState.updateOne({ _id: key, leaseOwner: token }, { $set: { lastSyncAt: new Date(), lastError: failed.size ? `${failed.size} 封邮件待重试` : '' } });
     } finally { lock.release(); }
@@ -414,7 +490,7 @@ export async function syncPopMailbox(config: PersonalImapConfig, makeClient: Pop
       }
     }
     if (!leaseLost) await MailSyncState.updateOne({ _id: key, leaseOwner: token }, { $set: {
-      popSeenUids: [...seen], popFailedUids: [...failed], popFailedCount: failed.size, lastSyncAt: new Date(),
+      popSeenUids: [...seen].slice(-10000), popFailedUids: [...failed].slice(-500), popFailedCount: failed.size, lastSyncAt: new Date(),
       lastError: failed.size ? `${failed.size} 封邮件待重试` : '',
     } });
   } catch (error) {

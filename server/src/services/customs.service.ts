@@ -520,6 +520,200 @@ export async function getCustomerCustomsTrade(projectId: Types.ObjectId, custome
   return { matched: true, customer: { id: String(customer._id), name: customer.name, company: customer.company ?? null }, watch: watch ?? null, ...detail };
 }
 
+export interface CustomerCustomsEvidence {
+  matched: boolean;
+  companyId?: string;
+  companyName?: string;
+  matchMethod?: 'explicit_id' | 'domain' | 'name_country';
+  confidence: 'high' | 'medium' | 'low';
+  stale: boolean;
+  latestShipmentAt?: Date;
+  sourceName?: string;
+  signals: {
+    purchaseScale: 'high' | 'medium' | 'small';
+    shipmentCount: number;
+    totalWeightKg: number;
+    totalValueUsd: number;
+    importedCategories: string[];
+    importedMaterials: string[];
+    seasonalPeakMonths: number[];
+    upcomingRestockWindow: boolean;
+    supplierConcentration: 'single_source' | 'concentrated' | 'diversified';
+    topSupplierShare: number;
+    supplierCount: number;
+  };
+  summaryText: string;
+}
+
+const CUSTOMS_MATERIAL_PATTERNS: [string, RegExp][] = [
+  ['velvet / microfiber / textile', /\b(?:velvet|microfiber|suede|cotton|linen|silk|fabric|textile|pouch)\b/i],
+  ['paperboard / rigid box / kraft', /\b(?:paperboard|cardboard|kraft|rigid box|gift box|carton|paper bag|packaging)\b/i],
+  ['leather / PU', /\b(?:leather|pu leather|faux leather|handbag|wallet)\b/i],
+  ['cast iron / steel / urethane / rubber', /\b(?:cast iron|steel|urethane|rubber|dumbbell|barbell|kettlebell|weight plate|fitness)\b/i],
+  ['canvas / acrylic / oil / wood frame', /\b(?:canvas|acrylic|oil painting|wall art|artwork|picture frame|wood frame)\b/i],
+  ['glass / ceramic / wax', /\b(?:glass|ceramic|wax|candle|bottle|jar)\b/i],
+  ['gold / silver / jewelry', /\b(?:jewelry|jewellery|silver|gold|ring|necklace|bracelet|watch)\b/i],
+];
+
+/**
+ * 为开发信与切入点选择生成可核验的海关采购情报：
+ * 1. 核验客户匹配方式（已确认ID / 域名 / 名称+国家）
+ * 2. 核验来源时效（超过 365 天标记 stale，不参与高置信切入）与可信度
+ * 3. 输出四类采购信号：采购规模、进口品类与材质、季节性补货、供应商集中度
+ */
+export async function getCustomerCustomsEvidence(
+  projectId: Types.ObjectId,
+  customerId: string,
+  now = new Date(),
+): Promise<CustomerCustomsEvidence | null> {
+  if (!Types.ObjectId.isValid(customerId)) return null;
+  const customer = await Customer.findOne({ _id: customerId, projectId }).select('name company website email country customsCompanyId customsMatchConfidence').lean();
+  if (!customer) return null;
+
+  let company = null;
+  let matchMethod: CustomerCustomsEvidence['matchMethod'];
+  if (customer.customsCompanyId) {
+    company = await CustomsCompany.findOne({ _id: customer.customsCompanyId, projectId }).lean();
+    if (company) matchMethod = 'explicit_id';
+  }
+  if (!company) {
+    const domain = domainFromAddress(customer.website || customer.email || '');
+    if (domain) {
+      company = await CustomsCompany.findOne({ projectId, domain }).lean();
+      if (company) matchMethod = 'domain';
+    }
+  }
+  if (!company) {
+    const normalizedName = normalizeCompanyName(customer.company || customer.name);
+    const country = normalizeCountry(customer.country);
+    if (normalizedName && country) {
+      company = await CustomsCompany.findOne({ projectId, normalizedName, country }).lean();
+      if (company) matchMethod = 'name_country';
+    }
+  }
+  if (!company || !matchMethod) return null;
+
+  const shipments = await CustomsShipment.find({
+    projectId,
+    $or: [{ importerCompanyId: company._id }, { exporterCompanyId: company._id }],
+  })
+    .sort({ shipmentDate: -1 })
+    .limit(200)
+    .select('shipmentDate hsCode productDescription weightKg amountUsd exporterNameRaw exporterCompanyId sourceId')
+    .lean();
+
+  if (!shipments.length) return null;
+
+  const latestShipmentAt = shipments[0]?.shipmentDate ? new Date(shipments[0].shipmentDate) : undefined;
+  const ageDays = latestShipmentAt ? (now.getTime() - latestShipmentAt.getTime()) / 86_400_000 : 9999;
+  const stale = ageDays > 365;
+
+  const sourceId = shipments[0]?.sourceId;
+  const source = sourceId ? await CustomsSource.findById(sourceId).select('name status').lean() : null;
+  const sourceVerified = Boolean(source && source.status !== 'disabled');
+
+  // Credibility check
+  const confidence: CustomerCustomsEvidence['confidence'] =
+    stale || !sourceVerified
+      ? 'low'
+      : matchMethod === 'explicit_id' || (matchMethod === 'domain' && shipments.length >= 2)
+        ? 'high'
+        : shipments.length >= 2
+          ? 'medium'
+          : 'low';
+
+  // 1. Purchase scale
+  const shipmentCount = shipments.length;
+  const totalWeightKg = shipments.reduce((sum, s) => sum + (Number(s.weightKg) || 0), 0);
+  const totalValueUsd = shipments.reduce((sum, s) => sum + (Number(s.amountUsd) || 0), 0);
+  const purchaseScale: 'high' | 'medium' | 'small' =
+    shipmentCount >= 12 || totalValueUsd >= 100_000 || totalWeightKg >= 20_000
+      ? 'high'
+      : shipmentCount >= 4 || totalValueUsd >= 20_000 || totalWeightKg >= 3_000
+        ? 'medium'
+        : 'small';
+
+  // 2. Imported categories & materials
+  const categorySet = new Set<string>();
+  const materialSet = new Set<string>();
+  for (const s of shipments) {
+    const desc = String(s.productDescription ?? '').trim();
+    if (desc) categorySet.add(desc.slice(0, 80));
+    if (s.hsCode) categorySet.add(`HS ${s.hsCode}`);
+    for (const [label, regex] of CUSTOMS_MATERIAL_PATTERNS) {
+      if (regex.test(desc)) materialSet.add(label);
+    }
+  }
+
+  // 3. Seasonal restocking (peak months + check if current month or next 2 months hit peak)
+  const monthCounts = new Map<number, number>();
+  for (const s of shipments) {
+    if (!s.shipmentDate) continue;
+    const m = new Date(s.shipmentDate).getUTCMonth() + 1;
+    monthCounts.set(m, (monthCounts.get(m) ?? 0) + 1);
+  }
+  const avgMonth = shipmentCount / Math.max(1, monthCounts.size);
+  const seasonalPeakMonths = [...monthCounts.entries()]
+    .filter(([, count]) => count >= Math.max(2, Math.ceil(avgMonth * 1.25)))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([m]) => m);
+  const currentMonth = now.getUTCMonth() + 1;
+  const nextMonths = new Set([currentMonth, (currentMonth % 12) + 1, ((currentMonth + 1) % 12) + 1]);
+  const upcomingRestockWindow = seasonalPeakMonths.some((m) => nextMonths.has(m));
+
+  // 4. Supplier concentration
+  const supplierCounts = new Map<string, number>();
+  for (const s of shipments) {
+    const key = String(s.exporterCompanyId || s.exporterNameRaw || '').trim().toLowerCase();
+    if (!key) continue;
+    supplierCounts.set(key, (supplierCounts.get(key) ?? 0) + 1);
+  }
+  const supplierCount = supplierCounts.size;
+  const maxSupplierShipments = Math.max(0, ...supplierCounts.values());
+  const topSupplierShare = shipmentCount > 0 ? Number((maxSupplierShipments / shipmentCount).toFixed(2)) : 0;
+  const supplierConcentration: 'single_source' | 'concentrated' | 'diversified' =
+    supplierCount === 1 && shipmentCount >= 2
+      ? 'single_source'
+      : topSupplierShare >= 0.7 && shipmentCount >= 3
+        ? 'concentrated'
+        : 'diversified';
+
+  const summaryParts = [
+    `海关记录匹配方式：${matchMethod === 'explicit_id' ? '已确认关联' : matchMethod === 'domain' ? '域名精确匹配' : '公司名+国家匹配'}（可信度 ${confidence}${stale ? '，数据超 365 天已过期' : ''}）`,
+    `采购规模：${purchaseScale}（${shipmentCount} 票${totalValueUsd > 0 ? `，约 $${Math.round(totalValueUsd)}` : ''}）`,
+    categorySet.size ? `进口品类/HS：${[...categorySet].slice(0, 4).join('；')}` : '',
+    materialSet.size ? `识别材质：${[...materialSet].slice(0, 4).join('、')}` : '',
+    seasonalPeakMonths.length ? `补货高峰月：${seasonalPeakMonths.join('/')} 月${upcomingRestockWindow ? '（临近补货窗口）' : ''}` : '',
+    supplierCount > 0 ? `供应商集中度：${supplierConcentration}（${supplierCount} 家，头部占比 ${Math.round(topSupplierShare * 100)}%）` : '',
+  ].filter(Boolean);
+
+  return {
+    matched: true,
+    companyId: String(company._id),
+    companyName: company.canonicalName,
+    matchMethod,
+    confidence,
+    stale,
+    latestShipmentAt,
+    sourceName: source?.name,
+    signals: {
+      purchaseScale,
+      shipmentCount,
+      totalWeightKg: Math.round(totalWeightKg),
+      totalValueUsd: Math.round(totalValueUsd),
+      importedCategories: [...categorySet].slice(0, 8),
+      importedMaterials: [...materialSet].slice(0, 6),
+      seasonalPeakMonths,
+      upcomingRestockWindow,
+      supplierConcentration,
+      topSupplierShare,
+      supplierCount,
+    },
+    summaryText: summaryParts.join('；'),
+  };
+}
+
 export interface CustomsSuggestionResult {
   companyId: string;
   summary: string;

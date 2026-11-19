@@ -282,15 +282,17 @@ def retrieve(db,request,tokenizer,embed,options,Failure):
         diagnostic_warning={'code':'diagnostic_budget','message':f'历史资料状态检查共 {len(diagnostic_rows)+omitted} 条；为控制单次开销，本次检查前 500 条（另有 {omitted} 条未检查），旧政策不会作为当前依据'}
     semantic_titles={}
     if query_vectors and diagnostic_rows:
+        cache=globals().setdefault('_DIAGNOSTIC_VECTOR_CACHE',{})
         for row in diagnostic_rows:
             search_text=row.get('searchText') or row['title']
-            # Historical diagnostics are best-effort state hints. A corrupt or
-            # unusually long legacy excerpt must not turn a normal query into a
-            # runtime failure; skip only that diagnostic's semantic hint and
-            # keep the lexical/status path below.
-            try: title_parts=windows(tokenizer,search_text,128,4)
-            except ValueError: continue
-            vectors_for_title=embed([part['text'] for part in title_parts])
+            cache_key=hashlib.sha256(search_text.encode('utf-8',errors='ignore')).hexdigest()
+            vectors_for_title=cache.get(cache_key)
+            if vectors_for_title is None:
+                try: title_parts=windows(tokenizer,search_text,128,4)
+                except ValueError: continue
+                vectors_for_title=embed([part['text'] for part in title_parts])
+                if len(cache)>=1024: cache.pop(next(iter(cache)))
+                cache[cache_key]=vectors_for_title
             semantic_titles[row['sourceId']]=max(float(v@q) for v in vectors_for_title for q in query_vectors)
     best_active=max(vector_scores.values(),default=0)
     draft_intent=bool(re.search(r'未发布|未公開|草稿|草拟|加急生产|unpublished|draft|unapproved|not approved',normalize(query)))

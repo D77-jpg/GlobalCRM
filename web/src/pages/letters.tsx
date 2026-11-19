@@ -97,27 +97,37 @@ export function LettersPage(): React.JSX.Element {
 
   /* ---------------------------- 动作 ---------------------------- */
 
-  /**
-   * 重发前先取完整客户档案：SendLetterDialog 的占位符预览需要
-   * industry / address 等字段，而列表里的 customer 只是摘要。
-   */
-  const openResend = React.useCallback(async (letter: DevelopmentLetter) => {
+  const draftQueue = React.useMemo(
+    () => items.filter((item) => item.status === 'draft' && item.review?.decision !== 'rejected'),
+    [items],
+  );
+
+  const openLetterInDialog = React.useCallback(async (letter: DevelopmentLetter) => {
     setViewOpen(false);
-    if(letter.status==='draft'){navigate('/customers/'+letter.customerId+'?knowledgeDraft='+letter.id);return;}
     setPreparing(true);
     try {
-      const customer = await apiGet<Customer>(`/customers/${letter.customerId}`);
+      const [customer, fullLetter] = await Promise.all([
+        apiGet<Customer>(`/customers/${letter.customerId}`),
+        letter.status === 'draft' ? apiGet<DevelopmentLetter>(`/letters/${letter.id}`) : Promise.resolve(letter),
+      ]);
       setSendCustomer(customer);
-      setResendTarget(letter);
+      setResendTarget(fullLetter);
       setSendOpen(true);
     } catch (caught) {
-      toast.error('无法准备重新发送', {
-        description: toErrorMessage(caught, '客户信息加载失败，可能已被删除'),
+      toast.error('无法准备邮件弹窗', {
+        description: toErrorMessage(caught, '客户或草稿信息加载失败，可能已被删除'),
       });
     } finally {
       setPreparing(false);
     }
-  }, [navigate]);
+  }, []);
+
+  /**
+   * 重发 / 审核草稿前先取完整客户档案与草稿依据，支持人工批量「通过并下一封」连续处理。
+   */
+  const openResend = React.useCallback(async (letter: DevelopmentLetter) => {
+    await openLetterInDialog(letter);
+  }, [openLetterInDialog]);
 
   const handleSent = React.useCallback(() => {
     void fetchList();
@@ -339,6 +349,35 @@ export function LettersPage(): React.JSX.Element {
         customer={sendCustomer}
         letter={resendTarget}
         onSent={handleSent}
+        onReviewed={(updated) => {
+          setResendTarget(updated);
+          void fetchList();
+        }}
+        queueProgress={(() => {
+          if (!resendTarget || resendTarget.status !== 'draft') return undefined;
+          const idx = draftQueue.findIndex((item) => item.id === resendTarget.id);
+          if (idx < 0) return undefined;
+          return {
+            index: idx,
+            total: draftQueue.length,
+            hasPrev: idx > 0,
+            hasNext: idx < draftQueue.length - 1,
+          };
+        })()}
+        onAdvanceNext={() => {
+          if (!resendTarget) return;
+          const remaining = draftQueue.filter((item) => item.id !== resendTarget.id);
+          const nextItem = remaining[0];
+          if (!nextItem) { setSendOpen(false); setResendTarget(null); setSendCustomer(null); return; }
+          void openLetterInDialog(nextItem);
+        }}
+        onNavigateQueue={(delta) => {
+          if (!resendTarget) return;
+          const idx = draftQueue.findIndex((item) => item.id === resendTarget.id);
+          const nextItem = draftQueue[idx + delta];
+          if (!nextItem) return;
+          void openLetterInDialog(nextItem);
+        }}
       />
 
       <ConfirmDialog

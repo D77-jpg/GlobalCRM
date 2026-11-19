@@ -20,6 +20,19 @@ export interface HunterResult {
   phone?:string;linkedin?:string;
 }
 
+const GENERIC_MAILBOX_PREFIX = /^(?:info|hello|hi|sales|contact|support|admin|office|team|enquiries|inquiries|help|service|marketing|press|customerservice|noreply|no-reply)@/i;
+const DECISION_MAKER_POSITION = /\b(?:founder|co-founder|owner|ceo|president|brand|creative|merchandising|buyer|procurement|sourcing|purchasing|supply\s*chain|product\s*director|head\s*of|vp|director)\b|创始人|品牌|采购|供应链|总监/i;
+
+export function isGenericRoleEmail(email?: string): boolean {
+  return Boolean(email && GENERIC_MAILBOX_PREFIX.test(email.trim().toLowerCase()));
+}
+
+export function classifyContactRole(title?: string): 'brand' | 'procurement' | 'other' {
+  if (/\b(?:buyer|procurement|sourcing|purchasing|operations|supply\s*chain)\b|采购|供应链|运营/i.test(title ?? '')) return 'procurement';
+  if (/\b(?:founder|co-founder|owner|brand|creative|merchandising|product)\b|创始人|品牌|设计|商品/i.test(title ?? '')) return 'brand';
+  return 'other';
+}
+
 export function mapHunterResponse(payload: unknown): HunterResult {
   const data = (payload as { data?: Record<string, unknown> })?.data ?? {};
   const raw = Array.isArray(data.emails)?data.emails.filter((item):item is Record<string,unknown>=>Boolean(item)&&typeof item==='object'):[];
@@ -37,8 +50,13 @@ export function mapHunterResponse(payload: unknown): HunterResult {
       linkedin:typeof item.linkedin==='string'?item.linkedin.slice(0,300):undefined,
     }];
   }).sort((a, b) => {
-    // Prefer a named decision maker, then confidence.
-    const rank = (email: HunterEmail) => (email.type === 'personal' && email.position ? 2 : email.type === 'personal' ? 1 : 0);
+    // Prioritize personal brand/procurement decision-makers > other personal with position > personal > generic
+    const rank = (email: HunterEmail) => {
+      if (email.type !== 'personal') return 0;
+      if (!isGenericRoleEmail(email.value) && email.position && DECISION_MAKER_POSITION.test(email.position)) return 3;
+      if (email.position) return 2;
+      return 1;
+    };
     return rank(b) - rank(a) || b.confidence - a.confidence;
   });
   const person = emails[0]&&(emails[0].firstName||emails[0].lastName)?emails[0]:undefined;

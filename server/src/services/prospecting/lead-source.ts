@@ -23,6 +23,7 @@ export interface RawLead extends LeadContact {
   emailConfidence?: number;
   markdownChars?: number;
   pagesRead?:number;
+  scrapedPages?: { url: string; html?: string; markdown?: string }[];
 }
 
 const BLOCKED = /(^|\.)(etsy|amazon|ebay|pinterest|facebook|instagram|linkedin|youtube|tiktok|alibaba|aliexpress|walmart|target|shopify|wixsite|blogspot|wordpress|tumblr|reddit|x|twitter)\./i;
@@ -119,8 +120,10 @@ export async function enrichLead(
 ):Promise<RawLead>{
  const result:RawLead={...lead,contactSources:[...(lead.contactSources??[])]};
  const pages=[lead.website];let markdown='',pagesRead=0;const emails=[...(lead.emails??[])];
+ const scrapedPages:{ url: string; html?: string; markdown?: string }[]=[];
  for(let i=0;i<pages.length&&i<3;i++){
   const page=pages[i],content=await scrape(page);if(!content)continue;pagesRead++;
+  scrapedPages.push({url:page,html:content.rawHtml,markdown:content.markdown});
   markdown+='\n'+content.markdown;
   const found=extractSiteContact(content.markdown,content.rawHtml??'',lead.domain);
   if(i===0&&content.company&&!found.company)found.company=content.company.slice(0,200);
@@ -139,6 +142,7 @@ export async function enrichLead(
   if(pagesRead>0&&emails.length===0&&!result.phone&&!result.instagram&&!result.linkedin&&!result.facebook){
    const deep=await scrape(pages[0],{html:true});
    if(deep){
+    scrapedPages[0]={url:pages[0],html:deep.rawHtml,markdown:deep.markdown};
     const found=extractSiteContact(deep.markdown??'',deep.rawHtml??'',lead.domain);
     for(const key of Object.keys(found) as (keyof typeof found)[])if(found[key]&&!result[key])Object.assign(result,{[key]:found[key]});
     emails.push(...((deep.markdown??'').match(EMAIL)??[]).filter(mail=>!isBlockedEmail(mail)));
@@ -149,6 +153,7 @@ export async function enrichLead(
  if(result.emails.length&&!result.emailSource)result.emailSource='site';
  result.excerpt=markdown.replace(/\s+/g,' ').trim().slice(0,2000)||lead.excerpt;
  result.pagesRead=pagesRead;result.markdownChars=markdown.length;result.contactSources=result.contactSources!.slice(0,8);
+ if(scrapedPages.length)result.scrapedPages=scrapedPages;
  return result;
 }
 

@@ -14,10 +14,13 @@ import { useIsMobile } from '@/hooks/use-ui';
 import { useEscapeKey } from '@/hooks/use-ui';
 import { cn } from '@/lib/utils';
 import { ScratchpadPanel } from '@/components/scratchpad/scratchpad-panel';
-import { AgentPanel } from '@/components/agent/agent-panel';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { selectIsReadOnly, useAuthStore } from '@/store/auth.store';
 import { useI18n } from '@/i18n';
+
+const LazyAgentPanel = React.lazy(() =>
+  import('@/components/agent/agent-panel').then((m) => ({ default: m.AgentPanel })),
+);
 
 const SIDEBAR_WIDTH = '15rem';
 const SIDEBAR_WIDTH_COLLAPSED = '3.75rem';
@@ -29,6 +32,9 @@ export function AppShell(): React.JSX.Element {
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const mobileNavOpen = useUiStore((state) => state.mobileNavOpen);
   const setMobileNavOpen = useUiStore((state) => state.setMobileNavOpen);
+  const agentOpen = useUiStore((state) => state.agentOpen);
+  const [agentMounted, setAgentMounted] = React.useState(false);
+  React.useEffect(() => { if (agentOpen) setAgentMounted(true); }, [agentOpen]);
   const isMobile = useIsMobile();
   const location = useLocation();
   const scrollRef = React.useRef<HTMLElement | null>(null);
@@ -105,7 +111,11 @@ export function AppShell(): React.JSX.Element {
       </Dialog>
 
       <ScratchpadPanel />
-      <AgentPanel />
+      {agentMounted ? (
+        <React.Suspense fallback={null}>
+          <LazyAgentPanel />
+        </React.Suspense>
+      ) : null}
     </div>
   );
 }

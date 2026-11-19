@@ -165,6 +165,83 @@ export function tenantPlugin(schema: Schema): void {
     }
     next();
   });
+
+  // Global bulkWrite tenant isolation: Mongoose does not run query/save hooks on Model.bulkWrite.
+  // Wrap bulkWrite at the schema static level so every caller (knowledge, customer, mail-sync, etc.)
+  // automatically scopes filters and enforces organizationId on inserts/upserts.
+  schema.statics.bulkWrite = async function tenantBulkWrite(
+    this: mongoose.Model<unknown>,
+    writes: Record<string, unknown>[],
+    options?: Record<string, unknown>,
+  ) {
+    const scopedOrg = scopedOrganizationId();
+    const projectOrgCache = new Map<string, Types.ObjectId | undefined>();
+    const resolveOrg = async (projectId: unknown): Promise<Types.ObjectId | undefined> => {
+      if (scopedOrg) return scopedOrg;
+      if (!projectId) return undefined;
+      const key = String(projectId);
+      if (projectOrgCache.has(key)) return projectOrgCache.get(key);
+      const derived = await projectOrganizationId(projectId).catch(() => undefined);
+      projectOrgCache.set(key, derived);
+      return derived;
+    };
+
+    const scopeFilter = (filter: Record<string, unknown>, orgId?: Types.ObjectId) => {
+      if (!orgId) return filter;
+      if (filter.organizationId && String(filter.organizationId) === String(orgId)) return filter;
+      if (filter.organizationId) {
+        return { $and: [filter, { organizationId: orgId }] };
+      }
+      return { ...filter, organizationId: orgId };
+    };
+
+    const guardedWrites: Record<string, unknown>[] = [];
+    for (const op of writes) {
+      if (!op || typeof op !== 'object') { guardedWrites.push(op); continue; }
+      if ('insertOne' in op && op.insertOne && typeof op.insertOne === 'object') {
+        const insertOp = op.insertOne as { document?: Record<string, unknown> };
+        const doc = { ...(insertOp.document ?? {}) };
+        const org = scopedOrg ?? (doc.organizationId ? undefined : await resolveOrg(doc.projectId));
+        if (scopedOrg) doc.organizationId = scopedOrg;
+        else if (org && !doc.organizationId) doc.organizationId = org;
+        guardedWrites.push({ insertOne: { ...insertOp, document: doc } });
+        continue;
+      }
+      const updateKey = (['updateOne', 'updateMany', 'replaceOne', 'deleteOne', 'deleteMany'] as const).find((k) => k in op);
+      if (updateKey && op[updateKey] && typeof op[updateKey] === 'object') {
+        const inner = { ...(op[updateKey] as Record<string, unknown>) };
+        const filter = { ...((inner.filter as Record<string, unknown>) ?? {}) };
+        if (scopedOrg) inner.filter = scopeFilter(filter, scopedOrg);
+
+        if ((updateKey === 'updateOne' || updateKey === 'updateMany') && inner.upsert === true) {
+          const update = inner.update;
+          if (update && typeof update === 'object' && !Array.isArray(update)) {
+            const updateObj = { ...(update as Record<string, unknown>) };
+            const setOnInsert = { ...((updateObj.$setOnInsert as Record<string, unknown>) ?? {}) };
+            const setObj = (updateObj.$set as Record<string, unknown> | undefined) ?? {};
+            if (!setOnInsert.organizationId && !setObj.organizationId) {
+              const org = scopedOrg ?? await resolveOrg(setOnInsert.projectId ?? setObj.projectId ?? filter.projectId);
+              if (org) {
+                setOnInsert.organizationId = org;
+                updateObj.$setOnInsert = setOnInsert;
+                inner.update = updateObj;
+              }
+            }
+          }
+        } else if (updateKey === 'replaceOne' && inner.replacement && typeof inner.replacement === 'object') {
+          const rep = { ...(inner.replacement as Record<string, unknown>) };
+          const org = scopedOrg ?? (rep.organizationId ? undefined : await resolveOrg(rep.projectId ?? filter.projectId));
+          if (scopedOrg) rep.organizationId = scopedOrg;
+          else if (org && !rep.organizationId) rep.organizationId = org;
+          inner.replacement = rep;
+        }
+        guardedWrites.push({ [updateKey]: inner });
+        continue;
+      }
+      guardedWrites.push(op);
+    }
+    return mongoose.Model.bulkWrite.call(this, guardedWrites as never, options as never);
+  };
 }
 
 export default tenantPlugin;

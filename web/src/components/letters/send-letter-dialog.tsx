@@ -22,21 +22,27 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
 import {
+  ArrowRight,
   CalendarClock,
   Check,
+  ChevronLeft,
   ChevronRight,
   CircleSlash,
+  Columns2,
   Eye,
   FileText,
   Info,
   Languages,
   Loader2,
   Mail,
+  Paperclip,
   PencilLine,
+  RefreshCw,
   RotateCcw,
   Save,
   Send,
   ShieldCheck,
+  Sparkles,
   TriangleAlert,
   User,
 } from 'lucide-react';
@@ -81,7 +87,7 @@ import {
   withSignatureLogo,
 } from '@/constants';
 import { useAuthStore } from '@/store/auth.store';
-import type { CurrentMailSender, Customer, DevelopmentLetter, LetterReview, SendLetterResult } from '@/types';
+import type { CurrentMailSender, Customer, CustomerAttachment, DevelopmentLetter, LetterReview, SendLetterResult } from '@/types';
 
 export interface SendLetterDialogProps {
   open: boolean;
@@ -96,6 +102,45 @@ export interface SendLetterDialogProps {
   onSent?: (result: SendLetterResult) => void;
   /** 审核结论（通过 / 不通过 / 撤销）写入后回调，父级据此刷新待审核草稿列表 */
   onReviewed?: (letter: DevelopmentLetter) => void;
+  /** 人工批量审核队列进度（业务员接手草稿队列时启用「通过并发送 → 下一封」） */
+  queueProgress?: { index: number; total: number; hasNext: boolean; hasPrev: boolean };
+  /** 通过并发送当前草稿后，自动切换到下一封待审核草稿 */
+  onAdvanceNext?: () => void;
+  /** 在待审核队列中切换上一封/下一封（Alt+[ / Alt+]） */
+  onNavigateQueue?: (delta: -1 | 1) => void;
+}
+
+const LIVE_CLICHE_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\bi hope this (email|message) finds you well\b/i, label: '套话：hope this email finds you well' },
+  { pattern: /\bjust (checking in|following up|touching base|circling back)\b/i, label: '空泛跟进套话' },
+  { pattern: /\b(game[- ]?changer|synergy|seamless|revolutionary|delve into|elevate your brand)\b/i, label: 'AI 腔高频词' },
+  { pattern: /\b(high quality|best price|one[- ]stop solution|trusted partner)\b/i, label: '空洞泛词（缺具体证据）' },
+];
+
+function analyzeLiveDraftStyle(plainBody: string, step?: number): {
+  words: number;
+  maxParagraphWords: number;
+  questions: number;
+  warnings: string[];
+  wordTarget: string;
+} {
+  // 去掉签名行（Best regards / Regards 之后）以准确统计正文词数
+  const bodyOnly = plainBody.split(/\n(?:best regards|kind regards|warm regards|regards|sincerely)[,\s]*\n/i)[0] ?? plainBody;
+  const trimmed = bodyOnly.trim();
+  const words = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
+  const paragraphs = trimmed ? trimmed.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean) : [];
+  const maxParagraphWords = paragraphs.reduce((max, p) => Math.max(max, p.split(/\s+/).filter(Boolean).length), 0);
+  const questions = (trimmed.match(/\?/g) ?? []).length;
+  const warnings: string[] = [];
+  const maxTarget = step === 3 ? 85 : step === 2 ? 105 : 125;
+  const wordTarget = step === 3 ? '40–80 词' : step === 2 ? '55–100 词' : '80–120 词（资料少可更短）';
+  if (words > maxTarget) warnings.push(`正文偏长（${words} 词，建议 ${wordTarget}）`);
+  if (maxParagraphWords > 60) warnings.push(`单段过长（${maxParagraphWords} 词，建议 ≤55 词）`);
+  if (questions > 2) warnings.push(`问句过多（${questions} 个，建议 1 个低门槛问题）`);
+  for (const item of LIVE_CLICHE_PATTERNS) {
+    if (item.pattern.test(trimmed)) warnings.push(item.label);
+  }
+  return { words, maxParagraphWords, questions, warnings, wordTarget };
 }
 
 /** 模板选择器的占位值（Radix Select 不接受空字符串；选中即回填表单，不持久化选中态） */
@@ -217,6 +262,9 @@ export function SendLetterDialog({
   reply,
   onSent,
   onReviewed,
+  queueProgress,
+  onAdvanceNext,
+  onNavigateQueue,
 }: SendLetterDialogProps): React.JSX.Element {
   const sendLetter = useLetterStore((state) => state.sendLetter);
   const resendLetter = useLetterStore((state) => state.resendLetter);
@@ -242,7 +290,14 @@ export function SendLetterDialog({
   const [appliedTemplateId, setAppliedTemplateId] = React.useState<string | null>(null);
   const requestKey = React.useRef(createClientId());
   const submitLock = React.useRef(false);
-  const [activeTab, setActiveTab] = React.useState<'edit' | 'preview' | 'bilingual'>('edit');
+  const [activeLetter, setActiveLetter] = React.useState<DevelopmentLetter | null>(letter);
+  React.useEffect(() => { setActiveLetter(letter); }, [letter]);
+  const [activeTab, setActiveTab] = React.useState<'edit' | 'preview' | 'bilingual' | 'compare'>('edit');
+  const [regeneratingAngle, setRegeneratingAngle] = React.useState<string | null>(null);
+  const [rewriteInstruction, setRewriteInstruction] = React.useState('');
+  const [previousSnapshot, setPreviousSnapshot] = React.useState<{ subject: string; contentText: string } | null>(null);
+  const [attachments, setAttachments] = React.useState<CustomerAttachment[]>([]);
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = React.useState<string[]>([]);
   const [translation, setTranslation] = React.useState<{ subject?: string; body: string } | null>(null);
   const [translationSource, setTranslationSource] = React.useState<string | null>(null);
   const [translating, setTranslating] = React.useState(false);
@@ -286,7 +341,7 @@ export function SendLetterDialog({
 
   // 只依赖 id：避免列表刷新导致 customer 对象引用变化时把用户正在写的内容重置掉
   const customerId = customer?.id;
-  const letterId = letter?.id;
+  const letterId = activeLetter?.id;
 
   React.useEffect(() => {
     if (!open) return;
@@ -295,10 +350,12 @@ export function SendLetterDialog({
     setServerError(null);
     setScheduledAt('');
     setAppliedTemplateId(null);
+    setRewriteInstruction('');
+    setSelectedAttachmentIds(activeLetter?.attachmentIds ?? []);
     requestKey.current = createClientId();
 
-    const source = letter
-      ? { subject: letter.subject, content: letter.template || letter.content }
+    const source = activeLetter
+      ? { subject: activeLetter.subject, content: activeLetter.template || activeLetter.content }
       : initialDraft ?? defaultTemplate;
 
     // 固定结尾直接写进正文，审核时看到的就是客户会收到的完整内容（回复不预填，避免光标落在签名后）
@@ -306,7 +363,7 @@ export function SendLetterDialog({
     const values: SendLetterFormValues = {
       subject: reply ? (/^re:/i.test(reply.subject) ? reply.subject : 'Re: ' + reply.subject) : source.subject ?? '',
       content: reply ? '' : appendSignatureHtml(source.content ?? '', signerName, signature),
-      recipientEmail: reply?.from ?? letter?.recipientEmail ?? customer?.email ?? '',
+      recipientEmail: reply?.from ?? activeLetter?.recipientEmail ?? customer?.email ?? '',
       // 只有「待开发」客户才需要推进状态，已联系及之后的客户默认关掉更贴合直觉
       markAsDeveloped: customer?.status === 'pending',
       saveAsDraft: false,
@@ -314,11 +371,21 @@ export function SendLetterDialog({
     reset(values);
 
     // 审核结论跟着草稿走；基线取打开时的内容，之后一旦改动就视为「需重新审核」
-    setReview(letter?.review ?? null);
-    setReviewStale(Boolean(letter?.reviewStale));
-    setReviewBaseline(letter ? { subject: values.subject, content: values.content, recipientEmail: values.recipientEmail } : null);
+    setReview(activeLetter?.review ?? null);
+    setReviewStale(Boolean(activeLetter?.reviewStale));
+    setReviewBaseline(activeLetter ? { subject: values.subject, content: values.content, recipientEmail: values.recipientEmail } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在「打开 / 客户 / 原信」变化时重建表单
   }, [open, customerId, letterId, initialDraft?.analysisId, reply?.id, reset, signature, defaultTemplate]);
+
+  // 加载当前客户的可附加资料文件（最多选择 5 份随开发信发送）
+  React.useEffect(() => {
+    if (!open || !customerId) { setAttachments([]); return; }
+    let active = true;
+    void apiGet<CustomerAttachment[]>(`/customers/${customerId}/attachments`)
+      .then((rows) => { if (active) setAttachments(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setAttachments([]); });
+    return () => { active = false; };
+  }, [open, customerId]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -411,20 +478,54 @@ export function SendLetterDialog({
 
   /* ---------------------------- 提交 ---------------------------- */
 
-  const isDraftReview = letter?.status === 'draft';
+  const isDraftReview = activeLetter?.status === 'draft';
   /** 审核通过后又被编辑（含未保存的本地改动），或服务端发现当前发件人渲染结果已不一致 */
   const reviewDirty = reviewStale || Boolean(reviewBaseline) && (
     (subject ?? '') !== reviewBaseline?.subject
     || (content ?? '') !== reviewBaseline?.content
     || (recipientEmail ?? '') !== reviewBaseline?.recipientEmail
   );
+  const liveStyle = React.useMemo(
+    () => analyzeLiveDraftStyle(englishBody, activeLetter?.outreachStep ?? initialDraft?.outreachStep),
+    [englishBody, activeLetter?.outreachStep, initialDraft?.outreachStep],
+  );
+  const compareBase = previousSnapshot ?? (activeLetter?.aiSnapshot ? {
+    subject: activeLetter.aiSnapshot.subject,
+    contentText: activeLetter.aiSnapshot.contentText,
+  } : null);
+
+  const handleRegenerateAngle = React.useCallback(async (angleCode?: string) => {
+    if (!activeLetter?.id || regeneratingAngle) return;
+    setRegeneratingAngle(angleCode || '__current__');
+    setServerError(null);
+    setPreviousSnapshot({ subject: subject || activeLetter.subject, contentText: englishBody || activeLetter.contentText });
+    try {
+      const created = await apiPost<{ letterId: string }>(`/agent/knowledge-drafts/${activeLetter.id}/regenerate`, {
+        requestKey: createClientId(),
+        ...(angleCode ? { angleCode } : {}),
+        ...(rewriteInstruction.trim() ? { instruction: rewriteInstruction.trim() } : {}),
+      });
+      const fresh = await apiGet<DevelopmentLetter>(`/letters/${created.letterId}`);
+      setActiveLetter(fresh);
+      onReviewed?.(fresh);
+      setActiveTab('compare');
+      toast.success(angleCode ? '已按所选角度生成新稿' : '已重新生成草稿', {
+        description: '可在「并排比稿」页签对比改动，再核对发送。',
+      });
+    } catch (error) {
+      setServerError(toErrorMessage(error, '换角度重写失败，请稍后重试'));
+    } finally {
+      setRegeneratingAngle(null);
+    }
+  }, [activeLetter, englishBody, onReviewed, regeneratingAngle, rewriteInstruction, subject]);
 
   /** 真正落库 + 投递：草稿与新建共用，审核通过后的发送也走这里 */
   const dispatchLetter = React.useCallback(
     (values: SendLetterFormValues, asDraft: boolean): Promise<SendLetterResult> => {
       const scheduledIso = !asDraft && scheduledAt ? new Date(scheduledAt).toISOString() : undefined;
-      return letter
-        ? resendLetter(letter.id, {
+      const attachmentIds = selectedAttachmentIds.length ? selectedAttachmentIds : undefined;
+      return activeLetter
+        ? resendLetter(activeLetter.id, {
             saveAsDraft: asDraft,
             requestKey: requestKey.current,
             scheduledAt: scheduledIso,
@@ -432,6 +533,7 @@ export function SendLetterDialog({
             content: values.content,
             recipientEmail: values.recipientEmail,
             markAsDeveloped: values.markAsDeveloped,
+            attachmentIds,
           })
         : sendLetter({
             customerId: customer!.id,
@@ -449,9 +551,10 @@ export function SendLetterDialog({
             recipientEmail: values.recipientEmail,
             markAsDeveloped: values.markAsDeveloped,
             saveAsDraft: asDraft,
+            attachmentIds,
           });
     },
-    [letter, customer, initialDraft, reply, attributedTemplate, scheduledAt, sendLetter, resendLetter],
+    [activeLetter, customer, initialDraft, reply, attributedTemplate, scheduledAt, selectedAttachmentIds, sendLetter, resendLetter],
   );
 
   const submit = React.useCallback(
@@ -519,28 +622,29 @@ export function SendLetterDialog({
    * 撤销：清掉结论，回到待审核。
    */
   const decide = React.useCallback(
-    async (decision: 'approve' | 'reject' | 'clear') => {
-      if (!letter || !customer) return;
+    async (decision: 'approve' | 'reject' | 'clear', advanceNext = false) => {
+      if (!activeLetter || !customer) return;
       if (reviewLock.current || submitLock.current) return;
 
       if (decision !== 'approve') {
         if (decision === 'clear') {
-          await clearMark(letter.id);
+          await clearMark(activeLetter.id);
           return;
         }
         reviewLock.current = true;
         setReviewBusy(true);
         setServerError(null);
         try {
-          const updated = await apiPost<DevelopmentLetter>(`/letters/${letter.id}/review`, { decision: 'reject' });
+          const updated = await apiPost<DevelopmentLetter>(`/letters/${activeLetter.id}/review`, { decision: 'reject' });
           setReview(updated.review ?? null);
           onReviewed?.(updated);
-          const markedId = letter.id;
+          const markedId = activeLetter.id;
           toast.success('已标记为不通过', {
             description: '这封草稿不会发送给客户，也不再出现在待处理清单里。',
             action: { label: '撤销标记', onClick: () => void clearMark(markedId) },
           });
-          onOpenChange(false);
+          if (advanceNext && queueProgress?.hasNext && onAdvanceNext) onAdvanceNext();
+          else onOpenChange(false);
         } catch (error) {
           setServerError(toErrorMessage(error, '提交审核结论失败'));
         } finally {
@@ -556,7 +660,7 @@ export function SendLetterDialog({
         setReviewBusy(true);
         setServerError(null);
         try {
-          const updated = await apiPost<DevelopmentLetter>(`/letters/${letter.id}/review`, {
+          const updated = await apiPost<DevelopmentLetter>(`/letters/${activeLetter.id}/review`, {
             decision: 'approve',
             subject: values.subject,
             content: values.content,
@@ -571,7 +675,8 @@ export function SendLetterDialog({
             toast.success('已审核通过，草稿尚未发送', {
               description: `${senderStatus?.reason || senderError || '个人发件邮箱未就绪'}。邮箱配置好后，打开该草稿点「审核通过并发送」即可。`,
             });
-            onOpenChange(false);
+            if (advanceNext && queueProgress?.hasNext && onAdvanceNext) onAdvanceNext();
+            else onOpenChange(false);
             return;
           }
           if (scheduledAt && new Date(scheduledAt).getTime() <= Date.now()) throw new Error('定时时间必须晚于当前时间');
@@ -579,7 +684,8 @@ export function SendLetterDialog({
           const result = await dispatchLetter(values, false);
           notifyLetterResult(result, false);
           onSent?.(result);
-          onOpenChange(false);
+          if (advanceNext && queueProgress?.hasNext && onAdvanceNext) onAdvanceNext();
+          else onOpenChange(false);
         } catch (error) {
           setServerError(toErrorMessage(error, '审核通过后发送失败'));
         } finally {
@@ -588,19 +694,19 @@ export function SendLetterDialog({
         }
       })();
     },
-    [canSend, clearMark, customer, dispatchLetter, handleSubmit, letter, onOpenChange, onReviewed, onSent, scheduledAt, senderError, senderStatus?.reason],
+    [activeLetter, canSend, clearMark, customer, dispatchLetter, handleSubmit, onAdvanceNext, onOpenChange, onReviewed, onSent, queueProgress?.hasNext, scheduledAt, senderError, senderStatus?.reason],
   );
 
   /** 已通过且内容没再改动：主按钮就是发送；其余情况主按钮负责「给出通过结论（并发送）」 */
   const reviewApprovedClean = review?.decision === 'approved' && !reviewDirty;
   const needsApprove = isDraftReview && !reviewApprovedClean;
   /** 人工批准也解决不了的硬拦截：直接显示不可发送，避免「已通过但永远发不出去」 */
-  const sendBlocker = isDraftReview ? letter?.sendBlocker : undefined;
+  const sendBlocker = isDraftReview ? activeLetter?.sendBlocker : undefined;
 
   /** 主按钮：草稿先审核再发送，其他场景直接发送 */
-  const primaryAction = React.useCallback(() => {
+  const primaryAction = React.useCallback((advanceNext = false) => {
     if (sendBlocker) return;
-    if (needsApprove) return decide('approve');
+    if (needsApprove) return decide('approve', advanceNext);
     return submit(false);
   }, [decide, needsApprove, sendBlocker, submit]);
 
@@ -643,12 +749,18 @@ export function SendLetterDialog({
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault();
-        void primaryAction();
+        void primaryAction(Boolean(event.shiftKey && queueProgress?.hasNext));
+      } else if (event.altKey && event.key === '[' && queueProgress?.hasPrev && onNavigateQueue) {
+        event.preventDefault();
+        onNavigateQueue(-1);
+      } else if (event.altKey && event.key === ']' && queueProgress?.hasNext && onNavigateQueue) {
+        event.preventDefault();
+        onNavigateQueue(1);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, primaryAction]);
+  }, [open, onNavigateQueue, primaryAction, queueProgress?.hasNext, queueProgress?.hasPrev]);
 
   const handleOpenChange = React.useCallback(
     (next: boolean) => {
@@ -700,14 +812,28 @@ export function SendLetterDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {isDraftReview ? <ShieldCheck className="h-4 w-4 text-primary" aria-hidden /> : <Send className="h-4 w-4 text-primary" aria-hidden />}
-            {reply ? '回复客户邮件' : isDraftReview ? '审核开发信草稿' : letter ? '重新发送开发信' : '发送开发信'}
-          </DialogTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
+            <DialogTitle className="flex items-center gap-2">
+              {isDraftReview ? <ShieldCheck className="h-4 w-4 text-primary" aria-hidden /> : <Send className="h-4 w-4 text-primary" aria-hidden />}
+              {reply ? '回复客户邮件' : isDraftReview ? '审核开发信草稿' : activeLetter ? '重新发送开发信' : '发送开发信'}
+              {activeLetter?.outreachStep ? <Badge variant="outline">第 {activeLetter.outreachStep} 封</Badge> : null}
+            </DialogTitle>
+            {queueProgress && queueProgress.total > 1 && onNavigateQueue ? (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Button type="button" variant="outline" size="sm" className="h-7 px-2" disabled={!queueProgress.hasPrev || sending || reviewBusy} onClick={() => onNavigateQueue(-1)} title="上一封（Alt+[）">
+                  <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                </Button>
+                <span className="px-1.5 tabular-nums">{queueProgress.index + 1} / {queueProgress.total}</span>
+                <Button type="button" variant="outline" size="sm" className="h-7 px-2" disabled={!queueProgress.hasNext || sending || reviewBusy} onClick={() => onNavigateQueue(1)} title="下一封（Alt+]）">
+                  <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                </Button>
+              </div>
+            ) : null}
+          </div>
           <DialogDescription>
             {isDraftReview
-              ? '左侧核对要发给客户的内容，右侧列出需要你确认的事；没问题就通过并发送，觉得不能用直接标记不通过（不用写理由）。'
-              : letter
+              ? '左侧核对要发给客户的内容，右侧可换角度重写、看线索依据与质量反馈；没问题就通过并发送，觉得不能用直接标记不通过。'
+              : activeLetter
                 ? '已带出原信内容，可修改后再次发送；会新增一条发送记录。'
                 : '正文中的 {{占位符}} 会在发送时自动替换为该客户的真实信息。'}
           </DialogDescription>
@@ -826,7 +952,7 @@ export function SendLetterDialog({
                 </div>
               </div>
 
-                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'edit' | 'preview' | 'bilingual')}>
+                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'edit' | 'preview' | 'bilingual' | 'compare')}>
                   <TabsList className="h-9 justify-start gap-1 bg-muted/60">
                     <TabsTrigger value="edit">
                       <PencilLine className="h-3.5 w-3.5" aria-hidden />
@@ -840,6 +966,12 @@ export function SendLetterDialog({
                       <Languages className="h-3.5 w-3.5" aria-hidden />
                       中英对照
                     </TabsTrigger>
+                    {compareBase ? (
+                      <TabsTrigger value="compare">
+                        <Columns2 className="h-3.5 w-3.5" aria-hidden />
+                        并排比稿
+                      </TabsTrigger>
+                    ) : null}
                   </TabsList>
                   <TabsContent value="edit" className="space-y-4 pt-1">
                     <div>
@@ -872,6 +1004,20 @@ export function SendLetterDialog({
                         />
                       </div>
                       <FieldMessage error={errors.content?.message} />
+                      {/* 实时字数与文风反馈条 */}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border/70 bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                        <span className="tabular-nums">正文约 <strong className="text-foreground">{liveStyle.words}</strong> 词（建议 {liveStyle.wordTarget}）</span>
+                        <span className="tabular-nums">最长段 {liveStyle.maxParagraphWords} 词</span>
+                        <span className="tabular-nums">问句 {liveStyle.questions} 个</span>
+                        {liveStyle.warnings.length === 0
+                          ? <span className="text-emerald-700 dark:text-emerald-400">文风简洁自然</span>
+                          : liveStyle.warnings.map((warn) => (
+                              <span key={warn} className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                                <TriangleAlert className="h-3 w-3 shrink-0" aria-hidden />
+                                {warn}
+                              </span>
+                            ))}
+                      </div>
                     </div>
 
                     {missingLabels.length > 0 ? (
@@ -962,6 +1108,34 @@ export function SendLetterDialog({
                     </div>
                     <p className="text-2xs text-muted-foreground">翻译只用于核对内容，实际发送的是左侧英文原文；翻译不会修改草稿。</p>
                   </TabsContent>
+
+                  {/* ---------------- 并排比稿 ---------------- */}
+                  {compareBase ? (
+                    <TabsContent value="compare" className="space-y-3 pt-1">
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <section className="min-w-0 rounded-xl border border-border/80 bg-muted/20">
+                          <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2">
+                            <span className="text-xs font-medium text-muted-foreground">{previousSnapshot ? '改写前版本' : 'AI 原始草稿'}</span>
+                            <span className="text-2xs text-muted-foreground">对比参考</span>
+                          </div>
+                          <div className="max-h-[24rem] space-y-2 overflow-y-auto px-4 py-3 text-sm leading-6">
+                            <p className="font-semibold">{compareBase.subject || '（无主题）'}</p>
+                            <p className="whitespace-pre-wrap break-words text-muted-foreground">{compareBase.contentText || '（空）'}</p>
+                          </div>
+                        </section>
+                        <section className="min-w-0 rounded-xl border border-primary/30 bg-card">
+                          <div className="flex items-center justify-between border-b bg-primary/5 px-4 py-2">
+                            <span className="text-xs font-medium text-foreground">当前编辑版本</span>
+                            <span className="text-2xs text-primary">实际将发送</span>
+                          </div>
+                          <div className="max-h-[24rem] space-y-2 overflow-y-auto px-4 py-3 text-sm leading-6">
+                            <p className="font-semibold">{preview.subject || '（未填写主题）'}</p>
+                            <p className="whitespace-pre-wrap break-words">{englishBody || '（空）'}</p>
+                          </div>
+                        </section>
+                      </div>
+                    </TabsContent>
+                  ) : null}
                 </Tabs>
               </div>
               </section>
@@ -969,15 +1143,81 @@ export function SendLetterDialog({
 
           {/* ---------------- 右栏：依据核对 → 审核结论 → 发送设置 ---------------- */}
           <aside className="min-w-0 space-y-4 lg:sticky lg:top-0">
-            {letter?.knowledgeReview?.context.playbook?.selectionReason ? (
-              <section className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
-                <h3 className="font-semibold">开发切入点</h3>
-                <p className="break-words text-muted-foreground">{letter.knowledgeReview.context.playbook.selectionReason}</p>
-                {letter.knowledgeReview.context.playbook.alternatives?.length ? (
+            {activeLetter?.knowledgeReview?.context.playbook?.selectionReason ? (
+              <section className="space-y-2.5 rounded-lg border border-border bg-card p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="flex items-center gap-1.5 font-semibold">
+                    <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+                    开发切入点与一键重写
+                  </h3>
+                  {activeLetter.knowledgeReview.context.playbook.segmentName ? (
+                    <Badge variant="outline" className="text-[11px]">{activeLetter.knowledgeReview.context.playbook.segmentName}</Badge>
+                  ) : null}
+                </div>
+                <p className="break-words text-xs leading-5 text-muted-foreground">{activeLetter.knowledgeReview.context.playbook.selectionReason}</p>
+                {activeLetter.knowledgeReview.context.playbook.matchedClues?.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {activeLetter.knowledgeReview.context.playbook.matchedClues.slice(0, 6).map((clue) => (
+                      <Badge key={clue} variant="muted" className="max-w-full truncate text-[10px]" title={clue}>{clue}</Badge>
+                    ))}
+                  </div>
+                ) : null}
+                {activeLetter.knowledgeReview.context.playbook.dualAngleComparison?.comparisonReason ? (
+                  <p className="rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground">
+                    双角度比稿：{activeLetter.knowledgeReview.context.playbook.dualAngleComparison.comparisonReason}
+                  </p>
+                ) : null}
+                {isDraftReview && activeLetter.id ? (
+                  <div className="space-y-2 border-t pt-2">
+                    <Input
+                      value={rewriteInstruction}
+                      onChange={(e) => setRewriteInstruction(e.target.value)}
+                      placeholder="可选补充要求（如：更偏采购视角、压短到 90 词）"
+                      className="h-8 text-xs"
+                      disabled={Boolean(regeneratingAngle) || sending || reviewBusy}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 w-full text-xs"
+                      disabled={Boolean(regeneratingAngle) || sending || reviewBusy}
+                      onClick={() => void handleRegenerateAngle(undefined)}
+                    >
+                      {regeneratingAngle === '__current__' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                      按当前角度重新生成
+                    </Button>
+                    {activeLetter.knowledgeReview.context.playbook.alternatives?.length ? (
+                      <div className="space-y-1.5">
+                        <p className="text-[11px] font-medium text-foreground">备选角度（点击一键切换并重写）</p>
+                        <ul className="space-y-1.5">
+                          {activeLetter.knowledgeReview.context.playbook.alternatives.map((option) => (
+                            <li key={option.code} className="rounded-md border border-border/70 bg-muted/20 p-2 text-xs">
+                              <p className="font-medium text-foreground">{option.name}</p>
+                              <p className="mt-0.5 break-words text-[11px] text-muted-foreground">{option.angle}</p>
+                              {option.reason ? <p className="mt-0.5 text-[11px] text-muted-foreground/80">暂不首选：{option.reason}</p> : null}
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                className="mt-1.5 h-7 px-2 text-[11px]"
+                                disabled={Boolean(regeneratingAngle) || sending || reviewBusy}
+                                onClick={() => void handleRegenerateAngle(option.code)}
+                              >
+                                {regeneratingAngle === option.code ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Sparkles className="h-3 w-3" aria-hidden />}
+                                改用此角度重写
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : activeLetter.knowledgeReview.context.playbook.alternatives?.length ? (
                   <details className="space-y-1 text-muted-foreground">
                     <summary className="cursor-pointer font-medium text-foreground">备选角度</summary>
                     <ul className="space-y-1 pl-4">
-                      {letter.knowledgeReview.context.playbook.alternatives.map(option => (
+                      {activeLetter.knowledgeReview.context.playbook.alternatives.map(option => (
                         <li key={option.code} className="list-disc break-words">{option.name} · {option.angle}</li>
                       ))}
                     </ul>
@@ -1003,10 +1243,10 @@ export function SendLetterDialog({
               </section>
             ) : null}
 
-            {letter?.id || initialDraft?.analysisId ? (
+            {activeLetter?.id || initialDraft?.analysisId ? (
             <section className="rounded-lg border border-border bg-card p-3">
               <KnowledgeReviewPanel
-                letterId={letter?.id}
+                letterId={activeLetter?.id}
                 analysisId={initialDraft?.analysisId}
                 currentBody={htmlToPlainText(content ?? '')}
                 currentSubject={subject}
@@ -1019,6 +1259,49 @@ export function SendLetterDialog({
                 <CalendarClock className="h-4 w-4 text-muted-foreground" aria-hidden />
                 发送设置
               </h3>
+              {attachments.length > 0 ? (
+                <>
+                  <details className="mt-2.5 rounded-md border border-dashed bg-muted/20 p-2">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-medium text-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Paperclip className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                        随信附加产品/客户资料
+                      </span>
+                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                        已选 {selectedAttachmentIds.length}/5
+                      </span>
+                    </summary>
+                    <ul className="mt-2 max-h-36 space-y-1.5 overflow-y-auto text-xs">
+                      {attachments.map((file) => {
+                        const checked = selectedAttachmentIds.includes(file.id);
+                        return (
+                          <li key={file.id} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id={`letter-att-${file.id}`}
+                              checked={checked}
+                              disabled={!checked && selectedAttachmentIds.length >= 5}
+                              onChange={(e) => {
+                                setSelectedAttachmentIds((prev) =>
+                                  e.target.checked
+                                    ? [...prev.slice(0, 4), file.id]
+                                    : prev.filter((id) => id !== file.id),
+                                );
+                              }}
+                              className="h-3.5 w-3.5 rounded border-border"
+                            />
+                            <label htmlFor={`letter-att-${file.id}`} className="min-w-0 flex-1 cursor-pointer truncate" title={file.originalName}>
+                              {file.originalName}
+                            </label>
+                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{Math.max(1, Math.ceil(file.size / 1024))} KB</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </details>
+                  <Separator className="my-3" />
+                </>
+              ) : null}
               <div className="mt-2.5 space-y-1">
                 <Label htmlFor="scheduled-mail-at" className="text-xs font-normal text-muted-foreground">定时发送（可选）</Label>
                 <Input
@@ -1075,7 +1358,9 @@ export function SendLetterDialog({
         <DialogFooter className="items-center">
           <span className="mr-auto hidden text-2xs text-muted-foreground lg:inline">
             {isDraftReview
-              ? `Ctrl/Cmd + Enter ${primaryLabel} · Ctrl/Cmd + S 存草稿`
+              ? queueProgress?.hasNext
+                ? `Ctrl/Cmd + Enter ${primaryLabel} · Ctrl/Cmd + Shift + Enter 通过并打开下一封 · Alt+[/] 切换`
+                : `Ctrl/Cmd + Enter ${primaryLabel} · Ctrl/Cmd + S 存草稿`
               : reply
                 ? 'Ctrl/Cmd + Enter 发送回复'
                 : 'Ctrl/Cmd + Enter 发送 · Ctrl/Cmd + S 存草稿'}
@@ -1124,9 +1409,23 @@ export function SendLetterDialog({
             )
           ) : null}
 
+          {isDraftReview && queueProgress?.hasNext && onAdvanceNext ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void primaryAction(true)}
+              loading={sending || reviewBusy}
+              disabled={primaryDisabled}
+              title="通过并发送当前草稿后，自动打开队列中的下一封（Ctrl/Cmd + Shift + Enter）"
+            >
+              {!sending && !reviewBusy ? <ArrowRight className="h-3.5 w-3.5" aria-hidden /> : null}
+              通过并下一封
+            </Button>
+          ) : null}
+
           <Button
             type="button"
-            onClick={() => void primaryAction()}
+            onClick={() => void primaryAction(false)}
             loading={sending || reviewBusy}
             disabled={primaryDisabled}
             title={primaryTitle}

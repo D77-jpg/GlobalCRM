@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {Upload,Plus,FileText,CheckCircle2,AlertCircle,Loader2,RefreshCw,Pencil,ChevronDown,Eye,Power,Trash2} from 'lucide-react';
 import {apiDelete,apiGet,apiPost,toErrorMessage} from '@/lib/api';
+import {createClientId} from '@/lib/utils';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Badge} from '@/components/ui/badge';
@@ -58,12 +59,12 @@ export function KnowledgeAdmin({initialKnowledgeId,initialDocumentId,initialRevi
  // Files still being read: poll until the parser finishes, then open the review sheet.
  React.useEffect(()=>{
   if(!files.some(file=>['queued','running'].includes(file.parsing?.state??'')))return;
-  const timer=setInterval(()=>{void loadFiles().catch(()=>undefined);},3000);
+  const timer=setInterval(()=>{if(document.visibilityState==='visible')void loadFiles().catch(()=>undefined);},3000);
   return()=>clearInterval(timer);
  },[files,loadFiles]);
  React.useEffect(()=>{
   if(!status||status.ready||!['updating','stale'].includes(status.status))return;
-  const timer=setInterval(()=>{void loadStatus();},5000);
+  const timer=setInterval(()=>{if(document.visibilityState==='visible')void loadStatus();},5000);
   return()=>clearInterval(timer);
  },[status,loadStatus]);
  React.useEffect(()=>{
@@ -174,7 +175,7 @@ export function KnowledgeAdmin({initialKnowledgeId,initialDocumentId,initialRevi
 
  async function rebuild(){
   setBusy(true);setError('');
-  try{await apiPost('/knowledge-index/rebuild',{requestKey:crypto.randomUUID()});setNotice('正在整理资料，通常几秒就好。');await loadStatus();}
+  try{await apiPost('/knowledge-index/rebuild',{requestKey:createClientId()});setNotice('正在整理资料，通常几秒就好。');await loadStatus();}
   catch(e){setError(toErrorMessage(e,'整理失败，请稍后再试'));}finally{setBusy(false);}
  }
 

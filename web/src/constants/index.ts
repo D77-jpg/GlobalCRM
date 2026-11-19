@@ -753,17 +753,15 @@ export const STATUS_TEXT_MAP: Record<string, CustomerStatus> = {
   输单: 'lost',
 };
 
-/** 默认开发信模板（首次打开编辑器时填充，可被「上次使用的模板」覆盖） */
+/** 通用默认开发信模板（私有品牌文案由项目品牌包 brandProfile.defaultLetterTemplate 注入） */
 export const DEFAULT_LETTER_TEMPLATE = `<p>Hi {{firstName}},</p>
 <p>I came across {{company}} and noticed your focus on {{industry}}.</p>
-<p>At {{companyName}}, we produce FSC-certified custom packaging from {{moq}} — most factories start at 500 to 1,000.</p>
-<p>Would it be useful if I sent over a few structures that could fit your current range?</p>`;
+<p>At {{companyName}}, we support buyers with tailored products and dependable supply for your range.</p>
+<p>Would it be useful if I shared a brief overview that fits your current lineup?</p>`;
 
 /**
- * 开发信固定结尾（与服务端 server/src/services/letter-signature.ts 保持一致）。
- * 编辑器里直接把它写进正文尾部，业务员看到的就是客户会收到的样子；
- * 服务端渲染时只做幂等兜底（已有标记就不再追加）。
- * logo 用同源相对路径方便预览，发送前服务端会换成公网绝对地址。
+ * 开发信固定结尾（优先读取项目品牌包 brandProfile.signatureTitle / signatureLines / logoPath，
+ * 公共前端源码不再硬编码私有品牌联系方式与话术）。
  */
 export interface LetterSignatureProfile {
   marker: string;
@@ -774,7 +772,14 @@ export interface LetterSignatureProfile {
 }
 
 interface ProjectSignatureSource {
-  brandProfile?: { brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general'; signatureTitle?: string; signatureLines?: string[] };
+  brandProfile?: {
+    brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
+    signatureTitle?: string;
+    signatureLines?: string[];
+    logoPath?: string | null;
+    defaultLetterSubject?: string;
+    defaultLetterTemplate?: string;
+  };
   code?: string;
   slug?: string;
   name?: string;
@@ -784,57 +789,36 @@ interface ProjectSignatureSource {
   mailFrom?: string;
 }
 
-const GENESIS_LETTER_SIGNATURE: LetterSignatureProfile = {
-  marker: 'Gold Supplier on Alibaba.com since 2014',
-  title: 'Sales Manager, Genesis (Xiamen) Bags Co., Ltd.',
-  lines: [
-    'Genesis Bags · Custom Packaging Manufacturer · Xiamen· Where Packaging Begins',
-    'WhatsApp +86 153 0600 1357 · sales@genesisbags.com',
-    'genesisbags.com · genesisgroup.en.alibaba.com',
-    'Gold Supplier on Alibaba.com since 2014 · ISO 9001 / FSC® / BSCI Certified',
-  ],
-  logoPath: '/api/brand/genesis-logo.png',
-  logoAlt: 'Genesis Packaging',
+const GENERIC_LETTER_SIGNATURE: LetterSignatureProfile = {
+  marker: 'Sales Manager',
+  title: 'Sales Manager',
+  lines: ['GlobalCRM Workspace'],
+  logoPath: null,
+  logoAlt: 'Company Logo',
 };
 
-const IRONHUE_LETTER_SIGNATURE: LetterSignatureProfile = {
-  marker: 'Wholesale · OEM · ODM · Private Label',
-  title: 'Sales Manager, IRONHUE',
-  lines: [
-    'Free Weight & Strength Training Equipment',
-    'Wholesale · OEM · ODM · Private Label',
-    'E: sales@ironhue.com',
-    'T / WhatsApp: +86 138 6042 3022',
-    'W: ironhue.com',
-  ],
-  logoPath: '/api/brand/ironhue-logo.png',
-  logoAlt: 'IRONHUE',
-};
+/** 通用默认签名导出（私有品牌签名通过项目品牌包下发至 project.brandProfile） */
+export const LETTER_SIGNATURE = GENERIC_LETTER_SIGNATURE;
 
-/** 保留 Genesis 默认导出，兼容旧测试和未传项目上下文的调用。 */
-export const LETTER_SIGNATURE = GENESIS_LETTER_SIGNATURE;
-
-/** 只按项目标识匹配，不能按行业猜测，避免未来项目继承 Genesis/IronHue 结尾。 */
+/** 仅根据当前项目资料与已导入的品牌包组装签名，公共源码不包含任何私有品牌联系方式。 */
 export function letterSignatureForProject(project?: ProjectSignatureSource | null): LetterSignatureProfile {
-  const key = project?.brandProfile?.brandKey;
   const companyName = String(project?.companyName || project?.name || 'Our team').trim();
   const industry = String(project?.industry || '').trim();
-  const lines = [
+  const fallbackLines = [
     `${companyName}${industry ? ` · ${industry}` : ''}`,
     ...(project?.website ? [`Website ${project.website}`] : []),
     ...(project?.mailFrom ? [`Email ${project.mailFrom}`] : []),
   ];
-  const generic = {
-    marker: `Sales Manager, ${companyName}`,
-    title: `Sales Manager, ${companyName}`,
-    lines: lines.length ? lines : [companyName],
-    logoPath: null,
+  const title = project?.brandProfile?.signatureTitle?.trim() || `Sales Manager, ${companyName}`;
+  const linesOverride = project?.brandProfile?.signatureLines?.map((line) => line.trim()).filter(Boolean);
+  const logoPath = project?.brandProfile?.logoPath !== undefined ? project.brandProfile.logoPath : null;
+  return {
+    marker: title,
+    title,
+    lines: linesOverride?.length ? linesOverride : (fallbackLines.length ? fallbackLines : [companyName]),
+    logoPath,
     logoAlt: companyName,
   };
-  const base = key === 'ironhue' ? IRONHUE_LETTER_SIGNATURE : key === 'genesis' ? GENESIS_LETTER_SIGNATURE : generic;
-  const title = project?.brandProfile?.signatureTitle?.trim();
-  const linesOverride = project?.brandProfile?.signatureLines?.map(line => line.trim()).filter(Boolean);
-  return { ...base, ...(title ? { title, marker: title } : {}), ...(linesOverride?.length ? { lines: linesOverride } : {}) };
 }
 
 function escapeSignatureText(value: string): string {
@@ -981,24 +965,21 @@ export function withSignatureLogo(
   return html;
 }
 
-export const DEFAULT_LETTER_SUBJECT = '{{company}} packaging — samples from {{moq}}';
+export const DEFAULT_LETTER_SUBJECT = '{{company}} — {{industry}} introduction';
 
-/** 新写开发信时的项目默认模板，避免 IronHue/未知项目落进 Genesis 包装话术。 */
+/** 新写开发信时的项目默认模板：优先读取品牌包配置的默认主题与模板，否则使用通用中性配置。 */
 export function defaultLetterTemplateForProject(project?: ProjectSignatureSource | null): { subject: string; content: string } {
-  const key = project?.brandProfile?.brandKey;
-  if (key === 'ironhue') {
+  const customSubject = project?.brandProfile?.defaultLetterSubject?.trim();
+  const customTemplate = project?.brandProfile?.defaultLetterTemplate?.trim();
+  if (customSubject || customTemplate) {
     return {
-      subject: '{{company}} — free weights and strength equipment',
-      content: `<p>Hi {{firstName}},</p>
-<p>I came across {{company}} and noticed your focus on {{industry}}.</p>
-<p>At IRONHUE, we manufacture free weights and strength training equipment, including dumbbells, weight plates, kettlebells, barbells and accessories, with private-label, OEM and ODM support.</p>
-<p>Would it be useful if I sent over a few options that could fit your current range?</p>`,
+      subject: customSubject || DEFAULT_LETTER_SUBJECT,
+      content: customTemplate || DEFAULT_LETTER_TEMPLATE,
     };
   }
-  if (key === 'genesis') return { subject: DEFAULT_LETTER_SUBJECT, content: DEFAULT_LETTER_TEMPLATE };
   const companyName = String(project?.companyName || project?.name || 'our team').trim();
   return {
-    subject: '{{company}} — {{industry}} introduction',
+    subject: DEFAULT_LETTER_SUBJECT,
     content: `<p>Hi {{firstName}},</p>
 <p>I came across {{company}} and noticed your focus on {{industry}}.</p>
 <p>At ${escapeSignatureText(companyName)}, we support customers with products and services related to your market.</p>

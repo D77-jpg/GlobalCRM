@@ -516,14 +516,43 @@ export async function getMailAccountDeliveryConfig(
   };
 }
 
+export function computeMailboxWarmupLimit(
+  account: { dailyLimit: number; warmup?: { enabled?: boolean; startedAt?: Date; startLimit?: number; dailyIncrement?: number; maxLimit?: number; activeSendDays?: number; recentSentCount?: number; recentHardBounceCount?: number; cooledDownUntil?: Date } },
+  project: { mailCompliance?: { warmupEnabled?: boolean; warmupStartedAt?: Date; warmupStartLimit?: number; warmupDailyIncrement?: number; warmupMaxLimit?: number; dailySendLimit?: number } } | null,
+  now = new Date(),
+): { limit: number; warmup: boolean; reason?: string } {
+  const baseCap = effectiveDailyLimit(project, account.dailyLimit);
+  const w = account.warmup;
+  if (!w?.enabled) return baseCap;
+  const startLimit = Math.max(1, w.startLimit ?? 10);
+  const inc = Math.max(1, w.dailyIncrement ?? 5);
+  const maxLimit = Math.max(startLimit, w.maxLimit ?? account.dailyLimit);
+  const sent = w.recentSentCount ?? 0;
+  const bounces = w.recentHardBounceCount ?? 0;
+  const bounceRate = sent > 0 ? bounces / sent : 0;
+  const activeDays = Math.max(0, w.activeSendDays ?? 0);
+
+  let warmupLimit = Math.min(maxLimit, startLimit + activeDays * inc);
+  let reason: string | undefined;
+  if ((w.cooledDownUntil && new Date(w.cooledDownUntil) > now) || (sent >= 5 && bounceRate > 0.05) || bounces >= 3) {
+    warmupLimit = Math.max(5, Math.floor(warmupLimit * 0.5));
+    reason = 'mailbox_bounce_cooldown';
+  } else if (sent >= 5 && bounceRate >= 0.03) {
+    warmupLimit = Math.min(maxLimit, startLimit + Math.max(0, activeDays - 1) * inc);
+    reason = 'mailbox_bounce_hold';
+  }
+  const finalLimit = Math.max(1, Math.min(baseCap.limit, warmupLimit));
+  return { limit: finalLimit, warmup: true, ...(reason ? { reason } : {}) };
+}
+
 export async function reserveMailAttempt(accountId: string, projectId: string, userId: string): Promise<void> {
   const [account, project] = await Promise.all([
-    UserMailAccount.findOne({ _id: accountId, projectId, userId }).select('dailyLimit'),
+    UserMailAccount.findOne({ _id: accountId, projectId, userId }).select('dailyLimit warmup'),
     Project.findById(projectId).select('mailCompliance organizationId').lean(),
   ]);
   if (!account) throw ApiError.conflict('个人发件邮箱不存在或无权使用');
   await assertUsageAvailable('monthlyEmails', 1, project?.organizationId ? String(project.organizationId) : undefined);
-  const cap = effectiveDailyLimit(project, account.dailyLimit);
+  const cap = computeMailboxWarmupLimit(account, project);
   const filter = { mailAccountId: account._id, day: utcDay() };
   await MailQuotaBucket.updateOne(filter, {
     $setOnInsert: { projectId: account.projectId, userId: account.userId, mailAccountId: account._id, day: utcDay(), attempts: 0 },
@@ -537,7 +566,34 @@ export async function reserveMailAttempt(accountId: string, projectId: string, u
   await audit({ projectId, accountId, actorId: userId, targetUserId: userId, action: 'send_attempt', detail: { used: reserved.attempts, dailyLimit: cap.limit, warmup: cap.warmup } });
 }
 
-export async function auditMailResult(accountId: string, projectId: string, userId: string, accepted: boolean, _error?: string): Promise<void> {
+export async function auditMailResult(
+  accountId: string,
+  projectId: string,
+  userId: string,
+  accepted: boolean,
+  _error?: string,
+  hardBounce = false,
+): Promise<void> {
+  const today = utcDay();
+  if (accepted) {
+    // Advance independent per-mailbox activeSendDays once per UTC day with real sends
+    await UserMailAccount.updateOne(
+      { _id: accountId, projectId, 'warmup.lastSendDay': { $ne: today } },
+      { $inc: { 'warmup.activeSendDays': 1 }, $set: { 'warmup.lastSendDay': today } },
+    ).catch(() => undefined);
+    await UserMailAccount.updateOne(
+      { _id: accountId, projectId },
+      { $inc: { 'warmup.recentSentCount': 1 } },
+    ).catch(() => undefined);
+  } else if (hardBounce) {
+    await UserMailAccount.updateOne(
+      { _id: accountId, projectId },
+      {
+        $inc: { 'warmup.recentHardBounceCount': 1 },
+        $set: { 'warmup.cooledDownUntil': new Date(Date.now() + 2 * 86_400_000) },
+      },
+    ).catch(() => undefined);
+  }
   await audit({
     projectId,
     accountId,
@@ -545,6 +601,6 @@ export async function auditMailResult(accountId: string, projectId: string, user
     targetUserId: userId,
     action: accepted ? 'send_success' : 'send_failed',
     // Never persist transport-library error strings; they may embed SMTP credentials.
-    detail: accepted ? {} : { error: 'SMTP 发送失败' },
+    detail: accepted ? {} : { error: 'SMTP 发送失败', ...(hardBounce ? { hardBounce: true } : {}) },
   });
 }

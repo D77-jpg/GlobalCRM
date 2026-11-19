@@ -7,10 +7,15 @@
  * - 深色模式样式已在 index.css 中覆盖 quill.snow.css
  */
 import * as React from 'react';
-import ReactQuill from 'react-quill-new';
-import 'react-quill-new/dist/quill.snow.css';
+import type ReactQuillType from 'react-quill-new';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const LazyReactQuill = React.lazy(async () => {
+  await import('react-quill-new/dist/quill.snow.css');
+  const mod = await import('react-quill-new');
+  return { default: mod.default };
+});
 
 /**
  * Quill 实例的最小接口。
@@ -75,7 +80,7 @@ export const LetterEditor = React.forwardRef<LetterEditorHandle, LetterEditorPro
   { value, onChange, placeholder, invalid = false, readOnly = false, className, id, onBlur },
   ref,
 ) {
-  const quillRef = React.useRef<ReactQuill | null>(null);
+  const quillRef = React.useRef<ReactQuillType | null>(null);
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
 
   // Quill's generated icon controls do not supply descriptive names by default.
@@ -191,17 +196,19 @@ export const LetterEditor = React.forwardRef<LetterEditorHandle, LetterEditorPro
       )}
       onBlur={onBlur}
     >
-      <ReactQuill
-        ref={quillRef}
-        theme="snow"
-        value={value}
-        onChange={onChange}
-        modules={modules}
-        formats={FORMATS}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        preserveWhitespace
-      />
+      <React.Suspense fallback={<LetterEditorSkeleton />}>
+        <LazyReactQuill
+          ref={quillRef}
+          theme="snow"
+          value={value}
+          onChange={onChange}
+          modules={modules}
+          formats={FORMATS}
+          placeholder={placeholder}
+          readOnly={readOnly}
+          preserveWhitespace
+        />
+      </React.Suspense>
     </div>
   );
 });

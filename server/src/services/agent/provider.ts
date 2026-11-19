@@ -51,6 +51,11 @@ export interface PreviousOutreachDraft {
   step: number;
   subject: string;
   bodyText: string;
+  savedAlternatives?: { code: string; name: string; angle: string; reason?: string }[];
+  usedProofIds?: string[];
+  usedProofTexts?: string[];
+  usedCtas?: string[];
+  usedDeliverables?: string[];
 }
 
 export interface CustomerAnalysisInput {
