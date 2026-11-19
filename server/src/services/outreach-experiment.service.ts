@@ -157,6 +157,85 @@ export async function listOutreachExperiments(actor: AuthUser) {
   }));
 }
 
+/**
+ * Resolve (or deterministically assign) the active running A/B experiment arm
+ * for a customer when drafting outreach emails. Returns null when no active
+ * experiment is running in this project's observation window.
+ */
+export async function resolveActiveExperimentAssignment(
+  projectId: Types.ObjectId,
+  customer: { _id: Types.ObjectId; email?: string; title?: string; website?: string; interestedProducts?: string },
+  brandKey = 'general',
+  now = new Date(),
+): Promise<{ experimentId: string; arm: 'control' | 'treatment'; writingVersion: string; stratumKey: string } | null> {
+  const exp = await OutreachExperiment.findOne({
+    projectId,
+    status: 'running',
+    $and: [
+      { $or: [{ startedAt: { $exists: false } }, { startedAt: { $lte: now } }] },
+      { $or: [{ endsAt: { $exists: false } }, { endsAt: { $gte: now } }] },
+    ],
+  }).sort({ createdAt: -1 }).lean();
+  if (!exp) return null;
+
+  const existing = exp.assignments.find((a) => String(a.customerId) === String(customer._id));
+  if (existing) {
+    return {
+      experimentId: String(exp._id),
+      arm: existing.arm,
+      writingVersion: existing.writingVersion,
+      stratumKey: existing.stratumKey,
+    };
+  }
+
+  const tier = classifyCustomerTier({
+    email: customer.email,
+    contactRole: customer.title,
+    websiteTextLength: customer.website ? 400 : 0,
+    hasProducts: Boolean(customer.interestedProducts),
+  });
+  const parts = [
+    exp.stratifyBy.includes('brand') ? (exp.brandKey || brandKey) : '',
+    exp.stratifyBy.includes('data_tier') ? (tier === 'sparse' ? 'sparse' : 'rich') : '',
+    exp.stratifyBy.includes('contact_role') ? tier : '',
+  ].filter(Boolean);
+  const stratumKey = parts.join('|') || 'all';
+  const arm = assignExperimentArm(String(exp._id), String(customer._id), stratumKey);
+  const writingVersion = arm === 'control' ? exp.controlVersion : exp.treatmentVersion;
+
+  // Idempotently persist assignment (capped at 5000 customers per experiment)
+  if (exp.assignments.length < 5000) {
+    await OutreachExperiment.updateOne(
+      { _id: exp._id, projectId, 'assignments.customerId': { $ne: customer._id } },
+      {
+        $push: {
+          assignments: {
+            customerId: customer._id,
+            arm,
+            writingVersion,
+            stratumKey,
+            assignedAt: now,
+          },
+        },
+      },
+    ).catch(() => undefined);
+  }
+
+  return { experimentId: String(exp._id), arm, writingVersion, stratumKey };
+}
+
+export async function stopOutreachExperiment(experimentId: string, actor: AuthUser): Promise<ExperimentEvaluationReport> {
+  if (!Types.ObjectId.isValid(experimentId)) throw ApiError.notFound('实验不存在');
+  const projectId = requireProjectId(actor);
+  const updated = await OutreachExperiment.findOneAndUpdate(
+    { _id: experimentId, projectId },
+    { $set: { status: 'completed', endsAt: new Date() } },
+    { new: true },
+  );
+  if (!updated) throw ApiError.notFound('实验不存在或无权访问');
+  return evaluateOutreachExperiment(experimentId, actor);
+}
+
 export async function evaluateOutreachExperiment(experimentId: string, actor: AuthUser): Promise<ExperimentEvaluationReport> {
   if (!Types.ObjectId.isValid(experimentId)) throw ApiError.notFound('实验不存在');
   const projectId = requireProjectId(actor);

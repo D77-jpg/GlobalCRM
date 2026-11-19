@@ -376,6 +376,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
         </p>
       ) : null}
 
+      {isAdmin ? <LegacyUpgradeAuditBanner key={`upgrade-${activeProjectId}`} onMigrated={() => void load(true)} /> : null}
+
       {overview ? (
         <>
           <section className="rounded-lg border bg-card p-3.5">
@@ -406,6 +408,12 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 <Badge variant={mailbox?.canSend ? 'developed' : 'failed'}>
                   {mailbox?.canSend ? '邮箱已验证' : '邮箱未就绪'}
                 </Badge>
+                {mailbox?.warmup?.enabled ? (
+                  <Badge variant={mailbox.warmup.reason === 'mailbox_bounce_cooldown' ? 'warning' : 'outline'}>
+                    独立预热 · 活跃 {mailbox.warmup.activeSendDays} 天 · 今日限 {mailbox.warmup.effectiveLimit}/{mailbox.dailyLimit} 封
+                    {mailbox.warmup.reason === 'mailbox_bounce_cooldown' ? '（退信降速中）' : mailbox.warmup.reason === 'mailbox_bounce_hold' ? '（退信暂缓加量）' : ''}
+                  </Badge>
+                ) : null}
               </div>
             </div>
             {!mailbox?.canSend ? (
@@ -651,6 +659,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
 
           <OutreachResultsPanel key={`${activeProjectId}-${ownerId}`} endpoint={scoped('/outreach-automation/results')} isAdmin={isAdmin} />
           {isAdmin ? <WritingReleaseCard key={`release-${activeProjectId}`} /> : null}
+          {isAdmin ? <OutreachExperimentsCard key={`exp-${activeProjectId}`} /> : null}
 
           {overview.recent.length ? (
             <Card>
@@ -742,15 +751,44 @@ const RECOMMENDATION_BADGE: Record<string, { label: string; variant: 'developed'
   insufficient_sample: { label: '样本不足', variant: 'outline' },
 };
 
+interface CrossBrandReport {
+  windowDays: number;
+  projects: {
+    projectId: string;
+    projectName: string;
+    brandKey: string;
+    sent: number;
+    replies: number;
+    interested: number;
+    inquiries: number;
+    sampleRequests: number;
+    quoted: number;
+    won: number;
+    replyRate: number;
+    optOuts: number;
+    observedBounces: number;
+    observedComplaints: number;
+    highOpenLowReplyGroups: number;
+  }[];
+}
+
 function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin: boolean }) {
   const [data, setData] = React.useState<OutreachResults>();
+  const [crossBrand, setCrossBrand] = React.useState<CrossBrandReport>();
+  const [mode, setMode] = React.useState<'project' | 'cross_brand'>('project');
   const [error, setError] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [harvesting, setHarvesting] = React.useState(false);
 
-  async function load() {
+  async function load(targetMode = mode) {
     setLoading(true); setError('');
-    try { setData(await apiGet<OutreachResults>(endpoint)); }
+    try {
+      if (targetMode === 'cross_brand') {
+        setCrossBrand(await apiGet<CrossBrandReport>('/outreach-automation/results/cross-brand?windowDays=30'));
+      } else {
+        setData(await apiGet<OutreachResults>(endpoint));
+      }
+    }
     catch (reason) { setError(toErrorMessage(reason, '效果数据加载失败')); }
     finally { setLoading(false); }
   }
@@ -771,17 +809,37 @@ function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin
     <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
       <div className="space-y-1"><CardTitle className="text-sm">近 30 天自动开发效果与归因复盘</CardTitle>
         <CardDescription>按切入点、采购偏好、步骤和写信版本统计；自动标记「打开多、回复少」并给出保留/改写/停用建议。</CardDescription></div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {isAdmin ? (
+          <div className="inline-flex rounded-md border p-0.5 text-xs">
+            <Button size="sm" variant={mode === 'project' ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => { setMode('project'); void load('project'); }}>当前项目</Button>
+            <Button size="sm" variant={mode === 'cross_brand' ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => { setMode('cross_brand'); void load('cross_brand'); }}>跨品牌对照</Button>
+          </div>
+        ) : null}
         {isAdmin ? (
           <Button size="sm" variant="outline" onClick={() => void harvestExemplars()} disabled={harvesting}>
             {harvesting ? '回流中…' : '回流优秀范本'}
           </Button>
         ) : null}
-        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>{loading ? '加载中' : data ? '刷新' : '查看'}</Button>
+        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>{loading ? '加载中' : (mode === 'cross_brand' ? crossBrand : data) ? '刷新' : '查看'}</Button>
       </div>
     </CardHeader>
     {error && <CardContent><p role="alert" className="text-sm text-destructive">{error}</p></CardContent>}
-    {data && <CardContent className="space-y-3">
+    {mode === 'cross_brand' && crossBrand && <CardContent className="space-y-3">
+      {crossBrand.projects.length ? <div className="overflow-x-auto"><Table>
+        <TableHeader><TableRow>{['项目 / 品牌', '已发', '有效回复（率）', '意向 / 询价 / 要样', '报价 / 成交', '退订 / 退信 / 投诉', '打开多回复少组'].map(title => <TableHead key={title}>{title}</TableHead>)}</TableRow></TableHeader>
+        <TableBody>{crossBrand.projects.map(p => <TableRow key={p.projectId}>
+          <TableCell><p className="font-medium">{p.projectName}</p><p className="text-xs text-muted-foreground">{p.brandKey}</p></TableCell>
+          <TableCell className="tabular-nums">{p.sent}</TableCell>
+          <TableCell className="tabular-nums">{p.replies}（{(p.replyRate * 100).toFixed(1)}%）</TableCell>
+          <TableCell className="tabular-nums">{p.interested} / {p.inquiries} / {p.sampleRequests}</TableCell>
+          <TableCell className="tabular-nums">{p.quoted} / {p.won}</TableCell>
+          <TableCell className="tabular-nums">{p.optOuts} / {p.observedBounces} / {p.observedComplaints}</TableCell>
+          <TableCell className="tabular-nums">{p.highOpenLowReplyGroups}</TableCell>
+        </TableRow>)}</TableBody>
+      </Table></div> : <p className="text-sm text-muted-foreground">暂无可对照的活跃品牌项目。</p>}
+    </CardContent>}
+    {mode === 'project' && data && <CardContent className="space-y-3">
       <div className="space-y-1 text-xs text-muted-foreground">
         <p className="text-sm text-foreground">
           观察到 {data.observedBounces} 个收件地址硬退信 · {data.optOuts} 个退订 · {data.observedComplaints} 个投诉
@@ -920,4 +978,208 @@ function WritingReleaseCard() {
       </CardContent>
     ) : null}
   </Card>;
+}
+
+interface LegacyAuditResult {
+  countsByMode: { shadow: number; pilot: number; active: number; legacyUnset: number };
+  pendingQueuedLetters: number;
+  recommendation: string;
+}
+
+function LegacyUpgradeAuditBanner({ onMigrated }: { onMigrated: () => void }) {
+  const [audit, setAudit] = React.useState<LegacyAuditResult | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+    void apiGet<LegacyAuditResult>('/outreach-automation/upgrade-audit')
+      .then((res) => { if (active) setAudit(res); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  if (!audit || audit.countsByMode.legacyUnset === 0) return null;
+
+  async function migrate(targetMode: 'shadow' | 'pilot' | 'active') {
+    setBusy(true);
+    try {
+      await apiPost('/outreach-automation/migrate-legacy-modes', { targetMode });
+      toast.success(`已将历史配置统一迁移为 ${targetMode} 模式`);
+      setAudit(null);
+      onMigrated();
+    } catch (reason) {
+      toast.error('迁移失败', { description: toErrorMessage(reason, '请稍后重试') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 p-3 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+      <div className="space-y-0.5">
+        <p className="font-semibold">升级前配置检查：发现 {audit.countsByMode.legacyUnset} 条历史自动开发配置未设置发送模式（排队邮件 {audit.pendingQueuedLetters} 封）</p>
+        <p>{audit.recommendation}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void migrate('shadow')}>归类为模拟</Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void migrate('pilot')}>归类为试发</Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void migrate('active')}>确认为正式</Button>
+      </div>
+    </section>
+  );
+}
+
+interface ExperimentSummary {
+  id: string;
+  name: string;
+  controlVersion: string;
+  treatmentVersion: string;
+  observationWindowDays: number;
+  minSamplePerArm: number;
+  status: string;
+  assignedCount: number;
+}
+
+interface ExperimentEval {
+  id: string;
+  name: string;
+  status: string;
+  control: { writingVersion: string; assigned: number; sent: number; validReplies: number; replyRate: number };
+  treatment: { writingVersion: string; assigned: number; sent: number; validReplies: number; replyRate: number };
+  zScore: number | null;
+  pValueApprox: number | null;
+  verdict: string;
+  verdictNote: string;
+}
+
+function OutreachExperimentsCard() {
+  const [items, setItems] = React.useState<ExperimentSummary[]>([]);
+  const [selected, setSelected] = React.useState<ExperimentEval | null>(null);
+  const [name, setName] = React.useState('');
+  const [windowDays, setWindowDays] = React.useState(14);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    try {
+      setItems(await apiGet<ExperimentSummary[]>('/outreach-automation/experiments'));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  React.useEffect(() => { void load(); }, [load]);
+
+  async function create() {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const created = await apiPost<ExperimentEval>('/outreach-automation/experiments', {
+        name: name.trim(),
+        controlVersion: 'legacy-2026-10',
+        treatmentVersion: '2026-11-19.2',
+        stratifyBy: ['brand', 'data_tier', 'contact_role'],
+        observationWindowDays: windowDays,
+        minSamplePerArm: 30,
+      });
+      setSelected(created);
+      setName('');
+      toast.success('已启动分层 A/B 试发实验', { description: '新生成草稿将自动按分层确定性分桶并记录版本归因。' });
+      await load();
+    } catch (reason) {
+      toast.error('创建实验失败', { description: toErrorMessage(reason, '请检查实验参数') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function inspect(id: string) {
+    setBusy(true);
+    try {
+      setSelected(await apiGet<ExperimentEval>(`/outreach-automation/experiments/${id}`));
+    } catch (reason) {
+      toast.error('读取实验报告失败', { description: toErrorMessage(reason, '请稍后重试') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stop(id: string) {
+    setBusy(true);
+    try {
+      const stopped = await apiPost<ExperimentEval>(`/outreach-automation/experiments/${id}/stop`, {});
+      setSelected(stopped);
+      toast.success('实验已结束并锁定观察期');
+      await load();
+    } catch (reason) {
+      toast.error('结束实验失败', { description: toErrorMessage(reason, '请稍后重试') });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">分层可比较试发实验（旧版 vs 新版）</CardTitle>
+        <CardDescription>按品牌、客户资料丰富度与联系人角色自动分桶，固定写法版本与观察期并做双比例显著性检验。</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="实验名称（如：11 月新版正文 vs 旧版对照）"
+            className="h-8 max-w-xs text-xs"
+            disabled={busy}
+          />
+          <Input
+            type="number"
+            min={3}
+            max={90}
+            value={windowDays}
+            onChange={(e) => setWindowDays(Number(e.target.value) || 14)}
+            className="h-8 w-24 text-xs"
+            aria-label="观察天数"
+            disabled={busy}
+          />
+          <span className="text-muted-foreground">天观察期</span>
+          <Button size="sm" disabled={busy || !name.trim()} onClick={() => void create()}>启动新实验</Button>
+        </div>
+
+        {items.length > 0 ? (
+          <ul className="divide-y rounded-md border">
+            {items.slice(0, 6).map((exp) => (
+              <li key={exp.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                <div>
+                  <span className="font-medium text-foreground">{exp.name}</span>
+                  <span className="ml-2 text-muted-foreground">{exp.controlVersion} vs {exp.treatmentVersion} · 已分桶 {exp.assignedCount} 位</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant={exp.status === 'running' ? 'developed' : 'outline'}>{exp.status === 'running' ? '运行中' : '已结束'}</Badge>
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void inspect(exp.id)}>查看统计</Button>
+                  {exp.status === 'running' ? (
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void stop(exp.id)}>结束</Button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="text-muted-foreground">当前暂无试发实验；启动后新生成的开发信会自动按分层规则分配对照组与新版组。</p>}
+
+        {selected ? (
+          <div className="space-y-1.5 rounded-md border bg-muted/20 p-3">
+            <p className="font-medium text-foreground">实验报告：{selected.name}（{selected.verdict}）</p>
+            <p className="text-muted-foreground">
+              对照组（{selected.control.writingVersion}）：已发 {selected.control.sent} · 有效回复 {selected.control.validReplies}（{(selected.control.replyRate * 100).toFixed(1)}%）
+              {' | '}
+              新版组（{selected.treatment.writingVersion}）：已发 {selected.treatment.sent} · 有效回复 {selected.treatment.validReplies}（{(selected.treatment.replyRate * 100).toFixed(1)}%）
+            </p>
+            <p className="text-muted-foreground">
+              {selected.zScore !== null ? `z = ${selected.zScore}, p ≈ ${selected.pValueApprox} · ` : ''}{selected.verdictNote}
+            </p>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
 }

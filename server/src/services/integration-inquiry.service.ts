@@ -161,6 +161,6 @@ export async function draftInquiryReply(id: string, actor: AuthUser) {
     const subject = 'Re: Your inquiry from ' + body.site.name;
     const paragraphs = ['Dear ' + body.contact.name + ',', 'Thank you for your inquiry. We have received your requirements and will review them with our team.', body.products.length ? 'We will review your interest in ' + body.products.map(p => p.name).join(', ') + '.' : 'Please share any additional application or specification details you would like us to consider.', 'We will confirm product suitability, availability and commercial terms separately before making a proposal.'];
     const content = paragraphs.map(s => '<p>' + escape(s) + '</p>').join('');
-    const saved = await sendLetter({ customerId: String(row.customerId), subject: subject.slice(0, 300), content, recipientEmail: body.contact.email, saveAsDraft: true, markAsDeveloped: false, requestKey: 'globalsite_inquiry_' + row._id }, actor);
+    const saved = await sendLetter({ customerId: String(row.customerId), subject: subject.slice(0, 300), content, recipientEmail: body.contact.email, saveAsDraft: true, markAsDeveloped: false, mailKind: 'inbound_reply', requestKey: 'globalsite_inquiry_' + row._id }, actor);
     return { letterId: saved.letter.id, customerId: String(row.customerId), status: 'draft', url: '/customers/' + row.customerId + '#letters' };
 }

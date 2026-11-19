@@ -137,6 +137,7 @@ export interface LetterDto {
   tracking?: TrackingSummary;
   aiSnapshot?: { subject: string; contentText: string; at: Date };
   attachmentIds?: string[];
+  mailKind?: 'outreach' | 'inbound_reply' | 'transactional';
 }
 
 /* ------------------------------------------------------------------ */
@@ -422,6 +423,7 @@ function toLetterDto(doc: Record<string, unknown>): LetterDto {
     ...(Array.isArray(doc.attachmentIds) && doc.attachmentIds.length
       ? { attachmentIds: (doc.attachmentIds as unknown[]).map((id) => String(id)) }
       : {}),
+    ...(doc.mailKind ? { mailKind: doc.mailKind as 'outreach' | 'inbound_reply' | 'transactional' } : {}),
     createdAt: doc.createdAt as Date,
     updatedAt: doc.updatedAt as Date,
   };
@@ -484,7 +486,7 @@ export async function getLetter(id: string, actor?: AuthUser): Promise<LetterDto
   if(result.review?.decision==='approved'&&result.status==='draft'){
     try{
       const fullCustomer=await getCustomerByIdOrThrow(result.customerId,actor);
-      const rendered=await renderLetter(fullCustomer,result.subject,result.template||result.content,result.recipientEmail,await signerNameFor(fullCustomer,actor?.id));
+      const rendered=await renderLetter(fullCustomer,result.subject,result.template||result.content,result.recipientEmail,await signerNameFor(fullCustomer,actor?.id),{ mailKind: result.mailKind });
       result.reviewStale=result.review.contentHash!==reviewContentHash(rendered.subject,rendered.text);
     }catch{result.reviewStale=false;}
   }
@@ -566,6 +568,8 @@ async function persistAndSend(options: {
   countAsOutreach?: boolean;
   /** 可选随信发送的客户资料附件 */
   attachmentIds?: Types.ObjectId[];
+  /** 邮件业务类型：回复客户主动来信时省略营销退订尾部和 List-Unsubscribe 头 */
+  mailKind?: 'outreach' | 'inbound_reply' | 'transactional';
 }): Promise<SendLetterResult> {
   const {
     customer,
@@ -608,7 +612,8 @@ async function persistAndSend(options: {
   // not run the tenant plugin's save hook. Carry the project tenant key
   // explicitly so the resulting letter is visible in tenant-scoped mail lists.
   const organizationId = await organizationIdForCustomer(customer);
-  const mailKind: 'outreach' | 'inbound_reply' = options.replyToId ? 'inbound_reply' : 'outreach';
+  const mailKind: 'outreach' | 'inbound_reply' | 'transactional' =
+    options.mailKind ?? (options.replyToId ? 'inbound_reply' : 'outreach');
   const rendered = await renderLetter(
     customer,
     subjectTemplate,
@@ -657,6 +662,7 @@ async function persistAndSend(options: {
       ...(options.agentDraftId?{agentDraftId:options.agentDraftId}:{}),
       ...(options.agentOutreachId ? { agentOutreachId: options.agentOutreachId } : {}),
       ...(outreachStep ? {outreachStep} : {}),
+      mailKind,
       ...(knowledgeReview ? {knowledgeReview} : {}),
       ...(knowledgeReview ? {aiSnapshot:{subject:rendered.subject,contentText:rendered.text,at:new Date()}} : {}),
       ...(organizationId ? { organizationId } : {}),
@@ -944,6 +950,7 @@ export async function sendLetter(input: SendLetterInput, actor?: AuthUser): Prom
     scheduledAt: input.scheduledAt,
     requestKey: input.requestKey,
     attachmentIds: verifiedAttachmentIds,
+    mailKind: input.mailKind,
   });
 }
 
@@ -975,14 +982,18 @@ export async function resendLetter(
   const priorReview = activeReview(original.review);
   const signerName = await signerNameFor(customer, actor?.id);
 
+  const originalMailKind: 'outreach' | 'inbound_reply' | 'transactional' =
+    original.mailKind ?? (original.inReplyTo && !original.outreachStep ? 'inbound_reply' : 'outreach');
+
   if (input.saveAsDraft) {
     if (original.status !== 'draft') throw ApiError.conflict('只有草稿可以继续保存');
     const organizationId = await organizationIdForCustomer(customer);
-    const rendered = await renderLetter(customer, subjectTemplate, contentTemplate, input.recipientEmail ?? original.recipientEmail, signerName);
+    const rendered = await renderLetter(customer, subjectTemplate, contentTemplate, input.recipientEmail ?? original.recipientEmail, signerName, { mailKind: originalMailKind });
     // 保存草稿等于换了一份待审内容：无论之前是通过还是不通过，结论都失效，重新审核。
     const update: Record<string, unknown> = {$set:{
       subject:rendered.subject, content:rendered.html, contentText:rendered.text, template:contentTemplate,
       recipientEmail:rendered.recipientEmail, recipientName:rendered.recipientName,
+      mailKind: originalMailKind,
       ...(organizationId ? { organizationId } : {}),
     },$unset:{review:1,'knowledgeReview.manualApprovedAt':1,'knowledgeReview.manualApprovedBy':1}};
     const saved = await DevelopmentLetter.findOneAndUpdate({_id: original._id, projectId: customer.projectId, status:'draft'}, update, {new:true});
@@ -994,7 +1005,7 @@ export async function resendLetter(
   // 审核结论是发送前的硬约束：不通过的稿和审核后又被改动的稿都不能直接发出。
   if (original.status === 'draft' && priorReview) {
     if (priorReview.decision === 'rejected') throw ApiError.conflict('草稿已标记为不通过，请先审核通过再发送');
-    const current = await renderLetter(customer, subjectTemplate, contentTemplate, input.recipientEmail ?? original.recipientEmail, signerName);
+    const current = await renderLetter(customer, subjectTemplate, contentTemplate, input.recipientEmail ?? original.recipientEmail, signerName, { mailKind: originalMailKind });
     if (priorReview.contentHash !== reviewContentHash(current.subject, current.text)) {
       throw ApiError.conflict('审核后内容已变化，请重新审核后再发送');
     }
@@ -1064,6 +1075,7 @@ export async function resendLetter(
     references,
     countAsOutreach: false,
     attachmentIds: verifiedAttachmentIds,
+    mailKind: originalMailKind,
   });
 }
 
@@ -1149,7 +1161,14 @@ export async function reviewLetter(id: string, input: ReviewLetterInput, actor?:
     update = { $set: { review: { ...base, contentHash: reviewContentHash(letter.subject, letter.contentText) } } };
   } else {
     const contentTemplate = input.content ?? letter.template ?? letter.content;
-    const rendered = await renderLetter(customer, input.subject ?? letter.subject, contentTemplate, input.recipientEmail ?? letter.recipientEmail, await signerNameFor(customer, actor?.id));
+    const rendered = await renderLetter(
+      customer,
+      input.subject ?? letter.subject,
+      contentTemplate,
+      input.recipientEmail ?? letter.recipientEmail,
+      await signerNameFor(customer, actor?.id),
+      { mailKind: letter.mailKind ?? (letter.inReplyTo && !letter.outreachStep ? 'inbound_reply' : 'outreach') },
+    );
     // 审核页是高风险内容的人工批准入口：人看的就是这份渲染后的正文，点「通过」
     // 即代表对这份正文负责，所以批准必须落在本次要落库的正文上。
     // 旧实现要求 rendered.text 与生成时的 bodyHash 完全一致才记录批准，只要草稿

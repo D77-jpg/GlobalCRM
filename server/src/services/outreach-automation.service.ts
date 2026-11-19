@@ -89,6 +89,15 @@ export interface OutreachAutomationOverview {
     reason?: string;
     usedToday: number;
     dailyLimit: number;
+    warmup?: {
+      enabled: boolean;
+      effectiveLimit: number;
+      activeSendDays: number;
+      recentSentCount: number;
+      recentHardBounceCount: number;
+      cooledDownUntil?: Date;
+      reason?: string;
+    };
   } | null;
   stats: {
     eligible: number;
@@ -482,6 +491,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       ...(mailbox.reason ? { reason: mailbox.reason } : {}),
       usedToday: mailbox.account.usedToday,
       dailyLimit: mailbox.account.dailyLimit,
+      ...(mailbox.account.warmup ? { warmup: mailbox.account.warmup } : {}),
     } : null,
     stats: {
       eligible,

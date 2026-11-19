@@ -49,6 +49,8 @@ export const sendLetterSchema = z.object({
   saveAsDraft: z.boolean().default(false),
   /** 可选产品/客户资料附件 ID（最多 5 个，仅允许当前客户同项目附件） */
   attachmentIds: z.array(objectIdSchema).max(5, '单封开发信最多附加 5 个文件').optional(),
+  /** 邮件业务类型：开发信 / 客户主动来信回复 / 事务通知（默认按 replyToId 判定） */
+  mailKind: z.enum(['outreach', 'inbound_reply', 'transactional']).optional(),
 });
 
 export const resendLetterSchema = z.object({

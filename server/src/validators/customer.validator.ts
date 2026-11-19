@@ -11,6 +11,7 @@ import {
   optionalText,
   paginationQuerySchema,
 } from './common';
+import { isValidIanaTimezone } from '../utils/timezone';
 
 const customerStatusSchema = z.enum(CUSTOMER_STATUS, {
   error: '客户状态取值非法',
@@ -84,6 +85,7 @@ const customerFields = {
   industry: optionalText(120),
   address: optionalText(500),
   country: optionalText(120),
+  timezone: optionalText(80).refine((v) => !v || isValidIanaTimezone(v), { message: '时区格式无效，请使用标准 IANA 时区（如 America/New_York）' }),
   website: optionalText(300),
   grade: optionalText(20),
   notes: optionalText(5000),
@@ -294,6 +296,7 @@ const importRowSchema = z.object({
   industry: optionalText(120),
   address: optionalText(500),
   country: optionalText(120),
+  timezone: optionalText(80).refine((v) => !v || isValidIanaTimezone(v), { message: '时区格式无效，请使用标准 IANA 时区（如 America/New_York）' }),
   website: optionalText(300),
   grade: optionalText(20),
   notes: optionalText(5000),
