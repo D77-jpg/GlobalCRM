@@ -10,6 +10,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Outreach evaluation failed:', err instanceof Error ? err.message : String(err));
+  const code = err && typeof err === 'object' && 'code' in err ? ` [${String((err as { code?: unknown }).code)}]` : '';
+  console.error(`Outreach evaluation failed:${code}`, err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
