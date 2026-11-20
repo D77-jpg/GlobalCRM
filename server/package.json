@@ -47,6 +47,7 @@
     "test:fixture": "node tests/start-fixture.cjs",
     "eval:outreach": "node --require ./tests/os-user-info.cjs --import tsx evaluation/outreach/runner.ts",
     "eval:outreach:live": "node --require ./tests/os-user-info.cjs --import tsx evaluation/outreach/runner.ts -- --live",
+    "eval:outreach:crm": "node --require ./tests/os-user-info.cjs --import tsx evaluation/outreach/runner.ts -- --live --use-crm-ai",
     "eval:knowledge:validate": "node --require ./tests/os-user-info.cjs --import tsx evaluation/knowledge/schema.ts",
     "eval:knowledge:baseline": "node --require ./tests/os-user-info.cjs --import tsx evaluation/knowledge/baseline.ts",
     "test:knowledge-evaluation": "node --require ./tests/os-user-info.cjs --import tsx --test tests/knowledge-evaluation.test.ts",
