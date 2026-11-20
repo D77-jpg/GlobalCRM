@@ -29,6 +29,9 @@ test('standalone ingress and healthcheck contract', () => {
   assert.match(compose, /service_healthy/g);
   assert.match(read('server/Dockerfile'), /\/api\/health/);
   assert.match(read('web/nginx.conf'), /proxy_pass http:\/\/server:5000;/);
+  assert.match(read('web/nginx.conf'), /absolute_redirect off;/);
+  assert.match(read('web/nginx.conf'), /port_in_redirect off;/);
+  assert.match(read('web/nginx.conf'), /try_files \$uri \/index\.html;/);
   assert.match(read('web/Dockerfile'), /ARG VITE_API_BASE_URL=\/api/);
 });
 
