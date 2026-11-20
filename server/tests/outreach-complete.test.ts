@@ -49,7 +49,7 @@ import {
 import { updateCustomerSchema } from '../src/validators/customer.validator';
 import { redactExemplarText } from '../src/services/winning-exemplar.service';
 import { guardedModelFetch, modelTransportStatus } from '../src/services/agent/model-transport';
-import { saveAiSettings } from '../src/services/agent/ai-settings.service';
+import { createAiProvider, saveAiSettings } from '../src/services/agent/ai-settings.service';
 import { resolveLiveEvalProvider } from '../src/services/agent/outreach-eval';
 import {
   OUTREACH_WRITING_VERSION,
@@ -770,6 +770,32 @@ test('Live eval --use-crm-ai loads encrypted CRM AI provider via tenant context 
     } finally {
       await resolved.cleanup();
     }
+
+    // 3. Selecting a specific named saved CRM provider via --provider=<name>
+    await runWithTenant({ organizationId: String(orgA) }, () => createAiProvider(
+      {
+        name: 'Named Eval Provider',
+        kind: 'openai',
+        model: 'gpt-4o-eval',
+        baseUrl: 'https://124.222.23.70/v1',
+        apiKey: 'local-secret-fixture',
+      },
+      actorA,
+    ));
+    const named = await resolveLiveEvalProvider({
+      useCrmAi: true,
+      orgSlug: 'org-a-eval',
+      providerName: 'Named Eval Provider',
+    });
+    try {
+      assert.equal(named.model, 'gpt-4o-eval');
+    } finally {
+      await named.cleanup();
+    }
+    await assert.rejects(
+      resolveLiveEvalProvider({ useCrmAi: true, orgSlug: 'org-a-eval', providerName: 'Missing Provider' }),
+      /未找到名为/,
+    );
   } finally {
     global.fetch = originalFetch;
   }

@@ -534,7 +534,7 @@ export async function deleteAiProvider(id: string, actor: AuthUser) {
   return { ok: true };
 }
 
-export async function resolveAgentProvider(): Promise<AgentProvider> {
+export async function resolveAgentProvider(providerName?: string): Promise<AgentProvider> {
   // Background workers deliberately bypass tenant filters. Without an
   // organization scope they must use environment defaults rather than reading
   // another tenant's stored provider and credential.
@@ -544,7 +544,15 @@ export async function resolveAgentProvider(): Promise<AgentProvider> {
     const fallbackUrl = await validateAiBaseUrl(fallbackConfig.baseUrl);
     return new OpenAIResponsesProvider({ apiKey: fallbackConfig.apiKey, model: fallbackConfig.model, baseUrl: fallbackUrl, timeoutMs: env.AI_REQUEST_TIMEOUT_MS });
   }
-  const profile = await activeProviderDoc();
+  const requestedName = providerName?.trim();
+  const profile = requestedName
+    ? await AgentAiProvider.findOne({ name: sameNamePattern(requestedName) })
+      .select('+credentialCiphertext +credentialIv +credentialTag')
+      .exec()
+    : await activeProviderDoc();
+  if (requestedName && !profile) {
+    throw ApiError.notFound(`未找到名为 "${requestedName}" 的 CRM AI 服务`);
+  }
   if (profile) {
     const config = resolvedProvider(profile);
     if (config.provider === 'mock') return new MockAgentProvider();
