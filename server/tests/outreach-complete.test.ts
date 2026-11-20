@@ -7,6 +7,7 @@ import { createApp } from '../src/app';
 import {
   Customer,
   DevelopmentLetter,
+  Organization,
   OutreachAutomationConfig,
   Project,
   User,
@@ -48,6 +49,8 @@ import {
 import { updateCustomerSchema } from '../src/validators/customer.validator';
 import { redactExemplarText } from '../src/services/winning-exemplar.service';
 import { guardedModelFetch, modelTransportStatus } from '../src/services/agent/model-transport';
+import { saveAiSettings } from '../src/services/agent/ai-settings.service';
+import { resolveLiveEvalProvider } from '../src/services/agent/outreach-eval';
 import {
   OUTREACH_WRITING_VERSION,
   OUTREACH_WRITING_VERSION_LEGACY,
@@ -720,4 +723,54 @@ test('P0 Polish: inbound_reply drafts preserve clean formatting across review/re
     const stopped = await stopOutreachExperiment(exp.id, actorA);
     assert.equal(stopped.status, 'completed');
   });
+});
+
+test('Live eval --use-crm-ai loads encrypted CRM AI provider via tenant context and fails closed on mock', async () => {
+  await Organization.create({
+    _id: orgA,
+    name: 'Org A Eval Fixture',
+    slug: 'org-a-eval',
+    status: 'active',
+  });
+
+  // 1. Default mock setting must fail closed with clear guidance
+  await assert.rejects(
+    resolveLiveEvalProvider({ useCrmAi: true, orgSlug: 'org-a-eval' }),
+    /未启用在线 AI 服务/,
+  );
+
+  // 2. Saving an encrypted online AI provider in CRM settings allows --use-crm-ai to resolve it
+  const originalFetch = global.fetch;
+  global.fetch = (async () => new Response(
+    JSON.stringify({
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }],
+      usage: { input_tokens: 2, output_tokens: 1 },
+    }),
+    { status: 200 },
+  )) as typeof fetch;
+
+  try {
+    await runWithTenant({ organizationId: String(orgA) }, () => saveAiSettings(
+      {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        baseUrl: 'https://124.222.23.70/v1',
+        apiKey: 'local-secret-fixture',
+      },
+      actorA,
+    ));
+
+    const resolved = await resolveLiveEvalProvider({ useCrmAi: true, orgSlug: 'org-a-eval' });
+    try {
+      assert.equal(resolved.source, 'crm_ai_settings');
+      assert.equal(resolved.provider.name, 'openai');
+      assert.equal(resolved.model, 'gpt-4o-mini');
+      assert.equal(resolved.organizationSlug, 'org-a-eval');
+    } finally {
+      await resolved.cleanup();
+    }
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

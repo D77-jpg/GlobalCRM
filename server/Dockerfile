@@ -18,6 +18,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node semantic ./semantic
 COPY --chown=node:node parsers ./parsers
+COPY --chown=node:node evaluation/outreach/samples.json ./evaluation/outreach/samples.json
 USER node
 EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \

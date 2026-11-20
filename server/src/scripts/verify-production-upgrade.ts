@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import env from '../config/env';
 import { migrations } from '../migrations/registry';
+import { migrationState } from '../migrations/runner';
 
 async function main() {
   await mongoose.connect(env.MONGODB_URI, { autoIndex: false });
@@ -15,14 +16,19 @@ async function main() {
       checks.push({ name: 'mongodb_replica_set', ok: false, detail: '无法读取 MongoDB hello 状态' });
     }
 
-    // 2. Check migrations applied
-    const applied = await mongoose.connection.collection('migrations').find({}).project({ id: 1 }).toArray();
-    const appliedIds = new Set(applied.map((m) => String(m.id)));
-    const pending = migrations.filter((m) => !appliedIds.has(m.id)).map((m) => m.id);
+    // 2. Check migrations applied via official schema_migrations state
+    const state = await migrationState({ connection: mongoose.connection, registry: migrations });
+    const migrationsOk = state.pending.length === 0 && state.changed.length === 0;
+    const migrationDetail = migrationsOk
+      ? `全部 ${migrations.length} 项迁移已执行`
+      : [
+          state.pending.length ? `待执行迁移：${state.pending.join(', ')}` : '',
+          state.changed.length ? `校验和变更：${state.changed.join(', ')}` : '',
+        ].filter(Boolean).join('；');
     checks.push({
       name: 'migrations_complete',
-      ok: pending.length === 0,
-      detail: pending.length === 0 ? `全部 ${migrations.length} 项迁移已执行` : `待执行迁移：${pending.join(', ')}`,
+      ok: migrationsOk,
+      detail: migrationDetail,
     });
 
     // 3. Check 014 knowledge tenant ownership backfill
