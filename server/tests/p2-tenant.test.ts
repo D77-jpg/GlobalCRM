@@ -119,7 +119,7 @@ test('organization capacity counts only the current tenant', async () => {
     await assert.rejects(() => orgService.assertOrganizationCapacity('users'), /额度已用完/);
   });
   await tenant.runWithTenant({ organizationId: String(orgB._id) }, async () => {
-    assert.doesNotReject(() => orgService.assertOrganizationCapacity('users'));
+    await assert.doesNotReject(() => orgService.assertOrganizationCapacity('users'));
   });
 });
 
