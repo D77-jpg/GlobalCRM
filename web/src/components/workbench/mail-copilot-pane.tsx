@@ -512,6 +512,32 @@ export function MailCopilotPane({
               </dl>
             </div>
 
+            {/* Knowledge / Policy / Product References (collapsible) */}
+            {result.analysis.knowledgeRefs && result.analysis.knowledgeRefs.length > 0 ? (
+              <details className="rounded-lg border border-border bg-muted/20 p-2.5">
+                <summary className="cursor-pointer font-semibold text-foreground">
+                  引用知识与产品依据（{result.analysis.knowledgeRefs.length} 条）
+                </summary>
+                <ul className="mt-2 space-y-1.5 text-[11px]">
+                  {result.analysis.knowledgeRefs.map((ref, idx) => (
+                    <li key={idx} className="rounded border border-border/60 bg-background/80 p-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="px-1 py-0 text-[9px]">
+                          {ref.kind === 'policy' ? '口径' : ref.kind === 'product' ? '产品 SKU' : '知识库'}
+                        </Badge>
+                        <span className="font-medium text-foreground">{ref.title}</span>
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-muted-foreground">{ref.snippet}</p>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : result.analysis.policyCount === 0 ? (
+              <div className="rounded-md border border-dashed border-amber-300/80 bg-amber-50/40 px-2.5 py-2 text-[11px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                提示：当前项目尚未配置「对外口径表」，前往 <strong>知识库 → 对外口径与红线</strong> 一键导入预置后，回复准确度与评分会显著提升。
+              </div>
+            ) : null}
+
             {/* Open questions & Commitments summary */}
             {result.analysis.openQuestions.length > 0 ? (
               <div className="space-y-1.5 rounded-lg border border-border p-2.5">

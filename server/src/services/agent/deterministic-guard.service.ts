@@ -208,17 +208,65 @@ export function extractNamesFromTexts(...texts: (string | undefined)[]): Set<str
   return new Set([...out].filter((name) => !ignored.has(name.toLowerCase())));
 }
 
+/**
+ * Strip quoted email reply chains (Gmail/Outlook/Apple Mail/Japanese/Chinese) so
+ * request extraction, item detection, and scoring evaluate only the customer's
+ * latest actual message rather than 20+ rounds of historical quoted emails.
+ */
+export function stripQuotedReplyHistory(raw: string): string {
+  const normalized = String(raw || '').replace(/\r\n/g, '\n');
+  if (!normalized.trim()) return '';
+
+  const lines = normalized.split('\n');
+  const kept: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Standard English / Outlook / Gmail / Apple Mail quote markers
+    if (/^-{3,}\s*(?:Original Message|Forwarded message)\s*-{3,}$/i.test(trimmed)) break;
+    if (/^_{10,}$/.test(trimmed)) break;
+    if (/^On\s+.{6,140}\s+wrote:\s*$/i.test(trimmed)) break;
+    if (/^On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|[A-Z][a-z]{2,8}\s+\d{1,2})/i.test(trimmed) && i + 1 < lines.length && /wrote:\s*$/i.test(lines[i + 1].trim())) break;
+
+    // Chinese / Japanese / Korean email reply dividers (e.g. "2026年10月13日(火) 16:52 jelly <a@b.com>:")
+    if (/^20\d{2}年\d{1,2}月\d{1,2}日.*(?:写道|寫道|[:：])\s*$/.test(trimmed)) break;
+    if (/^-{2,}\s*(?:原始邮件|转发邮件)\s*-{2,}$/.test(trimmed)) break;
+
+    // Outlook header block: "From: ..." followed within 2 lines by "Sent:/Date:/To:"
+    if (/^(?:From|发件人|差出人)\s*[:：]\s*.+/i.test(trimmed)) {
+      const nextTwo = `${lines[i + 1] || ''}\n${lines[i + 2] || ''}`;
+      if (/(?:Sent|Date|To|Subject|发送时间|时间|收件人|主题|日時|宛先)\s*[:：]/i.test(nextTwo)) break;
+    }
+
+    // Trailing block of '>' quoted lines once we already have real top content
+    if (trimmed.startsWith('>') && kept.join('\n').trim().length >= 24) {
+      const nextTrimmed = (lines[i + 1] || '').trim();
+      if (!nextTrimmed || nextTrimmed.startsWith('>')) break;
+    }
+
+    kept.push(line);
+  }
+
+  const candidate = kept.join('\n').trim();
+  // Safety fallback: if stripping removed almost everything, keep original text
+  return candidate.length >= 12 ? candidate : normalized.trim();
+}
+
 export function extractItemLines(text: string): string[] {
   const out: string[] = [];
   const skipTokens = new Set([
     'qty', 'quantity', 'each', 'per', 'weight', 'total', 'price', 'unit', 'cm', 'mm',
     'kg', 'lb', 'lbs', 'in', 'inch', 'inches', 'pcs', 'pc', 'pieces', 'ft', 'oz', 'ml',
+    'usd', 'rmb', 'cny', 'eur', 'gbp', 'the', 'and', 'for', 'with',
   ]);
   for (const raw of String(text || '').split('\n')) {
     const line = raw.replace(/^[\s\-•*·>|]+/, '').trim();
     if (!line || line.length > 120 || line.endsWith('?') || line.endsWith(':')) continue;
     if (!/\d/.test(line) || !/[A-Za-z]{3,}/.test(line)) continue;
-    if (/^(hi|hello|dear|thanks|regards|best|tel|phone|email|address|www|http)/i.test(line)) continue;
+    if (/^(hi|hello|dear|thanks|regards|best|tel|phone|email|address|www|http|whatsapp|wechat|from|sent|to|date|subject|on\s+\w+)/i.test(line)) continue;
+    if (/@|https?:\/\/|www\.|\bwhatsapp\b|\bwechat\b|\+\d{2,3}\s?\d{3}|\b(?:usd|rmb|cny|eur|gbp)\s*\d|\$\s*\d/i.test(line)) continue;
     const cleaned = line
       .replace(/\(.*?\)/g, ' ')
       .replace(/(\d)\s*[x×*]\s*(?=\d)/g, '$1 ')
@@ -561,7 +609,8 @@ export function extractBuyerRequests(text: string): { text: string; group: strin
 
 export function scoreWorkbenchReply(subject: string, body: string, ctx: DeterministicGuardContext): ReplyScoreResult {
   const text = String(body || '');
-  const reqs = extractBuyerRequests(ctx.inboundText || '');
+  const latestInbound = stripQuotedReplyHistory(ctx.inboundText || '');
+  const reqs = extractBuyerRequests(latestInbound);
   const sents = text.split(/(?<=[.?!])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
   const solidText = sents.filter((s) => !CHECKY_RE.test(s)).join(' ');
   const ackText = sents.filter((s) => CHECKY_RE.test(s)).join(' ');
@@ -583,22 +632,32 @@ export function scoreWorkbenchReply(subject: string, body: string, ctx: Determin
     return 0;
   });
   let cov = perReq.length > 0 ? perReq.reduce((a, b) => a + b, 0) / perReq.length : 1;
-  const itemLines = extractItemLines(ctx.inboundText || '');
+  const itemLines = extractItemLines(latestInbound);
   if (itemLines.length >= 4) {
     const replyStems = new Set((text.match(/[A-Za-z]{2,}/g) ?? []).map(stemWord));
     const lineCov = itemLines.filter((x) => (x.match(/[A-Za-z]{3,}/g) ?? []).some((w) => replyStems.has(stemWord(w)))).length / itemLines.length;
     cov = perReq.length > 0 ? (cov + lineCov) / 2 : lineCov;
   }
 
-  // Specificity (15)
-  const inbound = ctx.inboundText || '';
+  // Specificity (15) — evaluate against buyer's latest message only, not historical quotes
   const specs = new Set<string>();
-  for (const m of inbound.matchAll(/\d+(?:[.,]\d+)?\s?(?:-|–|to|x|×)?\s?\d*(?:\.\d+)?\s?(?:kg|lbs?|pcs|pieces|pairs|sets|units|ft|cm|mm|in|inch|inches)\b/gi)) {
+  for (const m of latestInbound.matchAll(/\d+(?:[.,]\d+)?\s?(?:-|–|to|x|×)?\s?\d*(?:\.\d+)?\s?(?:kg|lbs?|pcs|pieces|pairs|sets|units|ft|cm|mm|in|inch|inches)\b/gi)) {
     specs.add(m[0].replace(/\s/g, '').toLowerCase());
   }
   const compactReply = text.replace(/\s/g, '').toLowerCase();
   const specHits = [...specs].filter((s) => compactReply.includes(s)).length;
-  const specificity = specs.size === 0 ? 15 : Math.round(15 * Math.min(1, specHits / Math.max(2, 0.45 * specs.size)));
+  const specTarget = specs.size === 0 ? 0 : Math.min(specs.size, Math.max(1, Math.ceil(0.45 * specs.size)));
+  const isOngoing = Boolean(ctx.isOngoingThread)
+    || /^(?:re|fw|fwd|回复|答复)\s*[:：]/i.test((ctx.threadSubject || '').trim())
+    || (ctx.scenario !== undefined && ['followup', 'acknowledgement', 'complaint', 'sample_artwork', 'order_logistics'].includes(ctx.scenario));
+  let specificity = specs.size === 0 ? 15 : Math.round(15 * Math.min(1, specHits / specTarget));
+  if (specs.size > 0 && specHits === 0 && isOngoing) {
+    const inboundTokens = new Set([...tokenize(latestInbound)].filter((w) => w.length >= 4));
+    const replyTokens = tokenize(text);
+    let topicOverlap = 0;
+    for (const tk of inboundTokens) if (replyTokens.has(tk)) topicOverlap += 1;
+    if (topicOverlap >= 2) specificity = 12;
+  }
 
   // Safety (30)
   const checks = runDeterministicGuard(subject, text, ctx);
@@ -640,7 +699,7 @@ export function scoreWorkbenchReply(subject: string, body: string, ctx: Determin
 
   const coverageScore = Math.round(35 * cov);
   const score = Math.min(100, Math.round(coverageScore + specificity + safety + writing + length));
-  if (specs.size > 0 && specHits < 1) reasons.push('未引用买家给出的具体数量/尺寸信息');
+  if (specs.size > 0 && specHits < 1 && specificity < 10) reasons.push('未引用买家给出的具体数量/尺寸信息');
 
   return {
     score,
@@ -655,7 +714,7 @@ export function scoreWorkbenchReply(subject: string, body: string, ctx: Determin
 }
 
 export function composeDeterministicKbReply(ctx: DeterministicGuardContext): KbComposeResult {
-  const inbound = ctx.inboundText || '';
+  const inbound = stripQuotedReplyHistory(ctx.inboundText || '');
   const policyMap = new Map((ctx.policies ?? []).map((p) => [p.code.toUpperCase(), p]));
   const reqs = extractBuyerRequests(inbound);
   const paragraphs: string[] = [];

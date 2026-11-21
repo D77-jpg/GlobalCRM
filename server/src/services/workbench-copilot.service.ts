@@ -29,6 +29,7 @@ import {
   detectScamSignals,
   runDeterministicGuard,
   scoreWorkbenchReply,
+  stripQuotedReplyHistory,
   type ApprovedQuoteRecord,
   type DeterministicGuardContext,
   type GuardCheckItem,
@@ -516,6 +517,8 @@ export interface MultiChannelDraftResult {
     commitments: { quote: string; grade: CommitmentGrade; ownerRole: WorkbenchOwnerRole; zh: string }[];
     missingInfo: string[];
     preSendChecklist: { label: string; value: string; severity: 'ok' | 'warn' | 'bad' }[];
+    knowledgeRefs?: { kind: 'policy' | 'knowledge' | 'product'; title: string; snippet: string }[];
+    policyCount?: number;
   };
   usedAi: boolean;
   aiFallbackReason?: string;
@@ -560,19 +563,22 @@ export async function draftMultiChannelInquiry(
 ): Promise<MultiChannelDraftResult> {
   const scenario: WorkbenchReplyScenario = input.scenario ?? 'auto';
   const cleanedInbound = cleanInboundText(input.inboundText);
+  const latestInbound = stripQuotedReplyHistory(cleanedInbound);
   const cleanedThread = input.threadText ? cleanInboundText(input.threadText) : undefined;
   const isOngoingThread = /^(?:re|fw|fwd|回复|答复)\s*[:：]/i.test((input.subject || '').trim())
-    || Boolean(cleanedThread && cleanedThread.includes('Us:') && cleanedThread.includes('Buyer:'));
+    || Boolean(cleanedThread && cleanedThread.includes('Us:') && cleanedThread.includes('Buyer:'))
+    || cleanedInbound.length - latestInbound.length > 160;
   const attReadText = (input.inboundAttachments ?? [])
     .filter((a) => a.status === 'read' && a.text)
     .map((a) => `[附件 ${a.name}（已读）]\n${a.text!.slice(0, 6000)}`)
     .join('\n\n');
-  const combinedInbound = [cleanedInbound, attReadText].filter(Boolean).join('\n\n');
+  const combinedInbound = [latestInbound, attReadText].filter(Boolean).join('\n\n');
+  const fullContextThread = cleanedThread || (cleanedInbound.length > latestInbound.length ? cleanedInbound : undefined);
 
   const { ctx, policiesText, approvedQuotesText, writingRulesText, signatureText } = await buildGuardContextForProject(actor, {
     customerId: input.customerId,
     inboundText: combinedInbound,
-    threadText: cleanedThread,
+    threadText: fullContextThread,
     contactName: input.contactName,
     attachedOutFiles: input.attachedOutFiles,
     channel: input.channel ?? 'email',
@@ -583,7 +589,75 @@ export async function draftMultiChannelInquiry(
     isOngoingThread,
   });
 
-  const scamSignals = detectScamSignals(cleanedInbound);
+  // Retrieve top-matched published Knowledge docs + active Product catalog SKUs for grounded replies
+  const projectId = requireProjectId(actor);
+  const queryTerms = [...new Set(
+    `${input.subject || ''} ${latestInbound}`.toLowerCase()
+      .split(/[^a-z0-9\u4e00-\u9fff]+/)
+      .filter((t) => t.length >= 3 && !['the', 'and', 'for', 'with', 'that', 'this', 'from', 'your', 'our', 'please', 'thanks', 'thank', 'hello', 'dear', 'regards', 'best'].includes(t)),
+  )].slice(0, 30);
+
+  const [publishedDocs, catalogProducts] = await Promise.all([
+    AgentKnowledge.find({ projectId, archived: false, approvedVersion: { $gt: 0 } }).sort({ updatedAt: -1 }).limit(120).lean(),
+    activeProducts(actor),
+  ]);
+
+  const termHits = (haystack: string): number => {
+    if (queryTerms.length === 0) return 0;
+    const lower = haystack.toLowerCase();
+    let hits = 0;
+    for (const term of queryTerms) if (lower.includes(term)) hits += 1;
+    return hits;
+  };
+
+  const matchedKnowledge = publishedDocs
+    .map((doc) => {
+      const rev = doc.revisions.find((r) => r.version === doc.approvedVersion);
+      if (!rev || !revisionActive(rev) || (actor.role !== 'admin' && rev.accessScope === 'admins')) return null;
+      const hits = termHits(`${rev.title} ${rev.category} ${(rev.tags ?? []).join(' ')} ${(rev.products ?? []).join(' ')} ${rev.content}`);
+      if (hits <= 0) return null;
+      return { title: rev.title, category: rev.category || 'reference', hits, snippet: rev.content.slice(0, 420) };
+    })
+    .filter((x): x is NonNullable<typeof x> => Boolean(x))
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 4);
+
+  const matchedProducts = catalogProducts
+    .map((prod) => ({
+      prod,
+      hits: termHits(`${prod.sku} ${prod.name} ${prod.category || ''} ${prod.description || ''} ${prod.specs.map((s) => `${s.name} ${s.value}`).join(' ')}`),
+    }))
+    .filter((x) => x.hits > 0)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 3)
+    .map((x) => x.prod);
+
+  const matchedPolicies = (ctx.policies ?? [])
+    .filter((p) => p.external)
+    .map((p) => ({ p, hits: termHits(`${p.code} ${p.topic} ${p.valueZh} ${p.valueEn}`) }))
+    .filter((x) => x.hits > 0)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 4)
+    .map((x) => x.p);
+
+  const knowledgeRefs: NonNullable<MultiChannelDraftResult['analysis']['knowledgeRefs']> = [
+    ...matchedPolicies.map((p) => ({ kind: 'policy' as const, title: `[${p.code}] ${p.topic}`, snippet: p.valueEn || p.valueZh })),
+    ...matchedProducts.map((p) => ({
+      kind: 'product' as const,
+      title: `${p.sku} · ${p.name}`,
+      snippet: `MOQ: ${p.moq || '按需核价'}｜打样/交期: ${p.leadTime || '按工艺确认'}${p.description ? `｜${p.description.slice(0, 140)}` : ''}`,
+    })),
+    ...matchedKnowledge.map((k) => ({ kind: 'knowledge' as const, title: k.title, snippet: k.snippet.slice(0, 220) })),
+  ];
+
+  const knowledgeContextText = matchedKnowledge.length > 0
+    ? matchedKnowledge.map((k) => `- ${k.title}: ${k.snippet}`).join('\n')
+    : '';
+  const productContextText = matchedProducts.length > 0
+    ? matchedProducts.map((p) => `- [${p.sku}] ${p.name}（类目：${p.category || '未分类'}）｜MOQ：${p.moq || '待核'}｜交期：${p.leadTime || '待核'}｜参数：${p.specs.filter((s) => s.code !== 'PRICE_RANGE').slice(0, 5).map((s) => `${s.name}=${s.value}`).join('；')}`).join('\n')
+    : '';
+
+  const scamSignals = detectScamSignals(latestInbound);
   const kbDraft = composeDeterministicKbReply(ctx);
 
   let fullSubject = kbDraft.subject;
@@ -627,12 +701,14 @@ export async function draftMultiChannelInquiry(
           content: [
             `渠道：${input.channel || 'email'}｜场景：${scenario}｜是否多轮往来：${isOngoingThread ? '是' : '否'}｜原主题：${input.subject || '（无）'}｜目的地：${input.destination || '未提供'}`,
             `【对外口径表】\n${policiesText || '（无）'}`,
+            knowledgeContextText ? `【已审核知识库依据】\n${knowledgeContextText}` : '',
+            productContextText ? `【匹配产品目录（不含未批准报价金额）】\n${productContextText}` : '',
             writingRulesText ? `【团队写作规则】\n${writingRulesText}` : '',
             `【已批准报价】\n${approvedQuotesText}`,
             `【附件状态】\n${attSummary}`,
             `【待发送附件】\n${input.attachedOutFiles?.length ? input.attachedOutFiles.join('、') : '（无，正文不得写 attached）'}`,
-            cleanedThread ? `【历史往来（最近记录）】\n${cleanedThread.slice(-6000)}` : '',
-            `【当前买家来信】\n${combinedInbound.slice(0, 8000)}`,
+            fullContextThread ? `【历史往来（最近记录）】\n${fullContextThread.slice(-6000)}` : '',
+            `【当前买家最新来信】\n${combinedInbound.slice(0, 8000)}`,
             input.instruction ? `【业务员额外指示】\n${input.instruction}` : '',
             `【签名（结尾原样保留）】\n${signatureText}`,
           ].filter(Boolean).join('\n\n'),
@@ -763,6 +839,11 @@ export async function draftMultiChannelInquiry(
   ];
   versions.sort((x, y) => {
     if (x.score.badCount !== y.score.badCount) return x.score.badCount - y.score.badCount;
+    // When AI succeeded and has zero guardrail redlines, give AI a modest context-understanding
+    // edge over the static rule template K so nuanced multi-turn replies win cleanly.
+    const effX = x.score.score + (usedAi && x.key !== 'K' && x.score.badCount === 0 ? 12 : 0);
+    const effY = y.score.score + (usedAi && y.key !== 'K' && y.score.badCount === 0 ? 12 : 0);
+    if (effX !== effY) return effY - effX;
     return y.score.score - x.score.score;
   });
   const duelWinner = versions[0].key;
@@ -807,6 +888,8 @@ export async function draftMultiChannelInquiry(
       commitments,
       missingInfo,
       preSendChecklist,
+      knowledgeRefs,
+      policyCount: (ctx.policies ?? []).length,
     },
     usedAi,
     aiFallbackReason,

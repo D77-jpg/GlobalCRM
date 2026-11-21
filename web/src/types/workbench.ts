@@ -135,6 +135,8 @@ export interface MultiChannelDraftResult {
     }[];
     missingInfo: string[];
     preSendChecklist: { label: string; value: string; severity: 'ok' | 'warn' | 'bad' }[];
+    knowledgeRefs?: { kind: 'policy' | 'knowledge' | 'product'; title: string; snippet: string }[];
+    policyCount?: number;
   };
   usedAi: boolean;
   aiFallbackReason?: string;

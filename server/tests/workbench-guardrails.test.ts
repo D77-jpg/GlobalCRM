@@ -174,4 +174,39 @@ test('multi-channel inquiry drafting produces K/B/A drafts, scam signals, and to
   assert.equal(followupRes.status, 200);
   assert.ok(!followupRes.json.data.drafts.K.body.includes('reaching out with your inquiry'));
   assert.ok(!followupRes.json.data.drafts.K.body.includes('prepare an accurate quotation'));
+
+  // Email with a long quoted reply chain must score against ONLY the customer's latest message
+  const quotedInbound = [
+    'Dear Lisa,',
+    '',
+    'Thank you for the 1000 pcs offer, we will pass for now and revisit after finalizing our brand color palette.',
+    '',
+    'Best,',
+    'Sohta',
+    '',
+    '2026年10月13日(火) 16:52 jellyfish <lisa@genesisbags.com>:',
+    '- Box 10x12cm 200 pcs USD 1.20',
+    '- Pre production sample USD 80',
+    '- Sample shipping USD 45',
+    '- WhatsApp +86 153 0600 1357',
+    '- FSC mark on exterior bottom',
+    'Could you also confirm your MOQ and target timeline?',
+  ].join('\n');
+  const quotedDraft = await request('POST', '/workbench/draft-inquiry', {
+    channel: 'email',
+    scenario: 'auto',
+    subject: 'Re: Concept Design - Custom Rigid Jewelry Box',
+    inboundText: quotedInbound,
+  });
+  assert.equal(quotedDraft.status, 200);
+  assert.ok(!quotedDraft.json.data.drafts.K.body.includes('detailed list'));
+
+  const scoredFollowup = await request('POST', '/workbench/guardrails/check', {
+    subject: 'Re: Concept Design - Custom Rigid Jewelry Box',
+    threadSubject: 'Re: Concept Design - Custom Rigid Jewelry Box',
+    body: 'Hi Sohta,\n\nThank you for letting us know. We completely understand and have paused sampling for now while keeping your artwork and pearl white box specifications on file. Whenever your updated brand color palette is ready, just reach out and we will be glad to resume.\n\nBest regards,\nGenesis Bags',
+    inboundText: quotedInbound,
+  });
+  assert.equal(scoredFollowup.status, 200);
+  assert.ok(scoredFollowup.json.data.score.score >= 90, `expected >= 90, got ${scoredFollowup.json.data.score.score}`);
 });
