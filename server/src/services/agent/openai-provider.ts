@@ -489,16 +489,15 @@ export class OpenAIResponsesProvider implements AgentProvider {
 
   async createTurn(request: AgentProviderRequest): Promise<AgentProviderTurn> {
     if (!this.config.apiKey) throw new AgentProviderError('OPENAI_NOT_CONFIGURED');
+    const hasTools = request.tools.length > 0;
     const { body, status } = await this.postModel({
       model: this.config.model,
       store: false,
-      ...(request.outputFormat?{text:{format:request.outputFormat},...this.structuredOutputOptions()}:{}),
+      ...(request.outputFormat ? { text: { format: request.outputFormat }, ...this.structuredOutputOptions() } : {}),
       instructions: request.instructions,
       input: request.input,
-      tools: request.tools,
-      tool_choice: 'auto',
-      parallel_tool_calls: false,
-      include: ['reasoning.encrypted_content'],
+      ...(hasTools ? { tools: request.tools, tool_choice: 'auto', parallel_tool_calls: false } : {}),
+      ...(hasTools || !request.outputFormat ? { include: ['reasoning.encrypted_content'] } : {}),
       max_output_tokens: env.AI_MAX_OUTPUT_TOKENS,
       safety_identifier: request.safetyIdentifier,
     }, this.chatBody(request.instructions, request.input, { tools: request.tools, outputFormat: request.outputFormat }));

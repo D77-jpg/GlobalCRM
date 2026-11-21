@@ -137,6 +137,7 @@ export interface MultiChannelDraftResult {
     preSendChecklist: { label: string; value: string; severity: 'ok' | 'warn' | 'bad' }[];
   };
   usedAi: boolean;
+  aiFallbackReason?: string;
 }
 
 export interface LearnedCandidate {

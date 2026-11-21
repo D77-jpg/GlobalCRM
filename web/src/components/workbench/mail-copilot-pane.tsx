@@ -347,6 +347,22 @@ export function MailCopilotPane({
               </div>
             ) : null}
 
+            {!result.usedAi ? (
+              <div className="rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                <p className="flex items-center gap-1 font-semibold">
+                  <AlertTriangle className="h-3.5 w-3.5" />当前已降级为知识库规则兜底（未生成 AI 版）
+                </p>
+                <p className="mt-0.5 text-[11px] opacity-90">
+                  原因：{result.aiFallbackReason || 'AI 模型调用未返回有效 JSON'}。三版卡片暂基于规则底稿打分，可检查「AI 配置」后点重新起草。
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-md border border-border bg-muted/25 p-2 text-[11px]">
+                <p className="font-semibold text-foreground">{result.analysis.intentZh}</p>
+                <p className="mt-0.5 text-muted-foreground">{result.analysis.summaryZh}</p>
+              </div>
+            )}
+
             {/* 3-Version Tabs */}
             <div className="grid grid-cols-3 gap-1.5">
               {([['B', 'AI 完整', 'Alt+1'], ['A', 'AI 简洁', 'Alt+2'], ['K', '知识库秒回', 'Alt+3']] as const).map(([key, label, hint]) => {
@@ -413,6 +429,20 @@ export function MailCopilotPane({
                 </span>
                 <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => void recheckGuardrails()}>复检</Button>
               </div>
+              {liveScore ? (
+                <div className="grid grid-cols-5 gap-1 rounded bg-muted/40 px-2 py-1 text-center text-[10px] tabular-nums text-muted-foreground">
+                  <div>覆盖 <span className="font-semibold text-foreground">{liveScore.parts.coverage}</span>/35</div>
+                  <div>具体 <span className="font-semibold text-foreground">{liveScore.parts.specificity}</span>/15</div>
+                  <div>安全 <span className="font-semibold text-foreground">{liveScore.parts.safety}</span>/30</div>
+                  <div>写作 <span className="font-semibold text-foreground">{liveScore.parts.writing}</span>/10</div>
+                  <div>篇幅 <span className="font-semibold text-foreground">{liveScore.parts.length}</span>/10</div>
+                </div>
+              ) : null}
+              {liveScore && liveScore.reasons.length > 0 ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  扣分说明：{liveScore.reasons.join('；')}
+                </p>
+              ) : null}
               <ul className="space-y-1">
                 {checks.map((ck, i) => (
                   <li key={i} className="flex items-start gap-1.5 text-[11px]">

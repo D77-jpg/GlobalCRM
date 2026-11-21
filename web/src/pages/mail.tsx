@@ -85,6 +85,23 @@ interface SyncStatus { enabled: boolean; configured: boolean; source: 'personal'
 const folderLabels = { inbox: '收件箱', sent: '发件记录', tasks: '定时任务', followup: '跟进提醒', unknown: '未关联邮件' };
 type Folder = keyof typeof folderLabels;
 
+function stripMailHtml(html?: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /** 头像缩写：优先取姓名首字母，邮箱取 @ 前两段 */
 function initialsOf(value: string): string {
   const source = (value || '').trim();
@@ -586,8 +603,8 @@ export function MailPage(): React.JSX.Element {
             customerId={detail?.customer?.id}
             contactName={detail?.customer?.name || detail?.mail.fromName}
             subject={detail?.mail.subject || ''}
-            inboundText={detail?.mail.text || detail?.mail.html.replace(/<[^>]+>/g, ' ') || ''}
-            threadText={detail?.thread.map((m) => `${m.direction === 'inbound' ? 'Buyer' : 'Us'}: ${m.text || m.html.replace(/<[^>]+>/g, ' ')}`).join('\n\n') || ''}
+            inboundText={detail?.mail.text?.trim() || stripMailHtml(detail?.mail.html)}
+            threadText={detail?.thread.map((m) => `${m.direction === 'inbound' ? 'Buyer' : 'Us'}: ${m.text?.trim() || stripMailHtml(m.html)}`).join('\n\n') || ''}
             sourceMailId={detail?.mail.id}
             onApplyReply={detail?.customer ? (draft) => {
               setReplySeed(draft);

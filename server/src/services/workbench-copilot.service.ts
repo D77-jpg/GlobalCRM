@@ -20,6 +20,7 @@ import { customerRefScope, requireProjectId } from '../utils/access';
 import { getCustomerByIdOrThrow } from './customer.service';
 import { activeProducts, type ProductDto } from './product.service';
 import { resolveAgentProvider } from './agent/ai-settings.service';
+import { AgentProviderError } from './agent/provider';
 import { translateLetter } from './agent/translation.service';
 import { appendKnowledge, revisionActive } from './agent/knowledge.service';
 import { getProjectWorkbenchConfig, updateProjectWorkbenchConfig } from './workbench-policy.service';
@@ -280,6 +281,142 @@ async function buildGuardContextForProject(
   return { ctx, policiesText, approvedQuotesText, writingRulesText, signatureText };
 }
 
+function cleanInboundText(raw: string): string {
+  return String(raw || '')
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function parseJsonObjectFromText<T>(raw: string): T | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim() ?? '';
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  const sliced = first >= 0 && last > first ? text.slice(first, last + 1) : '';
+  for (const candidate of [text, fenced, sliced]) {
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as T;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+const WORKBENCH_ITEM_UPDATE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['body', 'zh'],
+  properties: {
+    body: { type: 'string' },
+    zh: { type: 'string' },
+  },
+} as const;
+
+const WORKBENCH_MULTICHANNEL_DRAFT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['subject', 'reply', 'reply_short', 'intent_zh', 'summary_zh', 'missing', 'requests', 'commitments'],
+  properties: {
+    subject: { type: 'string' },
+    reply: { type: 'string' },
+    reply_short: { type: 'string' },
+    intent_zh: { type: 'string' },
+    summary_zh: { type: 'string' },
+    missing: { type: 'array', items: { type: 'string' } },
+    requests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['text', 'zh', 'handling', 'ownerRole'],
+        properties: {
+          text: { type: 'string' },
+          zh: { type: 'string' },
+          handling: { type: 'string', enum: ['ANSWERED', 'ASKED', 'CHECKING', 'NOTED', 'DECLINED'] },
+          ownerRole: { type: 'string', enum: ['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'] },
+        },
+      },
+    },
+    commitments: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['quote', 'grade', 'ownerRole', 'zh'],
+        properties: {
+          quote: { type: 'string' },
+          grade: { type: 'string', enum: ['A', 'B', 'C'] },
+          ownerRole: { type: 'string', enum: ['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'] },
+          zh: { type: 'string' },
+        },
+      },
+    },
+  },
+} as const;
+
+const WORKBENCH_AUTO_REVISE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['subject', 'reply', 'reply_short', 'changes_zh'],
+  properties: {
+    subject: { type: 'string' },
+    reply: { type: 'string' },
+    reply_short: { type: 'string' },
+    changes_zh: { type: 'array', items: { type: 'string' } },
+  },
+} as const;
+
+const WORKBENCH_TONE_REWRITE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['body', 'zh'],
+  properties: {
+    body: { type: 'string' },
+    zh: { type: 'string' },
+  },
+} as const;
+
+const WORKBENCH_LEARN_EDIT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary_zh', 'items'],
+  properties: {
+    summary_zh: { type: 'string' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['type', 'text', 'why'],
+        properties: {
+          type: { type: 'string', enum: ['writing_rule', 'policy_change', 'exemplar'] },
+          text: { type: 'string' },
+          why: { type: 'string' },
+        },
+      },
+    },
+  },
+} as const;
+
 export async function draftUpdateForWorkbenchItem(id: string, actor: AuthUser): Promise<{
   itemId: string;
   body: string;
@@ -324,13 +461,13 @@ export async function draftUpdateForWorkbenchItem(id: string, actor: AuthUser): 
           ].filter(Boolean).join('\n\n'),
         }],
         tools: [],
+        outputFormat: { type: 'json_schema', name: 'workbench_item_update', strict: true, schema: WORKBENCH_ITEM_UPDATE_SCHEMA as unknown as Record<string, unknown> },
         context: { type: 'customer', resourceId: String(item.customerId) },
         userPrompt: '生成英文更新草稿及中文对照 JSON',
         safetyIdentifier: 'workbench-item-update',
       });
-      const match = turn.text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]) as { body?: string; zh?: string };
+      const parsed = parseJsonObjectFromText<{ body?: string; zh?: string }>(turn.text);
+      if (parsed) {
         body = String(parsed.body ?? '').trim();
         zh = String(parsed.zh ?? '').trim();
       }
@@ -376,6 +513,7 @@ export interface MultiChannelDraftResult {
     preSendChecklist: { label: string; value: string; severity: 'ok' | 'warn' | 'bad' }[];
   };
   usedAi: boolean;
+  aiFallbackReason?: string;
 }
 
 export async function draftMultiChannelInquiry(
@@ -394,16 +532,18 @@ export async function draftMultiChannelInquiry(
   },
   actor: AuthUser,
 ): Promise<MultiChannelDraftResult> {
+  const cleanedInbound = cleanInboundText(input.inboundText);
+  const cleanedThread = input.threadText ? cleanInboundText(input.threadText) : undefined;
   const attReadText = (input.inboundAttachments ?? [])
     .filter((a) => a.status === 'read' && a.text)
     .map((a) => `[附件 ${a.name}（已读）]\n${a.text!.slice(0, 6000)}`)
     .join('\n\n');
-  const combinedInbound = [input.inboundText, attReadText].filter(Boolean).join('\n\n');
+  const combinedInbound = [cleanedInbound, attReadText].filter(Boolean).join('\n\n');
 
   const { ctx, policiesText, approvedQuotesText, writingRulesText, signatureText } = await buildGuardContextForProject(actor, {
     customerId: input.customerId,
     inboundText: combinedInbound,
-    threadText: input.threadText,
+    threadText: cleanedThread,
     contactName: input.contactName,
     attachedOutFiles: input.attachedOutFiles,
     channel: input.channel ?? 'email',
@@ -412,7 +552,7 @@ export async function draftMultiChannelInquiry(
     destination: input.destination,
   });
 
-  const scamSignals = detectScamSignals(input.inboundText);
+  const scamSignals = detectScamSignals(cleanedInbound);
   const kbDraft = composeDeterministicKbReply(ctx);
 
   let fullSubject = kbDraft.subject;
@@ -430,9 +570,12 @@ export async function draftMultiChannelInquiry(
   let missingInfo: string[] = [];
   let revisedDiff: MultiChannelDraftResult['revisedDiff'];
   let usedAi = false;
+  let aiFallbackReason: string | undefined;
 
   const provider = await resolveAgentProvider();
-  if (provider.isAvailable() && provider.name !== 'mock') {
+  if (!provider.isAvailable() || provider.name === 'mock') {
+    aiFallbackReason = 'AI_NOT_CONFIGURED';
+  } else {
     try {
       const attSummary = (input.inboundAttachments ?? []).length > 0
         ? (input.inboundAttachments ?? []).map((a) => `- ${a.name}｜状态：${a.status}｜${a.note || ''}`).join('\n')
@@ -442,8 +585,8 @@ export async function draftMultiChannelInquiry(
           '你是资深外贸业务总监。请根据项目的【对外口径表】和【已批准报价】撰写客户英文回复，严格遵守：',
           '1. 只能引用“可对外=是”的口径数字；无批准报价时绝不写金额；无登记待发附件绝不写 attached/enclosed；不猜人名。',
           '2. 同时输出完整版 reply 和简洁版 reply_short（邮件 45-110 词，IM 60 词内），两版事实承诺一致，自然段不写电报体。',
-          '3. 严格输出单个 JSON 对象：',
-          '{"subject":"","reply":"","reply_short":"","intent_zh":"","summary_zh":"","missing":[],"requests":[{"text":"","zh":"","handling":"ANSWERED|ASKED|CHECKING|NOTED|DECLINED","ownerRole":"Sales|Costing|Engineering|QC|Logistics|Customs|Management"}],"commitments":[{"quote":"","grade":"A|B|C","ownerRole":"Sales","zh":""}]}',
+          '3. 如果来信明显是营销推广/系统通知/订阅邮件而非真实询盘，请在 intent_zh 和 summary_zh 中明确提醒业务员无需回复。',
+          '4. 严格输出符合 JSON Schema 的单个 JSON 对象，不要包含额外文字。',
         ].join('\n'),
         input: [{
           role: 'user',
@@ -454,63 +597,68 @@ export async function draftMultiChannelInquiry(
             `【已批准报价】\n${approvedQuotesText}`,
             `【附件状态】\n${attSummary}`,
             `【待发送附件】\n${input.attachedOutFiles?.length ? input.attachedOutFiles.join('、') : '（无，正文不得写 attached）'}`,
-            input.threadText ? `【历史往来】\n${input.threadText.slice(0, 6000)}` : '',
+            cleanedThread ? `【历史往来】\n${cleanedThread.slice(0, 6000)}` : '',
             `【当前买家来信】\n${combinedInbound.slice(0, 8000)}`,
             input.instruction ? `【业务员额外指示】\n${input.instruction}` : '',
             `【签名（结尾原样保留）】\n${signatureText}`,
           ].filter(Boolean).join('\n\n'),
         }],
         tools: [],
+        outputFormat: {
+          type: 'json_schema',
+          name: 'workbench_multichannel_draft',
+          strict: true,
+          schema: WORKBENCH_MULTICHANNEL_DRAFT_SCHEMA as unknown as Record<string, unknown>,
+        },
         context: input.customerId ? { type: 'customer', resourceId: input.customerId } : { type: 'global' },
         userPrompt: '生成双版本回复与内审分析 JSON',
         safetyIdentifier: 'workbench-multichannel-draft',
       });
-      const m = turn.text.match(/\{[\s\S]*\}/);
-      if (m) {
-        const parsed = JSON.parse(m[0]) as {
-          subject?: string;
-          reply?: string;
-          reply_short?: string;
-          intent_zh?: string;
-          summary_zh?: string;
-          missing?: string[];
-          requests?: { text?: string; zh?: string; handling?: string; ownerRole?: string }[];
-          commitments?: { quote?: string; grade?: string; ownerRole?: string; zh?: string }[];
-        };
-        if (parsed.reply?.trim()) {
-          usedAi = true;
-          fullSubject = String(parsed.subject ?? '').trim() || kbDraft.subject;
-          fullBody = parsed.reply.trim();
-          shortBody = String(parsed.reply_short ?? '').trim() || fullBody;
-          if (parsed.intent_zh) intentZh = parsed.intent_zh;
-          if (parsed.summary_zh) summaryZh = parsed.summary_zh;
-          if (Array.isArray(parsed.missing)) missingInfo = parsed.missing.map(String).filter(Boolean).slice(0, 10);
-          if (Array.isArray(parsed.requests) && parsed.requests.length > 0) {
-            openQuestions = parsed.requests
-              .filter((r) => r.text)
-              .slice(0, 12)
-              .map((r) => ({
-                text: String(r.text),
-                zh: String(r.zh || r.text),
-                handling: (['ANSWERED', 'ASKED', 'CHECKING', 'NOTED', 'DECLINED'].includes(String(r.handling))
-                  ? r.handling : 'CHECKING') as MultiChannelDraftResult['analysis']['openQuestions'][number]['handling'],
-                ownerRole: (['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'].includes(String(r.ownerRole))
-                  ? r.ownerRole : 'Sales') as WorkbenchOwnerRole,
-              }));
-          }
-          if (Array.isArray(parsed.commitments)) {
-            commitments = parsed.commitments
-              .filter((c) => c.quote)
-              .slice(0, 10)
-              .map((c) => ({
-                quote: String(c.quote),
-                grade: (['A', 'B', 'C'].includes(String(c.grade)) ? c.grade : 'C') as CommitmentGrade,
-                ownerRole: (['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'].includes(String(c.ownerRole))
-                  ? c.ownerRole : 'Sales') as WorkbenchOwnerRole,
-                zh: String(c.zh || c.quote),
-              }));
-          }
+      const parsed = parseJsonObjectFromText<{
+        subject?: string;
+        reply?: string;
+        reply_short?: string;
+        intent_zh?: string;
+        summary_zh?: string;
+        missing?: string[];
+        requests?: { text?: string; zh?: string; handling?: string; ownerRole?: string }[];
+        commitments?: { quote?: string; grade?: string; ownerRole?: string; zh?: string }[];
+      }>(turn.text);
+      if (parsed?.reply?.trim()) {
+        usedAi = true;
+        fullSubject = String(parsed.subject ?? '').trim() || kbDraft.subject;
+        fullBody = parsed.reply.trim();
+        shortBody = String(parsed.reply_short ?? '').trim() || fullBody;
+        if (parsed.intent_zh) intentZh = parsed.intent_zh;
+        if (parsed.summary_zh) summaryZh = parsed.summary_zh;
+        if (Array.isArray(parsed.missing)) missingInfo = parsed.missing.map(String).filter(Boolean).slice(0, 10);
+        if (Array.isArray(parsed.requests) && parsed.requests.length > 0) {
+          openQuestions = parsed.requests
+            .filter((r) => r.text)
+            .slice(0, 12)
+            .map((r) => ({
+              text: String(r.text),
+              zh: String(r.zh || r.text),
+              handling: (['ANSWERED', 'ASKED', 'CHECKING', 'NOTED', 'DECLINED'].includes(String(r.handling))
+                ? r.handling : 'CHECKING') as MultiChannelDraftResult['analysis']['openQuestions'][number]['handling'],
+              ownerRole: (['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'].includes(String(r.ownerRole))
+                ? r.ownerRole : 'Sales') as WorkbenchOwnerRole,
+            }));
         }
+        if (Array.isArray(parsed.commitments)) {
+          commitments = parsed.commitments
+            .filter((c) => c.quote)
+            .slice(0, 10)
+            .map((c) => ({
+              quote: String(c.quote),
+              grade: (['A', 'B', 'C'].includes(String(c.grade)) ? c.grade : 'C') as CommitmentGrade,
+              ownerRole: (['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'].includes(String(c.ownerRole))
+                ? c.ownerRole : 'Sales') as WorkbenchOwnerRole,
+              zh: String(c.zh || c.quote),
+            }));
+        }
+      } else {
+        aiFallbackReason = 'AI_INVALID_JSON';
       }
 
       // Auto-revise once if deterministic guardrail catches any `bad` violations
@@ -532,35 +680,42 @@ export async function draftMultiChannelInquiry(
               ].join('\n\n'),
             }],
             tools: [],
+            outputFormat: {
+              type: 'json_schema',
+              name: 'workbench_auto_revise',
+              strict: true,
+              schema: WORKBENCH_AUTO_REVISE_SCHEMA as unknown as Record<string, unknown>,
+            },
             context: { type: 'global' },
             userPrompt: '修正护栏红线问题',
             safetyIdentifier: 'workbench-auto-revise',
           });
-          const rm = reviseTurn.text.match(/\{[\s\S]*\}/);
-          if (rm) {
-            const rp = JSON.parse(rm[0]) as { subject?: string; reply?: string; reply_short?: string; changes_zh?: string[] };
-            if (rp.reply?.trim()) {
-              revisedDiff = {
-                before: fullBody,
-                problems: [...gFull, ...gShort],
-                changesZh: Array.isArray(rp.changes_zh) ? rp.changes_zh.map(String) : ['已自动修复护栏拦截项'],
-              };
-              fullBody = rp.reply.trim();
-              if (rp.subject?.trim()) fullSubject = rp.subject.trim();
-              if (rp.reply_short?.trim()) shortBody = rp.reply_short.trim();
-            }
+          const rp = parseJsonObjectFromText<{ subject?: string; reply?: string; reply_short?: string; changes_zh?: string[] }>(reviseTurn.text);
+          if (rp?.reply?.trim()) {
+            revisedDiff = {
+              before: fullBody,
+              problems: [...gFull, ...gShort],
+              changesZh: Array.isArray(rp.changes_zh) ? rp.changes_zh.map(String) : ['已自动修复护栏拦截项'],
+            };
+            fullBody = rp.reply.trim();
+            if (rp.subject?.trim()) fullSubject = rp.subject.trim();
+            if (rp.reply_short?.trim()) shortBody = rp.reply_short.trim();
           }
         }
       }
-    } catch {
-      // Degrade gracefully to deterministic KB draft + concise variant
+    } catch (error) {
+      aiFallbackReason = error instanceof AgentProviderError ? error.code : 'AI_CALL_FAILED';
     }
   }
 
   if (!usedAi) {
-    // Produce a crisp concise version deterministically
+    // Produce a genuinely concise version deterministically so A differs from K/B
     const paras = kbDraft.body.split('\n\n').filter(Boolean);
-    shortBody = paras.length > 3 ? [paras[0], paras[1], paras[paras.length - 1]].join('\n\n') : kbDraft.body;
+    if (paras.length >= 4) {
+      shortBody = [paras[0], paras[paras.length - 2], paras[paras.length - 1]].join('\n\n');
+    } else {
+      shortBody = kbDraft.body;
+    }
   }
 
   const scoreB = scoreWorkbenchReply(fullSubject, fullBody, ctx);
@@ -620,6 +775,7 @@ export async function draftMultiChannelInquiry(
       preSendChecklist,
     },
     usedAi,
+    aiFallbackReason,
   };
 }
 
@@ -669,17 +825,20 @@ export async function rewriteWorkbenchDraft(
           ].filter(Boolean).join('\n\n'),
         }],
         tools: [],
+        outputFormat: {
+          type: 'json_schema',
+          name: 'workbench_tone_rewrite',
+          strict: true,
+          schema: WORKBENCH_TONE_REWRITE_SCHEMA as unknown as Record<string, unknown>,
+        },
         context: { type: 'global' },
         userPrompt: '改写语气并返回英文与中文对照 JSON',
         safetyIdentifier: 'workbench-tone-rewrite',
       });
-      const m = turn.text.match(/\{[\s\S]*\}/);
-      if (m) {
-        const parsed = JSON.parse(m[0]) as { body?: string; zh?: string };
-        if (parsed.body?.trim()) {
-          rewritten = parsed.body.trim();
-          zh = String(parsed.zh ?? '').trim();
-        }
+      const parsed = parseJsonObjectFromText<{ body?: string; zh?: string }>(turn.text);
+      if (parsed?.body?.trim()) {
+        rewritten = parsed.body.trim();
+        zh = String(parsed.zh ?? '').trim();
       }
     } catch {
       // fallback below
@@ -740,13 +899,18 @@ export async function learnFromFinalEdit(
           ].filter(Boolean).join('\n\n'),
         }],
         tools: [],
+        outputFormat: {
+          type: 'json_schema',
+          name: 'workbench_learn_edit',
+          strict: true,
+          schema: WORKBENCH_LEARN_EDIT_SCHEMA as unknown as Record<string, unknown>,
+        },
         context: { type: 'global' },
         userPrompt: '提取长期可复用经验 JSON',
         safetyIdentifier: 'workbench-learn-edit',
       });
-      const m = turn.text.match(/\{[\s\S]*\}/);
-      if (m) {
-        const parsed = JSON.parse(m[0]) as { summary_zh?: string; items?: { type?: string; text?: string; why?: string }[] };
+      const parsed = parseJsonObjectFromText<{ summary_zh?: string; items?: { type?: string; text?: string; why?: string }[] }>(turn.text);
+      if (parsed) {
         if (parsed.summary_zh) summaryZh = parsed.summary_zh;
         if (Array.isArray(parsed.items)) {
           candidates = parsed.items
@@ -892,6 +1056,7 @@ export async function answerKnowledgeQuestion(question: string, actor: AuthUser)
           ].filter(Boolean).join('\n\n'),
         }],
         tools: [],
+        outputFormat: { type: 'text' },
         context: { type: 'global' },
         userPrompt: '基于已审核资料结构化作答',
         safetyIdentifier: 'workbench-knowledge-qa',
