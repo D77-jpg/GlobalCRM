@@ -122,8 +122,8 @@ export function useCustomerLetters(id: string | undefined, query: CustomerLetter
 }
 
 /** 仪表盘总览统计 */
-export function useOverviewStats() {
-  return useAsync<OverviewStats>(() => apiGet<OverviewStats>('/stats/overview'), [], {
+export function useOverviewStats(range: 'today' | '7d' | '30d' | 'month' | 'all' = '30d') {
+  return useAsync<OverviewStats>(() => apiGet<OverviewStats>('/stats/overview', { params: { range } }), [range], {
     fallbackMessage: '统计数据加载失败',
   });
 }

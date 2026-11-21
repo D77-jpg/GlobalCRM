@@ -60,6 +60,7 @@ export const ROUTES = {
   outreachAutomation: '/outreach-automation',
   letters: '/letters',
   templates: '/templates',
+  quotations: '/quotations',
   products: '/products',
   users: '/users',
   projects: '/projects',

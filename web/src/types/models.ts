@@ -1,4 +1,5 @@
 import type {KnowledgeReview,KnowledgeFreshness} from './knowledge';
+import type { DecisionAnalytics } from './workbench';
 /**
  * 领域模型类型（与后端 Mongoose 模型的 toJSON 输出一一对应）
  */
@@ -366,6 +367,8 @@ export interface Customer {
   leadSource?: string;
   /** 跟进优先级（可选，默认 medium；与 grade 等级不同概念） */
   priority?: CustomerPriority;
+  intentScore?: number;
+  sampleStatus?: 'none' | 'requested' | 'making' | 'sent' | 'approved';
   tags: string[];
   letterCount: number;
   lastContactAt?: string | Date;
@@ -702,13 +705,22 @@ export interface DeleteAttachmentResult {
 
 /** 报价明细行；amount 由后端权威计算，前端提交时无需（也无法）伪造 */
 export interface QuotationItem {
+  productId?: string;
+  sku?: string;
   productName: string;
   model?: string;
+  colorSpec?: string;
+  moq?: string;
+  pricingStatus?: 'approved' | 'pending';
   quantity: number;
   unitPrice: number;
   /** 行金额 = quantity × unitPrice（后端计算） */
   amount: number;
 }
+
+export type QuotationIncoterm = 'EXW' | 'FOB' | 'CIF' | 'CFR' | 'DDP' | 'DDU' | 'DAP';
+export type QuotationShippingMethod = 'sea' | 'air' | 'express' | 'rail' | 'other';
+export type QuotationApprovalStatus = 'none' | 'pending_approval' | 'approved' | 'rejected';
 
 export interface Quotation {
   id: string;
@@ -721,12 +733,21 @@ export interface Quotation {
   currency: QuotationCurrency;
   /** 报价总金额（后端计算：各行金额之和） */
   totalAmount: number;
+  incoterm?: QuotationIncoterm;
+  shippingMethod?: QuotationShippingMethod;
+  destinationPort?: string;
+  estimatedFreight?: number;
+  grandTotal?: number;
   validityDate?: string | Date | null;
   paymentTerms?: string;
   leadTime?: string;
   moq?: string;
   notes?: string;
   status: QuotationStatus;
+  approvalStatus?: QuotationApprovalStatus;
+  approvalNote?: string;
+  approvedBy?: string;
+  approvedAt?: string | Date;
   createdBy?: string;
   createdAt: string | Date;
   updatedAt: string | Date;
@@ -734,8 +755,13 @@ export interface Quotation {
 
 /** 提交用的明细行（不含 amount，由后端计算） */
 export interface QuotationItemInput {
+  productId?: string;
+  sku?: string;
   productName: string;
   model?: string;
+  colorSpec?: string;
+  moq?: string;
+  pricingStatus?: 'approved' | 'pending';
   quantity: number;
   unitPrice: number;
 }
@@ -749,6 +775,10 @@ export interface QuotationInput {
   title: string;
   items: QuotationItemInput[];
   currency: QuotationCurrency;
+  incoterm?: QuotationIncoterm;
+  shippingMethod?: QuotationShippingMethod;
+  destinationPort?: string;
+  estimatedFreight?: number;
   /** 有效期（yyyy-MM-dd），'' / null 表示未设置 */
   validityDate?: string | null;
   paymentTerms?: string;
@@ -1552,6 +1582,8 @@ export interface OverviewStats {
   recentLetters: DevelopmentLetter[];
   /** 销售工作区（今日待跟进 / 逾期 / 最近跟进等） */
   workspace: SalesWorkspace;
+  /** 决策分析（时间区间 / 国家分布 / 转化漏斗 / 报价与成交额 / 高优跟进榜） */
+  analytics?: DecisionAnalytics;
 }
 
 export interface HealthResponse {

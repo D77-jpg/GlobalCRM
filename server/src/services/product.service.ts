@@ -8,7 +8,7 @@ import type {CreateProductInput,ImportProductsInput,ListProductsQuery,UpdateProd
 
 export interface ProductDto{
   id:string;sku:string;name:string;category?:string;description?:string;status:IProduct['status'];
-  specs:ProductSpec[];priceTiers:ProductPriceTier[];moq?:string;leadTime?:string;notes?:string;source?:string;
+  specs:ProductSpec[];priceTiers:ProductPriceTier[];moq?:string;leadTime?:string;imageUrl?:string;unitCost?:number;targetMarginPct?:number;notes?:string;source?:string;
   effectiveFrom?:Date;effectiveUntil?:Date;createdAt:Date;updatedAt:Date;
 }
 
@@ -17,7 +17,11 @@ const PRODUCT_SORTS=new Set(['updatedAt','createdAt','name','sku','category']);
 function toDto(row:IProduct & {_id:Types.ObjectId}):ProductDto{
   return {
     id:String(row._id),sku:row.sku,name:row.name,category:row.category,description:row.description,status:row.status,
-    specs:row.specs??[],priceTiers:row.priceTiers??[],moq:row.moq,leadTime:row.leadTime,notes:row.notes,source:row.source,
+    specs:row.specs??[],priceTiers:row.priceTiers??[],moq:row.moq,leadTime:row.leadTime,
+    ...(row.imageUrl?{imageUrl:row.imageUrl}:{}),
+    ...(row.unitCost!==undefined?{unitCost:row.unitCost}:{}),
+    ...(row.targetMarginPct!==undefined?{targetMarginPct:row.targetMarginPct}:{}),
+    notes:row.notes,source:row.source,
     effectiveFrom:row.effectiveFrom,effectiveUntil:row.effectiveUntil,createdAt:row.createdAt,updatedAt:row.updatedAt,
   };
 }

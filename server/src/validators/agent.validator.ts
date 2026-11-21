@@ -110,6 +110,7 @@ export const quoteCheckSchema = z.object({
   items: z.array(z.object({
     name: z.string().trim().min(1).max(300),
     quantity: z.coerce.number().int().positive().max(1_000_000_000).optional(),
+    unitPrice: z.coerce.number().min(0).max(1_000_000_000).optional(),
   }).strict()).max(50).optional(),
 }).strict().superRefine((value, ctx) => {
   if (!value.analysisId && !value.customerId) ctx.addIssue({ code: 'custom', message: '需要 analysisId 或 customerId' });

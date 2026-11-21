@@ -29,8 +29,27 @@ export interface ProjectIndustryRule {
   priority?: number;
 }
 
+export interface ProjectGuardrailRedline {
+  id: string;
+  pattern: string;
+  message: string;
+  severity: 'bad' | 'warn';
+  skipSegment?: string;
+  enabled: boolean;
+}
+
+export interface ProjectWritingRule {
+  id: string;
+  text: string;
+  enabled: boolean;
+  source?: string;
+}
+
 export interface ProjectBrandProfile {
   brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
+  pricingMode?: 'catalog_tiered' | 'costing_approved';
+  guardrailRedlines?: ProjectGuardrailRedline[];
+  teamWritingRules?: ProjectWritingRule[];
   approvedActions?: string[];
   approvedOffers?: ProjectApprovedOffer[];
   industryRules?: ProjectIndustryRule[];
@@ -127,6 +146,27 @@ const ProjectSchema = new Schema<IProject>(
     coverImage: { type: String, maxlength: 600000 },
     brandProfile: {
       brandKey: { type: String, enum: ['genesis', 'ironhue', 'velaturo', 'general'] },
+      pricingMode: { type: String, enum: ['catalog_tiered', 'costing_approved'] },
+      guardrailRedlines: {
+        type: [{
+          id: { type: String, required: true, trim: true, maxlength: 60 },
+          pattern: { type: String, required: true, trim: true, maxlength: 350 },
+          message: { type: String, required: true, trim: true, maxlength: 400 },
+          severity: { type: String, enum: ['bad', 'warn'], default: 'bad' },
+          skipSegment: { type: String, trim: true, maxlength: 20 },
+          enabled: { type: Boolean, default: true },
+        }],
+        default: undefined,
+      },
+      teamWritingRules: {
+        type: [{
+          id: { type: String, required: true, trim: true, maxlength: 60 },
+          text: { type: String, required: true, trim: true, maxlength: 500 },
+          enabled: { type: Boolean, default: true },
+          source: { type: String, trim: true, maxlength: 120 },
+        }],
+        default: undefined,
+      },
       approvedActions: { type: [String], default: undefined },
       approvedOffers: {
         type: [{

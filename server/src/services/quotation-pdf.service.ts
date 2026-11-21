@@ -211,7 +211,22 @@ async function buildPdf(quotation: QuotationDocument, customer: PdfCustomer, bra
   );
   y += 54;
 
+  const shippingLabels: Record<string, string> = {
+    sea: '海运 / Sea Freight',
+    air: '空运 / Air Freight',
+    express: '国际快递 / Express',
+    rail: '铁路 / Rail',
+    other: '其他 / Other',
+  };
+  const freightRow = typeof quotation.estimatedFreight === 'number' && quotation.estimatedFreight > 0
+    ? `${formatMoney(quotation.estimatedFreight, quotation.currency)}（含运费合计 / Grand Total: ${formatMoney(quotation.grandTotal ?? (quotation.totalAmount + quotation.estimatedFreight), quotation.currency)}）`
+    : undefined;
+
   const detailRows = [
+    ['贸易条款 / Incoterm', quotation.incoterm],
+    ['运输方式 / Shipping', quotation.shippingMethod ? (shippingLabels[quotation.shippingMethod] ?? quotation.shippingMethod) : undefined],
+    ['目的港 / Destination', quotation.destinationPort],
+    ['预估运费 / Est. Freight', freightRow],
     ['付款方式 / Payment terms', quotation.paymentTerms],
     ['交期 / Lead time', quotation.leadTime],
     ['最低起订量 / MOQ', quotation.moq],
@@ -238,6 +253,21 @@ export async function renderIntegrationQuotationPdf(input: {
   projectId: string;
   quotationId: string;
 }): Promise<QuotationPdfResult> {
+  return renderQuotationPdfInternal({ ...input, requireExternalId: true });
+}
+
+export async function renderCrmQuotationPdf(input: {
+  projectId: string;
+  quotationId: string;
+}): Promise<QuotationPdfResult> {
+  return renderQuotationPdfInternal({ ...input, requireExternalId: false });
+}
+
+async function renderQuotationPdfInternal(input: {
+  projectId: string;
+  quotationId: string;
+  requireExternalId: boolean;
+}): Promise<QuotationPdfResult> {
   const quotation = await Quotation.findOne({
     _id: input.quotationId,
     projectId: input.projectId,
@@ -251,7 +281,7 @@ export async function renderIntegrationQuotationPdf(input: {
   const branding: PdfBranding = { companyName: project.companyName, website: project.website || '' };
   const brandingDigest = createHash('sha256').update(JSON.stringify(branding)).digest('hex');
   const version = quotation.version ?? 1;
-  const cacheKey = `${input.projectId}:${input.quotationId}:${version}:${brandingDigest}`;
+  const cacheKey = `${input.projectId}:${input.quotationId}:${version}:${brandingDigest}:${input.requireExternalId ? 'int' : 'crm'}`;
   const cached = getCachedPdf(cacheKey);
   if (cached) return cached;
 
@@ -259,7 +289,8 @@ export async function renderIntegrationQuotationPdf(input: {
     _id: quotation.customerId,
     projectId: input.projectId,
   }).select('name company email phone country externalId');
-  if (!customer?.externalId) throw ApiError.notFound('报价未关联外部客户引用');
+  if (!customer) throw ApiError.notFound('报价所属客户不存在');
+  if (input.requireExternalId && !customer.externalId) throw ApiError.notFound('报价未关联外部客户引用');
 
   try {
     const buffer = await buildPdf(quotation, {
@@ -268,7 +299,7 @@ export async function renderIntegrationQuotationPdf(input: {
       email: customer.email,
       phone: customer.phone,
       country: customer.country,
-      externalId: customer.externalId,
+      externalId: customer.externalId || String(customer._id),
     }, branding);
     const digest = createHash('sha256')
       .update(`${String(quotation._id)}:${version}:`)

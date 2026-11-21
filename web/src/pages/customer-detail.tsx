@@ -4,6 +4,7 @@ import { OutreachSequenceDialog } from '@/components/customers/outreach-sequence
 import { DraftCleanupDialog } from '@/components/customers/draft-cleanup-dialog';
 import {usePendingDrafts} from '@/hooks/use-pending-drafts';
 import {CustomerAgreements} from '@/components/agent/customer-agreements';
+import {CustomerWorkbenchSidebar} from '@/components/workbench/customer-workbench-sidebar';
 import { customerTextPatch } from '@/lib/customer-payload';
 /**
  * 客户详情页
@@ -699,6 +700,8 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       <PendingDrafts feed={pendingDrafts} onOpenDraft={letter=>navigate('/customers/'+customer.id+'?knowledgeDraft='+letter.id)} busy={letterBusy}/>
 
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_21rem] xl:items-start">
+      <div className="min-w-0 space-y-4">
       {/* ---------------------------- 客户档案 ---------------------------- */}
 
       <Card>
@@ -1238,6 +1241,16 @@ export function CustomerDetailPage(): React.JSX.Element {
       {/* ---------------------------- 客户附件 ---------------------------- */}
 
       <CustomerAttachments customerId={customer.id} />
+      </div>
+      <CustomerWorkbenchSidebar
+        customer={customer}
+        onPatchCustomer={async (patch) => {
+          await updateCustomer(customer.id, patch as Partial<CustomerInput>);
+          await reloadCustomer();
+          toast.success('客户商机信息已更新');
+        }}
+      />
+      </div>
 
       {/* ---------------------------- 弹窗 ---------------------------- */}
 

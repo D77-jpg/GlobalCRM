@@ -7,7 +7,8 @@
 import * as React from 'react';
 import {useUiStore} from '@/store/ui.store';
 import { toast } from 'sonner';
-import { Download, FileSpreadsheet, UserPlus } from 'lucide-react';
+import { Download, FileSpreadsheet, Columns3, Table2, UserPlus } from 'lucide-react';
+import { CustomerKanban } from '@/components/customers/customer-kanban';
 import { PageHeader } from '@/components/common/page-header';
 import { DataPagination } from '@/components/common/data-pagination';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
@@ -118,6 +119,7 @@ export function CustomersPage(): React.JSX.Element {
   const quickSavingRef = React.useRef(false);
   const [previewId, setPreviewId] = React.useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(true);
+  const [viewMode, setViewMode] = React.useState<'table' | 'kanban'>('table');
   const canPreview = useMediaQuery('(min-width: 1360px)');
 
   // Keep the right-side quick view useful as the list, filter or page changes.
@@ -294,6 +296,22 @@ export function CustomersPage(): React.JSX.Element {
         }
         actions={
           <>
+            <div className="inline-flex items-center rounded-md border border-border p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={cn('inline-flex items-center gap-1 rounded px-2 py-1 transition-colors', viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                <Table2 className="h-3.5 w-3.5" aria-hidden />表格
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('kanban')}
+                className={cn('inline-flex items-center gap-1 rounded px-2 py-1 transition-colors', viewMode === 'kanban' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                <Columns3 className="h-3.5 w-3.5" aria-hidden />漏斗看板
+              </button>
+            </div>
             <Button type="button" variant="outline" size="sm" onClick={() => setImportOpen(true)}>
               <FileSpreadsheet className="h-4 w-4" aria-hidden />
               导入 Excel
@@ -332,36 +350,52 @@ export function CustomersPage(): React.JSX.Element {
       />
 
         <Card className="relative flex min-h-0 min-w-0 flex-col overflow-hidden">
-          <CustomerTable
-            customers={items}
-            loading={loading}
-            error={error}
-            selectedIds={selectedIds}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            hasFilters={hasActiveFilters}
-            showOwner={isAdmin}
-            owners={owners}
-            quickEditDisabled={loading || mutating || quickSaving}
-            onQuickEdit={handleQuickEdit}
-            onSort={setSorting}
-            onToggleSelect={toggleSelect}
-            onToggleSelectAll={toggleSelectAll}
-            onRetry={() => void fetchList()}
-            onEdit={openEdit}
-            onSend={openSend}
-            onDelete={setDeleting}
-            onCreate={openCreate}
-            onImport={() => setImportOpen(true)}
-            onResetFilters={resetFilters}
-            previewId={previewOpen ? previewId : null}
-            previewEnabled={canPreview}
-            compactColumns={showPreview}
-            onPreview={(customer) => {
-              setPreviewId(customer.id);
-              setPreviewOpen(true);
-            }}
-          />
+          {viewMode === 'kanban' ? (
+            <CustomerKanban
+              customers={items}
+              loading={loading}
+              onStatusChange={async (customer, nextStatus) => {
+                try {
+                  await updateCustomer(customer.id, { status: nextStatus });
+                  toast.success(`已将「${customer.company || customer.name}」推进至新阶段`);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : '阶段更新失败');
+                }
+              }}
+              onCreate={openCreate}
+            />
+          ) : (
+            <CustomerTable
+              customers={items}
+              loading={loading}
+              error={error}
+              selectedIds={selectedIds}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              hasFilters={hasActiveFilters}
+              showOwner={isAdmin}
+              owners={owners}
+              quickEditDisabled={loading || mutating || quickSaving}
+              onQuickEdit={handleQuickEdit}
+              onSort={setSorting}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+              onRetry={() => void fetchList()}
+              onEdit={openEdit}
+              onSend={openSend}
+              onDelete={setDeleting}
+              onCreate={openCreate}
+              onImport={() => setImportOpen(true)}
+              onResetFilters={resetFilters}
+              previewId={previewOpen ? previewId : null}
+              previewEnabled={canPreview}
+              compactColumns={showPreview}
+              onPreview={(customer) => {
+                setPreviewId(customer.id);
+                setPreviewOpen(true);
+              }}
+            />
+          )}
 
           <DataPagination
             page={page}

@@ -6,14 +6,20 @@ import {
   BellRing,
   Clock,
   Inbox,
+  Languages,
   Loader2,
   Mail,
   MailSearch,
+  Maximize2,
+  Minimize2,
   Paperclip,
   RefreshCw,
   Send,
+  Sparkles,
   UserPlus,
 } from 'lucide-react';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { MailCopilotPane } from '@/components/workbench/mail-copilot-pane';
 import { toast } from 'sonner';
 import { apiGet, apiPost, toErrorMessage } from '@/lib/api';
 import { downloadFile } from '@/lib/download';
@@ -142,6 +148,12 @@ export function MailPage(): React.JSX.Element {
   const [mailPlanBusy, setMailPlanBusy] = React.useState(false);
   const [customers, setCustomers] = React.useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = React.useState<Customer | null>(null);
+  const [copilotOpen, setCopilotOpen] = React.useState(true);
+  const [focusMode, setFocusMode] = React.useState(false);
+  const [quickPasteOpen, setQuickPasteOpen] = React.useState(false);
+  const [replySeed, setReplySeed] = React.useState<{ subject: string; content: string } | null>(null);
+  const [translations, setTranslations] = React.useState<Record<string, { subject?: string; body: string }>>({});
+  const [translatingId, setTranslatingId] = React.useState<string | null>(null);
   const selectedId = params.get('id');
   const direction = params.get('direction') === 'outbound' ? 'outbound' : 'inbound';
   const detailRequest = React.useRef(0);
@@ -264,22 +276,52 @@ export function MailPage(): React.JSX.Element {
     finally { setMailPlanBusy(false); }
   }, [refresh]);
 
+  const toggleTranslateMail = React.useCallback(async (mail: MailItem) => {
+    if (translations[mail.id]) {
+      setTranslations((prev) => {
+        const next = { ...prev };
+        delete next[mail.id];
+        return next;
+      });
+      return;
+    }
+    setTranslatingId(mail.id);
+    try {
+      const tr = await apiPost<{ subject?: string; body: string }>(`/mail/${mail.id}/translate`, { direction: mail.direction });
+      setTranslations((prev) => ({ ...prev, [mail.id]: tr }));
+    } catch (e) {
+      toast.error('翻译失败', { description: toErrorMessage(e) });
+    } finally {
+      setTranslatingId(null);
+    }
+  }, [translations]);
+
   const syncOk = status?.enabled && status.verificationStatus === 'verified';
   const totalPages = Math.max(1, Math.ceil(total / 25));
 
   return <div className="workspace-page">
-    <PageHeader title="邮件中心" description="客户往来、发送记录与定时任务"
+    <PageHeader title="邮件中心" description="客户往来、双语对照、三栏 AI 回复副驾驶与多渠道询盘快贴"
       actions={<>
+        <Button variant="outline" size="sm" onClick={() => setQuickPasteOpen(true)}>
+          <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden />多渠道询盘快贴
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setFocusMode((v) => !v)}>
+          {focusMode ? <Minimize2 className="mr-1.5 h-3.5 w-3.5" aria-hidden /> : <Maximize2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />}
+          {focusMode ? '退出专注' : '专注模式'}
+        </Button>
+        <Button variant={copilotOpen ? 'secondary' : 'outline'} size="sm" onClick={() => setCopilotOpen((v) => !v)}>
+          <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden />AI 副驾驶
+        </Button>
         {admin ? (
-          <Button variant="outline" disabled={mailPlanBusy} onClick={() => void openMailPlan()}>
-            <UserPlus className="mr-2 h-4 w-4" aria-hidden />从邮件建客户
+          <Button variant="outline" size="sm" disabled={mailPlanBusy} onClick={() => void openMailPlan()}>
+            <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden />从邮件建客户
           </Button>
         ) : null}
-        <Button variant="outline" disabled={loading} onClick={() => void refresh()}>
-          <RefreshCw className={cn('mr-2 h-4 w-4', loading && 'animate-spin')} aria-hidden />刷新
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>
+          <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', loading && 'animate-spin')} aria-hidden />刷新
         </Button>
-        <Button aria-pressed={compose} onClick={() => { setCompose(!compose); setSelectedCustomer(null); }}>
-          <Mail className="mr-2 h-4 w-4" aria-hidden />写邮件
+        <Button size="sm" aria-pressed={compose} onClick={() => { setCompose(!compose); setSelectedCustomer(null); }}>
+          <Mail className="mr-1.5 h-3.5 w-3.5" aria-hidden />写邮件
         </Button>
       </>} />
 
@@ -326,7 +368,13 @@ export function MailPage(): React.JSX.Element {
     {error && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
     {compose && !selectedCustomer && customerPicker}
 
-    <div className="mail-workspace grid min-h-[520px] overflow-hidden rounded-lg border border-border bg-card xl:h-[calc(100dvh-15.25rem)] xl:grid-cols-[21rem_minmax(0,1fr)]">
+    <div className={cn(
+      'mail-workspace grid min-h-[520px] overflow-hidden rounded-lg border border-border bg-card xl:h-[calc(100dvh-15.25rem)]',
+      focusMode
+        ? (copilotOpen ? 'xl:grid-cols-[minmax(0,1fr)_26rem]' : 'xl:grid-cols-1')
+        : (copilotOpen ? 'xl:grid-cols-[19rem_minmax(0,1fr)_25rem]' : 'xl:grid-cols-[21rem_minmax(0,1fr)]'),
+    )}>
+      {!focusMode ? (
       <section className="flex min-w-0 flex-col overflow-hidden border-b border-border xl:border-b-0 xl:border-r" aria-label={folderLabels[folder]} aria-busy={loading}>
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
           <p className="flex items-center gap-2 text-[0.8125rem] font-semibold">{folderLabels[folder]}<span className="text-[11px] font-normal tabular-nums text-muted-foreground">{total}</span></p>
@@ -415,8 +463,9 @@ export function MailPage(): React.JSX.Element {
         </>)}
         </div>
       </section>
+      ) : null}
 
-      <section className={cn('flex min-w-0 flex-col overflow-y-auto p-4 sm:p-5', !detail && 'justify-center')} aria-label="邮件会话详情">
+      <section className={cn('flex min-w-0 flex-col overflow-y-auto p-4 sm:p-5', copilotOpen && 'xl:border-r xl:border-border', !detail && 'justify-center')} aria-label="邮件会话详情">
         {!detail
           ? folder === 'followup' ? (
             <div className="mx-auto max-w-lg space-y-3 py-8 text-sm">
@@ -476,8 +525,30 @@ export function MailPage(): React.JSX.Element {
                       <p className="truncate text-[11px] text-muted-foreground">{formatDateTime(mail.sentAt)} · 收件人 {mail.to.join(', ') || '—'}{mail.cc.length > 0 ? ` · 抄送 ${mail.cc.join(', ')}` : ''}</p>
                     </div>
                   </div>
-                  <StatusChip status={mail.status} />
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      disabled={translatingId === mail.id}
+                      onClick={() => void toggleTranslateMail(mail)}
+                    >
+                      {translatingId === mail.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Languages className="mr-1 h-3 w-3" />}
+                      {translations[mail.id] ? '隐藏译文' : '双语对照'}
+                    </Button>
+                    <StatusChip status={mail.status} />
+                  </div>
                 </header>
+
+                {translations[mail.id] ? (
+                  <div className="rounded-md border border-primary/25 bg-primary/5 px-3 py-2.5 text-xs leading-relaxed">
+                    <p className="mb-1 flex items-center gap-1 font-semibold text-primary">
+                      <Languages className="h-3.5 w-3.5" />中文双语对照
+                    </p>
+                    {translations[mail.id].subject ? <p className="mb-1 font-medium text-foreground">主题：{translations[mail.id].subject}</p> : null}
+                    <p className="whitespace-pre-wrap text-foreground/90">{translations[mail.id].body}</p>
+                  </div>
+                ) : null}
 
                 {mail.error && <p role="status" className="rounded-md bg-destructive/5 px-3 py-2 text-xs text-destructive">{mail.error}{mail.needsReview ? '（待核实，不会自动重发）' : ''}</p>}
                 {mail.scheduledAt && <p className="text-[11px] text-muted-foreground">定时时间：{formatDateTime(mail.scheduledAt)}</p>}
@@ -507,8 +578,43 @@ export function MailPage(): React.JSX.Element {
             ))}
           </div>}
       </section>
+
+      {copilotOpen ? (
+        <aside className="flex min-h-0 flex-col overflow-hidden border-t border-border xl:border-t-0" aria-label="AI 回复副驾驶">
+          <MailCopilotPane
+            mode="mail"
+            customerId={detail?.customer?.id}
+            contactName={detail?.customer?.name || detail?.mail.fromName}
+            subject={detail?.mail.subject || ''}
+            inboundText={detail?.mail.text || detail?.mail.html.replace(/<[^>]+>/g, ' ') || ''}
+            threadText={detail?.thread.map((m) => `${m.direction === 'inbound' ? 'Buyer' : 'Us'}: ${m.text || m.html.replace(/<[^>]+>/g, ' ')}`).join('\n\n') || ''}
+            sourceMailId={detail?.mail.id}
+            onApplyReply={detail?.customer ? (draft) => {
+              setReplySeed(draft);
+              setReply(true);
+            } : undefined}
+          />
+        </aside>
+      ) : null}
     </div>
-    <SendLetterDialog open={reply} onOpenChange={setReply} customer={detail?.customer || null} reply={detail ? { id: detail.mail.id, subject: detail.mail.subject, from: detail.mail.from } : undefined} onSent={() => { void refresh(); void loadDetail(); }} />
+    <SendLetterDialog
+      open={reply}
+      onOpenChange={(v) => { setReply(v); if (!v) setReplySeed(null); }}
+      customer={detail?.customer || null}
+      reply={detail ? { id: detail.mail.id, subject: detail.mail.subject, from: detail.mail.from } : undefined}
+      initialDraft={replySeed ? { analysisId: '', subject: replySeed.subject, content: replySeed.content } : null}
+      onSent={() => { void refresh(); void loadDetail(); }}
+    />
+    <Dialog open={quickPasteOpen} onOpenChange={setQuickPasteOpen}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>多渠道询盘快贴工作台（WhatsApp / 阿里 / IG / 邮件）</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="flex max-h-[75vh] flex-col overflow-hidden p-0">
+          <MailCopilotPane mode="multichannel" />
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
     <SendLetterDialog open={!!resend} onOpenChange={v => { if (!v) setResend(null); }} customer={detail?.customer || null} letter={resend} onSent={() => { void refresh(); void loadDetail(); }} />
     <SendLetterDialog open={compose && !!selectedCustomer} onOpenChange={v => { if (!v) { setCompose(false); setSelectedCustomer(null); } }} customer={selectedCustomer} onSent={() => { void refresh(); }} />
     <SendLetterDialog

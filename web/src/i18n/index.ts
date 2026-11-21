@@ -2,6 +2,7 @@ import {oauthZh,oauthEn} from './oauth';
 import {webhookZh,webhookEn} from './webhooks';
 import {inquiryZh,inquiryEn} from './inquiries';
 import { integrationsZh, integrationsEn } from './integrations';
+import { workbenchZh, workbenchEn } from './workbench';
 /**
  * Lightweight i18n for the CRM shell.
  *
@@ -21,6 +22,7 @@ const zh = {
   ...webhookZh,
   ...integrationsZh,
   ...inquiryZh,
+  ...workbenchZh,
   'common.loading': '正在加载…',
   'common.save': '保存',
   'common.saving': '保存中…',
@@ -328,6 +330,7 @@ const en: Record<TranslationKey, string> = {
   ...webhookEn,
   ...integrationsEn,
   ...inquiryEn,
+  ...workbenchEn,
   'common.loading': 'Loading…',
   'common.save': 'Save',
   'common.saving': 'Saving…',

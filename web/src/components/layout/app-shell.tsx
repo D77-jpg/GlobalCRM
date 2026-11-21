@@ -14,6 +14,7 @@ import { useIsMobile } from '@/hooks/use-ui';
 import { useEscapeKey } from '@/hooks/use-ui';
 import { cn } from '@/lib/utils';
 import { ScratchpadPanel } from '@/components/scratchpad/scratchpad-panel';
+import { CommandPalette } from './command-palette';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { selectIsReadOnly, useAuthStore } from '@/store/auth.store';
 import { useI18n } from '@/i18n';
@@ -111,6 +112,7 @@ export function AppShell(): React.JSX.Element {
       </Dialog>
 
       <ScratchpadPanel />
+      <CommandPalette />
       {agentMounted ? (
         <React.Suspense fallback={null}>
           <LazyAgentPanel />

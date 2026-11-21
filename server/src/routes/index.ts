@@ -61,6 +61,7 @@ import organizationRoutes from './organization.routes';
 import platformRoutes from './platform.routes';
 import publicRoutes from './public.routes';
 import customsRoutes from './customs.routes';
+import workbenchRoutes from './workbench.routes';
 
 const router = Router();
 // Identity management has its own Cookie-only checks; no service credential fallback.
@@ -138,6 +139,7 @@ router.use('/products', requireAuth, requireProject, productRoutes);
 router.use('/customs', requireAuth, requireProject, customsRoutes);
 router.use('/templates', requireAuth, requireProject, templateRoutes);
 router.use('/scratchpad', requireAuth, requireProject, scratchpadRoutes);
+router.use('/workbench', requireAuth, requireProject, workbenchRoutes);
 router.use('/agent', requireAuth, requireProject, agentRoutes);
 router.use('/knowledge-index', requireAuth, requireProject, knowledgeIndexRoutes);
 router.use('/knowledge-documents', requireAuth, requireProject, knowledgeDocumentRoutes);

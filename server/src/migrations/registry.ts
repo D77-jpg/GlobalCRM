@@ -4,6 +4,7 @@ import { customsEngagementMigration } from './013-customs-engagement';
 import { productionIndexesMigration } from './014-production-indexes';
 import { projectBrandPackagesMigration } from './015-project-brand-packages';
 import { outreachCompleteIndexesMigration } from './016-outreach-complete-indexes';
+import { workbenchUpgradeIndexesMigration } from './017-workbench-upgrade-indexes';
 import {globalSiteWebhookMigration} from './010-globalsite-webhooks';
 import {globalSiteInquiryMigration} from './009-globalsite-inquiries';
 import { defaultOrganizationMigration } from './001-default-organization';
@@ -34,4 +35,5 @@ export const migrations: Migration[] = [
   productionIndexesMigration,
   projectBrandPackagesMigration,
   outreachCompleteIndexesMigration,
+  workbenchUpgradeIndexesMigration,
 ];

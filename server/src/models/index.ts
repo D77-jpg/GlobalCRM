@@ -210,3 +210,20 @@ export type {
   CustomsShipmentDocument,
   CustomsMatchDocument,
 } from './Customs';
+
+export { ProjectPolicy } from './ProjectPolicy';
+export type { IProjectPolicy, ProjectPolicyCategory, ProjectPolicyDocument, ProjectPolicyModel } from './ProjectPolicy';
+
+export { CustomerWorkbenchItem } from './CustomerWorkbenchItem';
+export type {
+  ICustomerWorkbenchItem,
+  WorkbenchItemKind,
+  WorkbenchItemStatus,
+  WorkbenchOwnerRole,
+  CommitmentGrade,
+  CustomerWorkbenchItemDocument,
+  CustomerWorkbenchItemModel,
+} from './CustomerWorkbenchItem';
+
+export { CustomerRfq } from './CustomerRfq';
+export type { ICustomerRfq, IRfqLine, RfqStatus, CustomerRfqDocument, CustomerRfqModel } from './CustomerRfq';
