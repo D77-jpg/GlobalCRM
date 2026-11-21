@@ -146,15 +146,15 @@ router.put('/config', requireRole('admin', 'project_admin'), validate({
 
 router.post('/guardrails/check', validate({
   body: z.object({
-    subject: z.string().max(300).default(''),
-    body: z.string().max(20000),
-    inboundText: z.string().max(12000).optional(),
-    threadText: z.string().max(12000).optional(),
-    contactName: z.string().max(120).optional(),
+    subject: z.string().max(500).default(''),
+    body: z.string().max(30000),
+    inboundText: z.string().max(50000).optional(),
+    threadText: z.string().max(100000).optional(),
+    contactName: z.string().max(200).optional(),
     attachedOutFiles: z.array(z.string().max(200)).max(20).optional(),
     channel: z.enum(['email', 'whatsapp', 'alibaba', 'trademanager', 'instagram', 'web', 'chat']).optional(),
     complaintLevel: z.enum(['', 'R1', 'R2', 'R3', 'R4']).optional(),
-    threadSubject: z.string().max(300).optional(),
+    threadSubject: z.string().max(500).optional(),
     destination: z.string().max(160).optional(),
   }),
 }), asyncHandler(async (req, res) => {
@@ -283,10 +283,10 @@ router.post('/draft-inquiry', validate({
     customerId: z.string().regex(/^[a-fA-F0-9]{24}$/).optional(),
     channel: z.enum(['email', 'whatsapp', 'alibaba', 'trademanager', 'instagram', 'web', 'chat']).optional(),
     scenario: replyScenarioEnum.optional(),
-    subject: z.string().max(300).optional(),
-    inboundText: z.string().trim().min(1).max(15000),
-    threadText: z.string().max(15000).optional(),
-    contactName: z.string().max(120).optional(),
+    subject: z.string().max(500).optional(),
+    inboundText: z.string().trim().min(1).max(50000),
+    threadText: z.string().max(100000).optional(),
+    contactName: z.string().max(200).optional(),
     attachedOutFiles: z.array(z.string().max(200)).max(20).optional(),
     inboundAttachments: z.array(z.object({
       name: z.string().min(1).max(200),
@@ -304,12 +304,12 @@ router.post('/draft-inquiry', validate({
 
 router.post('/rewrite', validate({
   body: z.object({
-    subject: z.string().max(300).optional(),
-    body: z.string().trim().min(1).max(20000),
+    subject: z.string().max(500).optional(),
+    body: z.string().trim().min(1).max(30000),
     tone: z.enum(['concise', 'professional', 'friendly', 'formal']),
     instruction: z.string().max(1000).optional(),
     customerId: z.string().regex(/^[a-fA-F0-9]{24}$/).optional(),
-    inboundText: z.string().max(12000).optional(),
+    inboundText: z.string().max(50000).optional(),
   }),
 }), asyncHandler(async (req, res) => {
   sendSuccess(res, await rewriteWorkbenchDraft(req.body, req.user!));
@@ -317,9 +317,9 @@ router.post('/rewrite', validate({
 
 router.post('/learn-from-edit', validate({
   body: z.object({
-    inboundText: z.string().max(8000).default(''),
-    aiDraft: z.string().trim().min(1).max(20000),
-    finalSent: z.string().trim().min(1).max(20000),
+    inboundText: z.string().max(50000).default(''),
+    aiDraft: z.string().trim().min(1).max(30000),
+    finalSent: z.string().trim().min(1).max(30000),
     note: z.string().max(500).optional(),
     autoAdoptWritingRules: z.boolean().optional(),
   }),

@@ -602,9 +602,9 @@ export function MailPage(): React.JSX.Element {
             mode="mail"
             customerId={detail?.customer?.id}
             contactName={detail?.customer?.name || detail?.mail.fromName}
-            subject={detail?.mail.subject || ''}
-            inboundText={detail?.mail.text?.trim() || stripMailHtml(detail?.mail.html)}
-            threadText={detail?.thread.map((m) => `${m.direction === 'inbound' ? 'Buyer' : 'Us'}: ${m.text?.trim() || stripMailHtml(m.html)}`).join('\n\n') || ''}
+            subject={detail?.mail.subject ? (/^(?:re|fw|fwd|回复|答复)\s*[:：]/i.test(detail.mail.subject) ? `Re: ${stripReplySubjectPrefix(detail.mail.subject)}` : detail.mail.subject).slice(0, 450) : ''}
+            inboundText={(detail?.mail.text?.trim() || stripMailHtml(detail?.mail.html)).slice(0, 30000)}
+            threadText={(detail?.thread.slice(-12).map((m) => `${m.direction === 'inbound' ? 'Buyer' : 'Us'}: ${(m.text?.trim() || stripMailHtml(m.html)).slice(0, 2200)}`).join('\n\n') || '').slice(-25000)}
             sourceMailId={detail?.mail.id}
             onApplyReply={detail?.customer ? (draft) => {
               setReplySeed(draft);

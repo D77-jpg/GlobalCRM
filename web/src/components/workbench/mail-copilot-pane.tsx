@@ -132,12 +132,12 @@ export function MailCopilotPane({
         customerId,
         channel: mode === 'mail' ? 'email' : channel,
         scenario,
-        subject: effectiveSubject,
-        inboundText: body,
-        threadText: mode === 'mail' ? threadText : undefined,
-        contactName,
+        subject: effectiveSubject.slice(0, 450),
+        inboundText: body.slice(0, 30000),
+        threadText: mode === 'mail' && threadText ? threadText.slice(-30000) : undefined,
+        contactName: contactName?.slice(0, 180),
         inboundAttachments: attachments.length > 0 ? attachments : undefined,
-        instruction: instruction.trim() || undefined,
+        instruction: instruction.trim().slice(0, 950) || undefined,
       });
       setResult(res);
       switchVersion(res.duelWinner, res);
@@ -153,12 +153,12 @@ export function MailCopilotPane({
     if (!editedBody.trim()) return;
     try {
       const res = await apiPost<{ checks: GuardCheckItem[]; score: ReplyScoreResult }>('/workbench/guardrails/check', {
-        subject: editedSubject,
-        body: editedBody,
-        inboundText: effectiveInbound,
-        contactName,
+        subject: editedSubject.slice(0, 450),
+        body: editedBody.slice(0, 28000),
+        inboundText: effectiveInbound.slice(0, 30000),
+        contactName: contactName?.slice(0, 180),
         channel: mode === 'mail' ? 'email' : channel,
-        threadSubject: effectiveSubject,
+        threadSubject: effectiveSubject.slice(0, 450),
       });
       setLiveScore(res.score);
       toast.success(`护栏复检完成：${res.score.score} 分`);
@@ -172,11 +172,11 @@ export function MailCopilotPane({
     setRewriting(true);
     try {
       const res = await apiPost<{ body: string; zh: string; score: ReplyScoreResult }>('/workbench/rewrite', {
-        subject: editedSubject,
-        body: editedBody,
+        subject: editedSubject.slice(0, 450),
+        body: editedBody.slice(0, 28000),
         tone,
         customerId,
-        inboundText: effectiveInbound,
+        inboundText: effectiveInbound.slice(0, 30000),
       });
       setEditedBody(res.body);
       setZhPreview(res.zh);
@@ -243,9 +243,9 @@ export function MailCopilotPane({
       const res = await apiPost<{ summaryZh: string; candidates: LearnedCandidate[]; adoptedCount: number }>(
         '/workbench/learn-from-edit',
         {
-          inboundText: effectiveInbound,
-          aiDraft: originalAi,
-          finalSent: editedBody,
+          inboundText: effectiveInbound.slice(0, 30000),
+          aiDraft: originalAi.slice(0, 28000),
+          finalSent: editedBody.slice(0, 28000),
           autoAdoptWritingRules: true,
         },
       );

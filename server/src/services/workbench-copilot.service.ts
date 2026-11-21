@@ -631,7 +631,7 @@ export async function draftMultiChannelInquiry(
             `【已批准报价】\n${approvedQuotesText}`,
             `【附件状态】\n${attSummary}`,
             `【待发送附件】\n${input.attachedOutFiles?.length ? input.attachedOutFiles.join('、') : '（无，正文不得写 attached）'}`,
-            cleanedThread ? `【历史往来】\n${cleanedThread.slice(0, 6000)}` : '',
+            cleanedThread ? `【历史往来（最近记录）】\n${cleanedThread.slice(-6000)}` : '',
             `【当前买家来信】\n${combinedInbound.slice(0, 8000)}`,
             input.instruction ? `【业务员额外指示】\n${input.instruction}` : '',
             `【签名（结尾原样保留）】\n${signatureText}`,
