@@ -1,4 +1,5 @@
 export const workbenchZh = {
+  'nav.channels': '全渠道 / WhatsApp',
   'nav.quotations': '报价与 RFQ',
   'workbench.policiesTitle': '对外口径与红线',
   'workbench.knowledgeQaTitle': 'AI 知识问答',
@@ -18,6 +19,7 @@ export const workbenchZh = {
 } as const;
 
 export const workbenchEn: Record<keyof typeof workbenchZh, string> = {
+  'nav.channels': 'WhatsApp & Channels',
   'nav.quotations': 'Quotes & RFQ',
   'workbench.policiesTitle': 'Policies & Guardrails',
   'workbench.knowledgeQaTitle': 'Knowledge Q&A',

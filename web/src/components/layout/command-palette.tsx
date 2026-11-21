@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, LayoutDashboard, Mail, Package, ReceiptText, Search, ShieldCheck, Users } from 'lucide-react';
+import { BookOpen, LayoutDashboard, Mail, MessageSquare, Package, ReceiptText, Search, ShieldCheck, Users } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +22,7 @@ const STATIC_NAV: PaletteItem[] = [
   { id: 'nav-dash', group: '快速跳转', label: '仪表盘 · 业务决策', to: ROUTES.dashboard, icon: <LayoutDashboard className="h-4 w-4" /> },
   { id: 'nav-cust', group: '快速跳转', label: '客户管理 · 表格 / 漏斗看板', to: ROUTES.customers, icon: <Users className="h-4 w-4" /> },
   { id: 'nav-mail', group: '快速跳转', label: '邮件中心 · 三栏 AI 副驾驶', to: '/mail', icon: <Mail className="h-4 w-4" /> },
+  { id: 'nav-channels', group: '快速跳转', label: '全渠道客服 · WhatsApp 三栏工作台', to: ROUTES.channels, icon: <MessageSquare className="h-4 w-4" /> },
   { id: 'nav-quote', group: '快速跳转', label: '报价与 RFQ 工作台', to: ROUTES.quotations, icon: <ReceiptText className="h-4 w-4" /> },
   { id: 'nav-kb', group: '快速跳转', label: '知识库 · AI 问答与对外口径', to: '/knowledge', icon: <BookOpen className="h-4 w-4" /> },
   { id: 'nav-pol', group: '快速跳转', label: '对外口径表与红线护栏', to: '/knowledge?view=policies', icon: <ShieldCheck className="h-4 w-4" /> },

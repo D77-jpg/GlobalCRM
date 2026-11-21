@@ -24,13 +24,15 @@ import type { GuardCheckItem, LearnedCandidate, MultiChannelDraftResult, ReplySc
 
 export interface MailCopilotPaneProps {
   mode?: 'mail' | 'multichannel';
+  channel?: 'email' | 'whatsapp' | 'alibaba' | 'trademanager' | 'instagram' | 'web' | 'chat';
+  applyLabel?: string;
   customerId?: string;
   contactName?: string;
   subject?: string;
   inboundText?: string;
   threadText?: string;
   sourceMailId?: string;
-  onApplyReply?: (draft: { subject: string; content: string }) => void;
+  onApplyReply?: (draft: { subject: string; content: string; zh?: string }) => void;
 }
 
 const TONE_OPTIONS = [
@@ -55,6 +57,8 @@ type DraftKey = 'B' | 'A' | 'K';
 
 export function MailCopilotPane({
   mode = 'mail',
+  channel: fixedChannel,
+  applyLabel = '填入回复审稿',
   customerId,
   contactName,
   subject: initialSubject = '',
@@ -64,6 +68,7 @@ export function MailCopilotPane({
   onApplyReply,
 }: MailCopilotPaneProps): React.JSX.Element {
   const [channel, setChannel] = React.useState<'email' | 'whatsapp' | 'alibaba' | 'trademanager' | 'instagram'>('email');
+  const activeChannel = fixedChannel ?? (mode === 'mail' ? 'email' : channel);
   const [scenario, setScenario] = React.useState<ReplyScenario>('auto');
   const [pasteSubject, setPasteSubject] = React.useState(initialSubject);
   const [pasteText, setPasteText] = React.useState(initialInbound);
@@ -130,7 +135,7 @@ export function MailCopilotPane({
     try {
       const res = await apiPost<MultiChannelDraftResult>('/workbench/draft-inquiry', {
         customerId,
-        channel: mode === 'mail' ? 'email' : channel,
+        channel: activeChannel,
         scenario,
         subject: effectiveSubject.slice(0, 450),
         inboundText: body.slice(0, 30000),
@@ -157,7 +162,7 @@ export function MailCopilotPane({
         body: editedBody.slice(0, 28000),
         inboundText: effectiveInbound.slice(0, 30000),
         contactName: contactName?.slice(0, 180),
-        channel: mode === 'mail' ? 'email' : channel,
+        channel: activeChannel,
         threadSubject: effectiveSubject.slice(0, 450),
       });
       setLiveScore(res.score);
@@ -591,9 +596,9 @@ export function MailCopilotPane({
               className="ml-auto h-7 text-xs"
               disabled={badChecks.length > 0}
               title={badChecks.length > 0 ? '请先修复红色护栏问题' : undefined}
-              onClick={() => onApplyReply({ subject: editedSubject, content: editedBody })}
+              onClick={() => onApplyReply({ subject: editedSubject, content: editedBody, zh: zhPreview || undefined })}
             >
-              <Send className="h-3 w-3" />填入回复审稿
+              <Send className="h-3 w-3" />{applyLabel}
             </Button>
           ) : null}
         </div>

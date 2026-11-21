@@ -259,3 +259,87 @@ export interface DecisionAnalytics {
     nextFollowUpAt?: string | null;
   }[];
 }
+
+export type OmnichannelType = 'whatsapp' | 'alibaba' | 'instagram' | 'trademanager' | 'wechat' | 'web_chat';
+export type ConversationStatus = 'open' | 'pending_followup' | 'resolved' | 'archived';
+
+export interface ChannelConfigDto {
+  projectId: string;
+  whatsappEnabled: boolean;
+  phoneNumberId: string;
+  businessAccountId: string;
+  displayPhoneNumber: string;
+  hasAccessToken: boolean;
+  hasAppSecret: boolean;
+  hasVerifyToken: boolean;
+  webhookPath: string;
+  webhookLastReceivedAt?: string;
+  webhookLastError?: string;
+}
+
+export interface ChannelConversationDto {
+  id: string;
+  customerId?: string;
+  ownerId?: string;
+  channel: OmnichannelType;
+  externalContactId: string;
+  contactName: string;
+  contactCompany?: string;
+  contactCountry?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  status: ConversationStatus;
+  starred: boolean;
+  tags: string[];
+  unreadCount: number;
+  mode: 'api_live' | 'manual_assist';
+  lastMessagePreview: string;
+  lastMessageDirection: 'inbound' | 'outbound';
+  lastMessageAt: string;
+  createdAt: string;
+}
+
+export interface ChannelMessageDto {
+  id: string;
+  conversationId: string;
+  channel: OmnichannelType;
+  direction: 'inbound' | 'outbound';
+  deliveryStatus: 'received' | 'logged_manual' | 'sent_api' | 'delivered' | 'read' | 'failed';
+  externalMessageId?: string;
+  text: string;
+  zhTranslation?: string;
+  detectedLang?: string;
+  attachments: { name: string; mimeType?: string; size?: number; quotationId?: string; quotationNo?: string }[];
+  senderName?: string;
+  errorMessage?: string;
+  sentAt: string;
+}
+
+export interface ChannelConversationDetailDto {
+  conversation: ChannelConversationDto;
+  messages: ChannelMessageDto[];
+  customer: {
+    id: string;
+    name: string;
+    company?: string;
+    country?: string;
+    email?: string;
+    phone?: string;
+    status: string;
+    intentScore?: number;
+    tags: string[];
+    requirementNotes?: string;
+  } | null;
+  quotations: {
+    id: string;
+    quotationNo: string;
+    status: string;
+    approvalStatus?: string;
+    currency: string;
+    grandTotal?: number;
+    totalAmount: number;
+    incoterm?: string;
+    createdAt: string;
+  }[];
+  openItemsCount: number;
+}

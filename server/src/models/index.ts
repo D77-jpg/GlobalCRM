@@ -227,3 +227,24 @@ export type {
 
 export { CustomerRfq } from './CustomerRfq';
 export type { ICustomerRfq, IRfqLine, RfqStatus, CustomerRfqDocument, CustomerRfqModel } from './CustomerRfq';
+
+export { ChannelConfig } from './ChannelConfig';
+export type { IChannelConfig, ChannelConfigDocument, ChannelConfigModel } from './ChannelConfig';
+
+export { ChannelConversation, OMNICHANNEL_TYPES, CONVERSATION_STATUSES } from './ChannelConversation';
+export type {
+  IChannelConversation,
+  OmnichannelType,
+  ConversationStatus,
+  ChannelConversationDocument,
+  ChannelConversationModel,
+} from './ChannelConversation';
+
+export { ChannelMessage } from './ChannelMessage';
+export type {
+  IChannelMessage,
+  IChannelAttachment,
+  ChannelDeliveryStatus,
+  ChannelMessageDocument,
+  ChannelMessageModel,
+} from './ChannelMessage';
