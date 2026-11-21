@@ -66,9 +66,24 @@ export function renderSignatureText(name: string, signature: LetterSignature = L
   return [signatureName(name), signature.title, '', ...signature.lines].join('\n');
 }
 
+/** 统一把富文本编辑器（Quill/TipTap）写入的 &nbsp; 与不间断空格归一化为普通空格，便于稳定识别签名。 */
+const normalizeSignatureSpaces = (value: string) => value
+  .replace(/&nbsp;|&#160;|&#xa0;/gi, ' ')
+  .replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
+  .replace(/[ \t]+/g, ' ');
+
 export function hasSignature(text: string, signature: LetterSignature = LETTER_SIGNATURE): boolean {
-  const marker = signature.marker ?? signature.lines[signature.lines.length - 1] ?? signature.title;
-  return text.includes(marker);
+  const marker = normalizeSignatureSpaces(signature.marker ?? signature.lines[signature.lines.length - 1] ?? signature.title).trim();
+  const normalizedRaw = normalizeSignatureSpaces(text);
+  if (normalizedRaw.includes(marker)) return true;
+  const normalizedPlain = normalizeSignatureSpaces(htmlToPlainText(text));
+  if (normalizedPlain.includes(marker)) return true;
+  const normalizedTitle = normalizeSignatureSpaces(signature.title).trim();
+  return Boolean(normalizedTitle) && normalizedPlain.includes(normalizedTitle)
+    && signature.lines.some((line) => {
+      const normalizedLine = normalizeSignatureSpaces(line).trim();
+      return Boolean(normalizedLine) && normalizedPlain.includes(normalizedLine);
+    });
 }
 
 /** 品牌 logo 的对外地址；关闭 SIGNATURE_LOGO 或项目不使用 logo 时为空（只输出文字签名） */
@@ -93,15 +108,27 @@ export function renderSignatureHtml(name: string, signature: LetterSignature = L
     + `<strong>${who}</strong><br>${escapeHtml(signature.title)}<br>${logo}<br>${lines}</div>`;
 }
 
-/** 把正文里的固定签名切出来（名字取签名块第一行），没有签名时 body 原样返回 */
+/** 把正文里的固定签名切出来（名字取签名块第一行），没有签名时 body 原样返回；若误含多套固定签名也会一并去重。 */
 export function splitSignatureText(text: string, signature: LetterSignature = LETTER_SIGNATURE): { body: string; name?: string } {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const titleIndex = lines.map((line) => line.trim()).lastIndexOf(signature.title);
-  if (titleIndex < 1) return { body: text.replace(/\r\n/g, '\n').trim() };
-  const name = lines[titleIndex - 1]?.trim();
-  let cut = titleIndex - 1;
-  while (cut > 0 && !lines[cut - 1].trim()) cut--;
-  return { body: lines.slice(0, cut).join('\n').trim(), name: name || undefined };
+  const rawLines = text.replace(/\r\n/g, '\n').split('\n');
+  const normLines = rawLines.map((line) => normalizeSignatureSpaces(line).trim());
+  const normalizedTitle = normalizeSignatureSpaces(signature.title).trim();
+  let cutIndex = normLines.indexOf(normalizedTitle);
+  if (cutIndex < 1) {
+    // 兜底：若职位行缺失但尾部连续出现固定签名联系方式行，同样剥离
+    const normalizedSigLines = new Set(signature.lines.map((line) => normalizeSignatureSpaces(line).trim()).filter(Boolean));
+    const firstSigLine = normLines.findIndex((line) => normalizedSigLines.has(line));
+    if (firstSigLine < 0) return { body: rawLines.join('\n').trim() };
+    let cut = firstSigLine;
+    while (cut > 0 && !normLines[cut - 1]) cut--;
+    return { body: rawLines.slice(0, cut).join('\n').trim() };
+  }
+  const lastTitleIndex = normLines.lastIndexOf(normalizedTitle);
+  const name = normalizeSignatureSpaces(rawLines[lastTitleIndex - 1] ?? '').trim()
+    || normalizeSignatureSpaces(rawLines[cutIndex - 1] ?? '').trim();
+  let cut = cutIndex - 1;
+  while (cut > 0 && !normLines[cut - 1]) cut--;
+  return { body: rawLines.slice(0, cut).join('\n').trim(), name: name || undefined };
 }
 
 /**
@@ -197,7 +224,12 @@ function stripLastSignoffBlock(content: string, sawStrong: boolean): { html: str
  */
 export function ensureSignature(content: string, name: string, signature: LetterSignature = LETTER_SIGNATURE, replaceSigner = false): string {
   if (hasSignature(content, signature)) {
-    if (/genesis-logo/.test(content) && !replaceSigner) return content;
+    const marker = normalizeSignatureSpaces(signature.marker ?? signature.lines[signature.lines.length - 1] ?? signature.title).trim();
+    const normalizedPlain = normalizeSignatureSpaces(htmlToPlainText(content));
+    const markerOccurrences = marker ? normalizedPlain.split(marker).length - 1 : 0;
+    const expectedLogo = signatureLogoUrl(signature);
+    const hasExpectedLogo = !expectedLogo || content.includes(expectedLogo) || /\/api\/brand\/[^"'<>]+\.(?:png|jpg|jpeg|webp)/i.test(content);
+    if (hasExpectedLogo && markerOccurrences === 1 && !replaceSigner) return content;
     const text = htmlToPlainText(content);
     const { body, name: signerFromBody } = splitSignatureText(text, signature);
     // 真正发送时以当前操作账号为准，旧草稿里的落款需要跟随当前业务员更新。

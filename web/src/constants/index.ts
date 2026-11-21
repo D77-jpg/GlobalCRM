@@ -886,6 +886,17 @@ export function stripLegacySignoff(html: string): string {
   return root.innerHTML;
 }
 
+const normalizeSignatureSpaces = (value: string) => value
+  .replace(/&nbsp;|&#160;|&#xa0;/gi, ' ')
+  .replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, ' ')
+  .replace(/[ \t]+/g, ' ');
+
+const hasSignatureMarker = (html: string, signature: LetterSignatureProfile) => {
+  const marker = normalizeSignatureSpaces(signature.marker).trim();
+  if (!marker) return false;
+  return normalizeSignatureSpaces(html).includes(marker);
+};
+
 /** 已有固定结尾时只替换结尾，保留业务员当前姓名；找不到结尾块则返回原 HTML。 */
 function replaceSignatureHtml(
   html: string,
@@ -896,9 +907,11 @@ function replaceSignatureHtml(
   const doc = new DOMParser().parseFromString(`<div id="signature-replace-root">${html}</div>`, 'text/html');
   const root = doc.getElementById('signature-replace-root');
   if (!root) return html;
+  const normalizedTitle = normalizeSignatureSpaces(signature.title).trim();
+  const normalizedMarker = normalizeSignatureSpaces(signature.marker).trim();
   const target = [...root.querySelectorAll('p,div')].find((element) => {
-    const text = (element.textContent ?? '').replace(/\s+/g, ' ');
-    return text.includes(signature.title) && text.includes(signature.marker);
+    const text = normalizeSignatureSpaces(element.textContent ?? '').replace(/\s+/g, ' ');
+    return text.includes(normalizedTitle) && text.includes(normalizedMarker);
   });
   if (!target) return html;
   const holder = doc.createElement('div');
@@ -915,7 +928,7 @@ export function appendSignatureHtml(
   name: string,
   signature: LetterSignatureProfile = LETTER_SIGNATURE,
 ): string {
-  if (html.includes(signature.marker)) return replaceSignatureHtml(html, name, signature);
+  if (hasSignatureMarker(html, signature)) return replaceSignatureHtml(html, name, signature);
   const cleaned = stripLegacySignoff(html);
   return `${cleaned}${cleaned ? '<p></p>' : ''}${letterSignatureHtml(name, signature)}`;
 }
@@ -928,26 +941,26 @@ export function withSignatureLogo(
   html: string,
   signature: LetterSignatureProfile = LETTER_SIGNATURE,
 ): string {
-  if (!signature.logoPath || !html.includes(signature.marker)) return html;
+  if (!signature.logoPath || !hasSignatureMarker(html, signature)) return html;
   const logoName = signature.logoPath.split('/').pop() ?? '';
   if (logoName && html.includes(logoName)) return html;
   if (typeof DOMParser === 'undefined') return html;
   const doc = new DOMParser().parseFromString(`<div id="signature-preview-root">${html}</div>`, 'text/html');
   const root = doc.getElementById('signature-preview-root');
   if (!root) return html;
-  const title = signature.title;
+  const title = normalizeSignatureSpaces(signature.title).trim();
   const logoSrc = signature.logoPath;
   const logoTag = `<img src="${logoSrc}" alt="${escapeSignatureText(signature.logoAlt ?? '')}" width="150" style="display:block;width:150px;height:auto;margin:4px 0">`;
   const dropEmptyBlocks = (start: Element): void => {
     let next = start.nextElementSibling;
-    while (next && !(next.textContent ?? '').trim()) {
+    while (next && !normalizeSignatureSpaces(next.textContent ?? '').trim()) {
       const after = next.nextElementSibling;
       next.remove();
       next = after;
     }
   };
-  // 结尾可能是「标题独占一段」，也可能整段用 <br> 连写，两种都支持
-  const standalone = [...root.querySelectorAll('p,div')].find((el) => (el.textContent ?? '').trim() === title);
+  // 结尾可能是「标题独占一段」，也可能整段用 <br> 连写，两种都支持（兼容 Quill 写入的 &nbsp;）
+  const standalone = [...root.querySelectorAll('p,div')].find((el) => normalizeSignatureSpaces(el.textContent ?? '').trim() === title);
   if (standalone?.parentElement) {
     const holder = doc.createElement('p');
     holder.innerHTML = logoTag;
@@ -955,10 +968,12 @@ export function withSignatureLogo(
     dropEmptyBlocks(holder);
     return root.innerHTML;
   }
-  const host = [...root.querySelectorAll('p,div')].find((el) => el.innerHTML.includes(title));
+  const host = [...root.querySelectorAll('p,div')].find((el) => normalizeSignatureSpaces(el.textContent ?? '').includes(title));
   if (host) {
-    host.innerHTML = host.innerHTML.replace(`${title}<br>`, `${title}<br>${logoTag}<br>`);
-    if (!host.innerHTML.includes(logoSrc)) host.innerHTML = host.innerHTML.replace(title, `${title}<br>${logoTag}`);
+    const normalizedInner = normalizeSignatureSpaces(host.innerHTML);
+    host.innerHTML = normalizedInner.includes(`${title}<br>`)
+      ? normalizedInner.replace(`${title}<br>`, `${title}<br>${logoTag}<br>`)
+      : normalizedInner.replace(title, `${title}<br>${logoTag}`);
     dropEmptyBlocks(host);
     return root.innerHTML;
   }

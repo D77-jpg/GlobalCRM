@@ -154,3 +154,32 @@ test('固定结尾：模型自己写的落款先剥掉，再加系统签名', ()
   const plain = 'Dear Diane,\n\nWe make custom boxes.';
   assert.equal(stripSignatureText(plain), plain);
 });
+
+test('固定结尾：Quill 编辑器把空格写成 &nbsp; 并剥掉 logo 后，重渲染只保留一套带 logo 的签名', () => {
+  const quillHtml = [
+    '<p>Dear&nbsp;Kirstin&nbsp;Ash&nbsp;team,</p>',
+    '<p></p>',
+    '<p>Genesis&nbsp;is&nbsp;a&nbsp;Xiamen-based&nbsp;factory&nbsp;making&nbsp;custom&nbsp;pouches.</p>',
+    '<p></p>',
+    '<p><strong>Susan&nbsp;Yao</strong></p>',
+    '<p>Sales&nbsp;Manager,&nbsp;Genesis&nbsp;(Xiamen)&nbsp;Bags&nbsp;Co.,&nbsp;Ltd.</p>',
+    '<p>Genesis&nbsp;Bags&nbsp;·&nbsp;Custom&nbsp;Packaging&nbsp;Manufacturer&nbsp;·&nbsp;Xiamen·&nbsp;Where&nbsp;Packaging&nbsp;Begins</p>',
+    '<p>WhatsApp&nbsp;+86&nbsp;153&nbsp;0600&nbsp;1357&nbsp;·&nbsp;sales@genesisbags.com</p>',
+    '<p>genesisbags.com&nbsp;·&nbsp;genesisgroup.en.alibaba.com</p>',
+    '<p>Gold&nbsp;Supplier&nbsp;on&nbsp;Alibaba.com&nbsp;since&nbsp;2014&nbsp;·&nbsp;ISO&nbsp;9001&nbsp;/&nbsp;FSC®&nbsp;/&nbsp;BSCI&nbsp;Certified</p>',
+  ].join('');
+  assert.equal(hasSignature(quillHtml), true);
+  const rendered = ensureSignature(quillHtml, 'Susan Yao', LETTER_SIGNATURE, true);
+  assert.ok(/genesis-logo\.png/.test(rendered), 'logo 必须保留');
+  const plainText = htmlToPlainText(rendered);
+  assert.equal((plainText.match(/Gold Supplier on Alibaba\.com since 2014/g) ?? []).length, 1);
+  assert.equal((plainText.match(/Sales Manager, Genesis \(Xiamen\) Bags Co\., Ltd\./g) ?? []).length, 1);
+  assert.equal((plainText.match(/Susan Yao/g) ?? []).length, 1);
+  // 即使历史脏草稿已经重复了两套签名，重渲染也会自动去重成一套带 logo 的签名
+  const alreadyDuplicated = `${quillHtml}<br>${renderSignatureHtml('Susan Yao', LETTER_SIGNATURE)}`;
+  const deduped = ensureSignature(alreadyDuplicated, 'Susan Yao', LETTER_SIGNATURE, true);
+  assert.ok(/genesis-logo\.png/.test(deduped), '去重后 logo 必须保留');
+  const dedupedText = htmlToPlainText(deduped);
+  assert.equal((dedupedText.match(/Gold Supplier on Alibaba\.com since 2014/g) ?? []).length, 1);
+  assert.equal((dedupedText.match(/Susan Yao/g) ?? []).length, 1);
+});
