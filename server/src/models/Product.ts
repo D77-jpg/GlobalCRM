@@ -35,6 +35,12 @@ export interface IProduct{
   priceTiers:ProductPriceTier[];
   moq?:string;
   leadTime?:string;
+  /** Optional product thumbnail (compressed data URL or https URL). */
+  imageUrl?:string;
+  /** Internal reference unit cost for margin estimation; never exported externally. */
+  unitCost?:number;
+  /** Target gross margin percentage (e.g. 20 means 20%). */
+  targetMarginPct?:number;
   notes?:string;
   source?:string;
   effectiveFrom?:Date;
@@ -76,6 +82,9 @@ const ProductSchema=new Schema<IProduct>({
   priceTiers:{type:[tierSchema],default:[]},
   moq:{type:String,trim:true,maxlength:120},
   leadTime:{type:String,trim:true,maxlength:120},
+  imageUrl:{type:String,trim:true,maxlength:600000},
+  unitCost:{type:Number,min:0},
+  targetMarginPct:{type:Number,min:0,max:99},
   notes:{type:String,trim:true,maxlength:4000},
   source:{type:String,trim:true,maxlength:500},
   effectiveFrom:Date,

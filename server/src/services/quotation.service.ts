@@ -25,7 +25,8 @@ import type { CustomerStatus, QuotationCurrency, QuotationStatus } from '../cons
 import { ApiError } from '../utils/ApiError';
 import { buildPaginated, parsePagination, sortableFields, type Paginated } from '../utils/pagination';
 import { escapeRegExp } from '../utils/text';
-import { assertCustomerAccess, customerRefScope, projectScope, requireProjectId } from '../utils/access';
+import { assertCustomerAccess, customerRefScope, isProjectManager, projectScope, requireProjectId } from '../utils/access';
+import { roundMoney } from '../models';
 import { createLogger } from '../config/logger';
 import { updateCustomer } from './customer.service';
 import type { AuthUser } from '../types/express';
@@ -73,8 +74,13 @@ export interface QuotationCustomerSummary {
 
 /** 对外输出的报价明细行 */
 export interface QuotationItemDto {
+  productId?: string;
+  sku?: string;
   productName: string;
   model?: string;
+  colorSpec?: string;
+  moq?: string;
+  pricingStatus?: 'approved' | 'pending';
   quantity: number;
   unitPrice: number;
   amount: number;
@@ -90,12 +96,21 @@ export interface QuotationDto {
   items: QuotationItemDto[];
   currency: QuotationCurrency;
   totalAmount: number;
+  incoterm?: 'EXW' | 'FOB' | 'CIF' | 'CFR' | 'DDP' | 'DDU' | 'DAP';
+  shippingMethod?: 'sea' | 'air' | 'express' | 'rail' | 'other';
+  destinationPort?: string;
+  estimatedFreight?: number;
+  grandTotal?: number;
   validityDate?: Date | null;
   paymentTerms?: string;
   leadTime?: string;
   moq?: string;
   notes?: string;
   status: QuotationStatus;
+  approvalStatus?: 'none' | 'pending_approval' | 'approved' | 'rejected';
+  approvalNote?: string;
+  approvedBy?: string;
+  approvedAt?: Date;
   version: number;
   createdBy?: string;
   createdAt: Date;
@@ -141,12 +156,23 @@ function toQuotationDto(doc: Record<string, unknown>): QuotationDto {
 
   const rawItems = (doc.items as Record<string, unknown>[] | undefined) ?? [];
   const items: QuotationItemDto[] = rawItems.map((it) => ({
+    ...(it.productId ? { productId: String(it.productId) } : {}),
+    ...(it.sku ? { sku: String(it.sku) } : {}),
     productName: String(it.productName ?? ''),
     ...(it.model ? { model: String(it.model) } : {}),
+    ...(it.colorSpec ? { colorSpec: String(it.colorSpec) } : {}),
+    ...(it.moq ? { moq: String(it.moq) } : {}),
+    ...(it.pricingStatus ? { pricingStatus: it.pricingStatus as 'approved' | 'pending' } : {}),
     quantity: Number(it.quantity ?? 0),
     unitPrice: Number(it.unitPrice ?? 0),
     amount: Number(it.amount ?? 0),
   }));
+
+  const totalAmount = Number(doc.totalAmount ?? 0);
+  const estimatedFreight = typeof doc.estimatedFreight === 'number' ? doc.estimatedFreight : undefined;
+  const grandTotal = typeof doc.grandTotal === 'number'
+    ? doc.grandTotal
+    : estimatedFreight !== undefined ? roundMoney(totalAmount + estimatedFreight) : undefined;
 
   return {
     id: String((doc._id ?? doc.id ?? '').toString()),
@@ -156,13 +182,22 @@ function toQuotationDto(doc: Record<string, unknown>): QuotationDto {
     title: String(doc.title ?? ''),
     items,
     currency: (doc.currency as QuotationCurrency) ?? 'USD',
-    totalAmount: Number(doc.totalAmount ?? 0),
+    totalAmount,
+    ...(doc.incoterm ? { incoterm: doc.incoterm as QuotationDto['incoterm'] } : {}),
+    ...(doc.shippingMethod ? { shippingMethod: doc.shippingMethod as QuotationDto['shippingMethod'] } : {}),
+    ...(doc.destinationPort ? { destinationPort: String(doc.destinationPort) } : {}),
+    ...(estimatedFreight !== undefined ? { estimatedFreight } : {}),
+    ...(grandTotal !== undefined ? { grandTotal } : {}),
     validityDate: doc.validityDate ? new Date(doc.validityDate as Date) : null,
     ...(doc.paymentTerms ? { paymentTerms: String(doc.paymentTerms) } : {}),
     ...(doc.leadTime ? { leadTime: String(doc.leadTime) } : {}),
     ...(doc.moq ? { moq: String(doc.moq) } : {}),
     ...(doc.notes ? { notes: String(doc.notes) } : {}),
     status: (doc.status as QuotationStatus) ?? 'draft',
+    ...(doc.approvalStatus ? { approvalStatus: doc.approvalStatus as QuotationDto['approvalStatus'] } : {}),
+    ...(doc.approvalNote ? { approvalNote: String(doc.approvalNote) } : {}),
+    ...(doc.approvedBy ? { approvedBy: String(doc.approvedBy) } : {}),
+    ...(doc.approvedAt ? { approvedAt: new Date(doc.approvedAt as Date) } : {}),
     version: Number(doc.version ?? 1),
     ...(doc.createdBy ? { createdBy: String(doc.createdBy) } : {}),
     createdAt: doc.createdAt as Date,
@@ -232,6 +267,7 @@ function buildQuotationFilter(query: ListQuotationsQuery): FilterQuery<IQuotatio
   const filter: Record<string, unknown> = {};
   if (query.customerId) filter.customerId = new Types.ObjectId(query.customerId);
   if (query.status && query.status !== 'all') filter.status = query.status;
+  if (query.approvalStatus && query.approvalStatus !== 'all') filter.approvalStatus = query.approvalStatus;
   if (query.currency) filter.currency = query.currency;
   if (query.search) {
     const regex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -347,9 +383,19 @@ export async function createQuotation(
       quotationNo,
       customerId: customer._id,
       title: input.title,
-      items,
+      items: items.map((it) => ({
+        ...it,
+        ...(it.productId ? { productId: new Types.ObjectId(it.productId) } : {}),
+      })),
       currency: input.currency,
       totalAmount,
+      ...(input.incoterm ? { incoterm: input.incoterm } : {}),
+      ...(input.shippingMethod ? { shippingMethod: input.shippingMethod } : {}),
+      ...(input.destinationPort ? { destinationPort: input.destinationPort } : {}),
+      ...(input.estimatedFreight !== undefined ? {
+        estimatedFreight: roundMoney(input.estimatedFreight),
+        grandTotal: roundMoney(totalAmount + input.estimatedFreight),
+      } : {}),
       validityDate: input.validityDate,
       paymentTerms: input.paymentTerms,
       leadTime: input.leadTime,
@@ -389,6 +435,10 @@ export async function updateQuotation(
   if (input.title !== undefined) patch.title = input.title;
   if (input.currency !== undefined) patch.currency = input.currency;
   if (input.paymentTerms !== undefined) patch.paymentTerms = input.paymentTerms;
+  if (input.incoterm !== undefined) patch.incoterm = input.incoterm;
+  if (input.shippingMethod !== undefined) patch.shippingMethod = input.shippingMethod;
+  if (input.destinationPort !== undefined) patch.destinationPort = input.destinationPort;
+  if (input.estimatedFreight !== undefined) patch.estimatedFreight = roundMoney(input.estimatedFreight);
   if (input.leadTime !== undefined) patch.leadTime = input.leadTime;
   if (input.moq !== undefined) patch.moq = input.moq;
   if (input.notes !== undefined) patch.notes = input.notes;
@@ -398,8 +448,14 @@ export async function updateQuotation(
   // 明细变更 → 后端重算每行金额与总金额（findOneAndUpdate 不触发模型钩子，故此处必须显式计算）
   if (input.items !== undefined) {
     const { items, totalAmount } = computeQuotationTotals(input.items);
-    patch.items = items;
+    patch.items = items.map((it) => ({
+      ...it,
+      ...(it.productId ? { productId: new Types.ObjectId(it.productId) } : {}),
+    }));
     patch.totalAmount = totalAmount;
+    if (input.estimatedFreight !== undefined) {
+      patch.grandTotal = roundMoney(totalAmount + input.estimatedFreight);
+    }
   }
   if (input.quotationNo !== undefined) {
     patch.quotationNo = await resolveQuotationNo(input.quotationNo, quotationId, actor);
@@ -479,4 +535,150 @@ export async function deleteQuotation(
 
   logger.info(`删除报价单: customer=${customerId} quotation=${quotationId}`);
   return { id: quotationId, deleted: deletedCount ?? 0 };
+}
+
+/* ------------------------------------------------------------------ */
+/* 工作台聚合：状态 KPI / 同款历史报价参考 / 内部审批流                 */
+/* ------------------------------------------------------------------ */
+
+export async function getQuotationSummary(actor?: AuthUser): Promise<{
+  total: number;
+  draft: number;
+  sent: number;
+  negotiating: number;
+  accepted: number;
+  pendingApproval: number;
+  acceptedAmount: number;
+  activePipelineAmount: number;
+}> {
+  const filter = await customerRefScope(actor);
+  const docs = await Quotation.find(filter)
+    .select('status approvalStatus totalAmount grandTotal')
+    .lean();
+  let draft = 0;
+  let sent = 0;
+  let negotiating = 0;
+  let accepted = 0;
+  let pendingApproval = 0;
+  let acceptedAmount = 0;
+  let activePipelineAmount = 0;
+  for (const d of docs) {
+    const amt = typeof d.grandTotal === 'number' ? d.grandTotal : Number(d.totalAmount ?? 0);
+    if (d.status === 'draft') draft += 1;
+    else if (d.status === 'sent') { sent += 1; activePipelineAmount += amt; }
+    else if (d.status === 'negotiating') { negotiating += 1; activePipelineAmount += amt; }
+    else if (d.status === 'accepted') { accepted += 1; acceptedAmount += amt; }
+    if (d.approvalStatus === 'pending_approval') pendingApproval += 1;
+  }
+  return {
+    total: docs.length,
+    draft,
+    sent,
+    negotiating,
+    accepted,
+    pendingApproval,
+    acceptedAmount: roundMoney(acceptedAmount),
+    activePipelineAmount: roundMoney(activePipelineAmount),
+  };
+}
+
+export interface ProductHistoricalQuoteRef {
+  quotationId: string;
+  quotationNo: string;
+  customerName: string;
+  customerCountry?: string;
+  productName: string;
+  sku?: string;
+  quantity: number;
+  unitPrice: number;
+  currency: QuotationCurrency;
+  status: QuotationStatus;
+  createdAt: Date;
+}
+
+export async function listProductHistoricalQuotes(
+  query: string,
+  actor?: AuthUser,
+  limit = 6,
+): Promise<ProductHistoricalQuoteRef[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const rx = new RegExp(escapeRegExp(q), 'i');
+  const filter = {
+    $and: [
+      await customerRefScope(actor),
+      {
+        $or: [
+          { 'items.productName': rx },
+          { 'items.sku': rx },
+          { 'items.model': rx },
+        ],
+      },
+    ],
+  };
+  const docs = await Quotation.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(30)
+    .populate('customerId', 'name company country')
+    .lean();
+  const refs: ProductHistoricalQuoteRef[] = [];
+  for (const doc of docs) {
+    const cust = doc.customerId as unknown as { name?: string; company?: string; country?: string } | null;
+    for (const item of doc.items ?? []) {
+      if (rx.test(item.productName) || (item.sku && rx.test(item.sku)) || (item.model && rx.test(item.model))) {
+        refs.push({
+          quotationId: String(doc._id),
+          quotationNo: doc.quotationNo,
+          customerName: cust?.company || cust?.name || '客户',
+          customerCountry: cust?.country,
+          productName: item.productName,
+          sku: item.sku,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          currency: doc.currency,
+          status: doc.status,
+          createdAt: doc.createdAt,
+        });
+        if (refs.length >= limit) return refs;
+      }
+    }
+  }
+  return refs;
+}
+
+export async function submitQuotationApproval(id: string, note: string | undefined, actor: AuthUser): Promise<QuotationDto> {
+  if (!Types.ObjectId.isValid(id)) throw ApiError.badRequest('报价单 ID 格式不正确');
+  const existing = await Quotation.findOne({ _id: id, ...projectScope(actor) })
+    .populate('customerId', 'ownerId projectId');
+  if (!existing) throw ApiError.notFound('报价单不存在或无权访问');
+  const cust = existing.customerId as unknown as { ownerId?: unknown } | null;
+  assertCustomerAccess(actor, cust?.ownerId, existing.projectId);
+
+  existing.approvalStatus = 'pending_approval';
+  if (note !== undefined) existing.approvalNote = note.trim();
+  existing.version = (existing.version ?? 1) + 1;
+  await existing.save();
+  return toDto(existing);
+}
+
+export async function reviewQuotationApproval(
+  id: string,
+  decision: 'approved' | 'rejected',
+  note: string | undefined,
+  actor: AuthUser,
+): Promise<QuotationDto> {
+  if (!isProjectManager(actor)) {
+    throw ApiError.forbidden('仅管理员或项目管理员可审批报价单');
+  }
+  if (!Types.ObjectId.isValid(id)) throw ApiError.badRequest('报价单 ID 格式不正确');
+  const existing = await Quotation.findOne({ _id: id, ...projectScope(actor) });
+  if (!existing) throw ApiError.notFound('报价单不存在或无权访问');
+
+  existing.approvalStatus = decision;
+  if (note !== undefined) existing.approvalNote = note.trim();
+  existing.approvedBy = new Types.ObjectId(actor.id);
+  existing.approvedAt = new Date();
+  existing.version = (existing.version ?? 1) + 1;
+  await existing.save();
+  return toDto(existing);
 }

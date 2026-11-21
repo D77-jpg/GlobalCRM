@@ -74,7 +74,8 @@
     "test:webhooks": "node --require ./tests/isolated-env.cjs --require ./tests/os-user-info.cjs --import tsx --test tests/integration-webhooks.test.ts",
     "test:webhooks-ui": "node --require ./tests/isolated-env.cjs --require ./tests/os-user-info.cjs --import tsx --test tests/integration-webhooks-ui.test.ts",
     "test:oauth": "node --require ./tests/isolated-env.cjs --require ./tests/os-user-info.cjs --import tsx --test tests/oauth.test.ts",
-    "test:oauth-ui": "node --require ./tests/isolated-env.cjs --require ./tests/os-user-info.cjs --import tsx --test tests/oauth-ui.test.ts"
+    "test:oauth-ui": "node --require ./tests/isolated-env.cjs --require ./tests/os-user-info.cjs --import tsx --test tests/oauth-ui.test.ts",
+    "test:workbench": "node --require ./tests/isolated-env.cjs --require ./tests/os-user-info.cjs --import tsx --test tests/workbench-guardrails.test.ts tests/workbench-quotations-rfq.test.ts tests/workbench-copilot-analytics.test.ts tests/channels-omnichannel.test.ts"
   },
   "dependencies": {
     "@embedpdf/fonts-sc": "^1.0.0",

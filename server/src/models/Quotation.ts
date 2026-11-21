@@ -17,10 +17,20 @@ import { QUOTATION_CURRENCY, QUOTATION_STATUS, type QuotationCurrency, type Quot
 
 /** 报价明细行（嵌入子文档，不含独立 _id） */
 export interface IQuotationItem {
+  /** 可选关联产品目录 ID */
+  productId?: Types.ObjectId;
+  /** 可选产品 SKU */
+  sku?: string;
   /** 产品名称（必填） */
   productName: string;
   /** 产品型号 / 规格（可空） */
   model?: string;
+  /** 颜色 / 尺码等变体说明 */
+  colorSpec?: string;
+  /** 行级起订量说明 */
+  moq?: string;
+  /** 非标核价状态：approved 已批准报价行 / pending 待核算员核价 */
+  pricingStatus?: 'approved' | 'pending';
   /** 数量 */
   quantity: number;
   /** 单价 */
@@ -42,6 +52,10 @@ export interface IQuotationProposalTrace {
   sources: IQuotationProposalSource[];
 }
 
+export type QuotationIncoterm = 'EXW' | 'FOB' | 'CIF' | 'CFR' | 'DDP' | 'DDU' | 'DAP';
+export type QuotationShippingMethod = 'sea' | 'air' | 'express' | 'rail' | 'other';
+export type QuotationApprovalStatus = 'none' | 'pending_approval' | 'approved' | 'rejected';
+
 export interface IQuotation {
   globalSiteSentAt?: Date;
   projectId: Types.ObjectId;
@@ -57,6 +71,16 @@ export interface IQuotation {
   currency: QuotationCurrency;
   /** 报价总金额（后端计算：各行金额之和） */
   totalAmount: number;
+  /** 贸易条款（FOB/CIF/DDP 等） */
+  incoterm?: QuotationIncoterm;
+  /** 运输方式 */
+  shippingMethod?: QuotationShippingMethod;
+  /** 目的港 / 目的地 */
+  destinationPort?: string;
+  /** 预估运费 */
+  estimatedFreight?: number;
+  /** 含预估运费的报价总额 */
+  grandTotal?: number;
   /** 报价有效期（可空） */
   validityDate?: Date;
   /** 付款方式（可空，自由文本，如 "30% deposit, 70% before shipment"） */
@@ -69,6 +93,11 @@ export interface IQuotation {
   notes?: string;
   /** 状态：draft / sent / negotiating / accepted / rejected / expired */
   status: QuotationStatus;
+  /** 内部审批流状态 */
+  approvalStatus?: QuotationApprovalStatus;
+  approvalNote?: string;
+  approvedBy?: Types.ObjectId;
+  approvedAt?: Date;
   /** 内容版本；每次修改递增，供稳定 PDF / ETag 使用 */
   version: number;
   /** AutoForceAI 建议来源审计（不参与金额计算） */
@@ -113,6 +142,8 @@ export function computeQuotationTotals<T extends AmountableItem>(
 
 const QuotationItemSchema = new Schema<IQuotationItem>(
   {
+    productId: { type: Schema.Types.ObjectId, ref: 'Product' },
+    sku: { type: String, trim: true, uppercase: true, maxlength: 80 },
     productName: {
       type: String,
       required: [true, '产品名称为必填项'],
@@ -120,6 +151,9 @@ const QuotationItemSchema = new Schema<IQuotationItem>(
       maxlength: [200, '产品名称不能超过 200 个字符'],
     },
     model: { type: String, trim: true, maxlength: 200 },
+    colorSpec: { type: String, trim: true, maxlength: 160 },
+    moq: { type: String, trim: true, maxlength: 120 },
+    pricingStatus: { type: String, enum: ['approved', 'pending'], default: 'approved' },
     quantity: {
       type: Number,
       required: [true, '数量为必填项'],
@@ -199,6 +233,11 @@ const QuotationSchema = new Schema<IQuotation>(
     },
     // totalAmount 由后端计算（pre-validate 钩子），这里只声明字段
     totalAmount: { type: Number, default: 0, min: [0, '报价总金额不能为负数'] },
+    incoterm: { type: String, enum: ['EXW', 'FOB', 'CIF', 'CFR', 'DDP', 'DDU', 'DAP'] },
+    shippingMethod: { type: String, enum: ['sea', 'air', 'express', 'rail', 'other'] },
+    destinationPort: { type: String, trim: true, maxlength: 160 },
+    estimatedFreight: { type: Number, min: 0 },
+    grandTotal: { type: Number, min: 0 },
     validityDate: { type: Date },
     paymentTerms: { type: String, trim: true, maxlength: 300 },
     leadTime: { type: String, trim: true, maxlength: 200 },
@@ -210,6 +249,15 @@ const QuotationSchema = new Schema<IQuotation>(
       default: 'draft',
       index: true,
     },
+    approvalStatus: {
+      type: String,
+      enum: ['none', 'pending_approval', 'approved', 'rejected'],
+      default: 'none',
+      index: true,
+    },
+    approvalNote: { type: String, trim: true, maxlength: 500 },
+    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    approvedAt: Date,
     version: { type: Number, default: 1, min: 1 },
     globalSiteSentAt: {type: Date, select: false},
     proposalTrace: { type: ProposalTraceSchema },
@@ -239,6 +287,7 @@ QuotationSchema.pre('validate', function recalcAmounts(next) {
     total += amount;
   }
   this.totalAmount = roundMoney(total);
+  this.grandTotal = roundMoney(this.totalAmount + (Number(this.estimatedFreight) || 0));
   next();
 });
 

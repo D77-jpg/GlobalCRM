@@ -91,6 +91,10 @@ export interface ICustomer {
   leadSource?: string;
   /** 跟进优先级：high / medium / low（与 grade 客户等级是不同维度，新客户默认 medium） */
   priority?: CustomerPriority;
+  /** 成交意向评分（0-100，支持规则或人工校准） */
+  intentScore?: number;
+  /** 轻量样品追踪状态 */
+  sampleStatus?: 'none' | 'requested' | 'making' | 'sent' | 'approved';
   /** 自定义标签 */
   tags: string[];
   /** 已发送开发信数量（反范式计数，随开发信增删同步维护） */
@@ -225,6 +229,8 @@ const CustomerSchema = new Schema<ICustomer, CustomerModel, ICustomerMethods>(
       default: 'medium',
       index: true,
     },
+    intentScore: { type: Number, min: 0, max: 100 },
+    sampleStatus: { type: String, enum: ['none', 'requested', 'making', 'sent', 'approved'], default: 'none' },
     tags: {
       type: [String],
       default: [],

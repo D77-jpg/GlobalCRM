@@ -11,9 +11,11 @@ export type QuoteCheckStatus='matched'|'catalog_missing'|'product_missing'|'quan
 export interface QuoteCheckItem{
   requestedName:string;
   requestedQuantity?:number;
-  product?:{id:string;sku:string;name:string;category?:string};
+  requestedUnitPrice?:number;
+  product?:{id:string;sku:string;name:string;category?:string;unitCost?:number;targetMarginPct?:number};
   tier?:{minQuantity:number;maxQuantity?:number;unitPrice:number;currency:string;moq?:string;leadTime?:string};
   quoted?:{quotationId:string;quotationNo:string;productName:string;quantity:number;unitPrice:number;currency:string;createdAt:Date};
+  margin?:{unitCost:number;proposedPrice:number;marginPct:number;targetMarginPct:number;belowTarget:boolean};
   status:QuoteCheckStatus;
   messages:string[];
 }
@@ -30,7 +32,7 @@ export interface QuoteCheckResult{
 export interface QuoteCheckInput{
   analysisId?:string;
   customerId?:string;
-  items?:{name:string;quantity?:number}[];
+  items?:{name:string;quantity?:number;unitPrice?:number}[];
 }
 
 function parseQuantity(text:string|undefined):number|undefined{
@@ -128,11 +130,26 @@ export async function checkQuote(input:QuoteCheckInput,actor:AuthUser):Promise<Q
     if(targetPrice&&targetPrice<tier.unitPrice){messages.push(`邮件提到的价格 ${targetPrice} 低于当前目录价 ${tier.unitPrice}，不能直接接受。`);if(status==='matched'||status==='review_required')status='below_catalog';}
     const moqText=product.moq||tier.moq;const moq=parseQuantity(moqText);
     if(moq&&request.quantity<moq){messages.push(`本次数量低于目录 MOQ ${moqText}，需先确认是否接受小单。`);if(status==='matched')status='review_required';}
+    const proposedPrice=typeof request.unitPrice==='number'&&request.unitPrice>0?request.unitPrice:(quotedValue?.unitPrice??tier.unitPrice);
+    let margin:QuoteCheckItem['margin'];
+    if(typeof product.unitCost==='number'&&product.unitCost>0&&proposedPrice>0){
+      const marginPct=Number((((proposedPrice-product.unitCost)/proposedPrice)*100).toFixed(1));
+      const targetMarginPct=product.targetMarginPct??20;
+      const belowTarget=marginPct<targetMarginPct;
+      margin={unitCost:product.unitCost,proposedPrice,marginPct,targetMarginPct,belowTarget};
+      if(belowTarget){
+        messages.push(`预计毛利率 ${marginPct}% 低于目标毛利率 ${targetMarginPct}%，建议调价或走审批。`);
+        if(status==='matched')status='review_required';
+      }
+    }
     return {
       requestedName:request.name,requestedQuantity:request.quantity,
-      product:{id:product.id,sku:product.sku,name:product.name,category:product.category},
+      ...(request.unitPrice!==undefined?{requestedUnitPrice:request.unitPrice}:{}),
+      product:{id:product.id,sku:product.sku,name:product.name,category:product.category,unitCost:product.unitCost,targetMarginPct:product.targetMarginPct},
       tier:{minQuantity:tier.minQuantity,maxQuantity:tier.maxQuantity,unitPrice:tier.unitPrice,currency:tier.currency,moq:tier.moq,leadTime:tier.leadTime},
-      ...(quotedValue?{quoted:quotedValue}:{}),status,
+      ...(quotedValue?{quoted:quotedValue}:{}),
+      ...(margin?{margin}:{}),
+      status,
       messages:messages.length?messages:['目录价、数量档与历史报价一致。'],
     };
   });

@@ -32,10 +32,18 @@ const quotationNoInputSchema = z
   .transform((v) => v.toUpperCase())
   .optional();
 
-/** 单行报价明细：只接收 productName / model / quantity / unitPrice（amount 由后端算） */
+const quotationIncotermSchema = z.enum(['EXW', 'FOB', 'CIF', 'CFR', 'DDP', 'DDU', 'DAP']);
+const quotationShippingSchema = z.enum(['sea', 'air', 'express', 'rail', 'other']);
+
+/** 单行报价明细：只接收 productName / model / quantity / unitPrice 等（amount 由后端算） */
 const quotationItemSchema = z.object({
+  productId: objectIdSchema.optional(),
+  sku: optionalText(80),
   productName: z.string().trim().min(1, '产品名称为必填项').max(200, '产品名称不能超过 200 个字符'),
   model: optionalText(200),
+  colorSpec: optionalText(160),
+  moq: optionalText(120),
+  pricingStatus: z.enum(['approved', 'pending']).optional(),
   quantity: z.coerce.number().positive('数量必须大于 0').max(1_000_000_000, '数量过大'),
   unitPrice: z.coerce.number().min(0, '单价不能为负数').max(1_000_000_000, '单价过大'),
 });
@@ -71,6 +79,10 @@ export const createQuotationSchema = z.object({
   currency: quotationCurrencySchema.default('USD'),
   /** 有效期（空串 / null / 不传均表示未设置） */
   validityDate: validityDateCreateSchema,
+  incoterm: quotationIncotermSchema.optional(),
+  shippingMethod: quotationShippingSchema.optional(),
+  destinationPort: optionalText(160),
+  estimatedFreight: z.coerce.number().min(0).max(1_000_000_000).optional(),
   paymentTerms: optionalText(300),
   leadTime: optionalText(200),
   moq: optionalText(120),
@@ -94,6 +106,10 @@ export const updateQuotationSchema = z
     items: quotationItemsSchema,
     currency: quotationCurrencySchema,
     validityDate: validityDateUpdateSchema,
+    incoterm: quotationIncotermSchema.optional(),
+    shippingMethod: quotationShippingSchema.optional(),
+    destinationPort: optionalText(160),
+    estimatedFreight: z.coerce.number().min(0).max(1_000_000_000).optional(),
     paymentTerms: optionalText(300),
     leadTime: optionalText(200),
     moq: optionalText(120),
@@ -117,7 +133,13 @@ export const listQuotationsQuerySchema = paginationQuerySchema.extend({
   /** 关键字：报价编号 / 标题 */
   search: z.string().trim().max(200).optional(),
   status: quotationStatusFilterSchema.optional(),
+  approvalStatus: z.enum(['all', 'none', 'pending_approval', 'approved', 'rejected']).optional(),
   currency: quotationCurrencySchema.optional(),
+});
+
+export const reviewQuotationApprovalSchema = z.object({
+  decision: z.enum(['approved', 'rejected']),
+  note: optionalText(500),
 });
 
 /** 路径参数：客户 id + 报价单 id（嵌套单条操作用） */

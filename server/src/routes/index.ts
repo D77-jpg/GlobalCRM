@@ -61,6 +61,8 @@ import organizationRoutes from './organization.routes';
 import platformRoutes from './platform.routes';
 import publicRoutes from './public.routes';
 import customsRoutes from './customs.routes';
+import workbenchRoutes from './workbench.routes';
+import { channelsRoutes, channelsWebhookRoutes } from './channels.routes';
 
 const router = Router();
 // Identity management has its own Cookie-only checks; no service credential fallback.
@@ -123,6 +125,8 @@ router.use('/auth', authRoutes);
 router.use('/tracking', trackingRoutes);
 // Public, signed one-click unsubscribe (no CRM session or project header).
 router.use('/unsubscribe', unsubscribeRoutes);
+// Public Meta WhatsApp Business Cloud API webhook (authenticated via verify_token / X-Hub-Signature-256).
+router.use('/channels', channelsWebhookRoutes);
 // Integration API v1：服务凭证认证（与用户 JWT 完全隔离），供 AutoForceAI 等系统集成。
 router.use('/integrations/v1', integrationRoutes);
 router.use('/organizations', organizationRoutes);
@@ -138,6 +142,8 @@ router.use('/products', requireAuth, requireProject, productRoutes);
 router.use('/customs', requireAuth, requireProject, customsRoutes);
 router.use('/templates', requireAuth, requireProject, templateRoutes);
 router.use('/scratchpad', requireAuth, requireProject, scratchpadRoutes);
+router.use('/workbench', requireAuth, requireProject, workbenchRoutes);
+router.use('/channels', requireAuth, requireProject, channelsRoutes);
 router.use('/agent', requireAuth, requireProject, agentRoutes);
 router.use('/knowledge-index', requireAuth, requireProject, knowledgeIndexRoutes);
 router.use('/knowledge-documents', requireAuth, requireProject, knowledgeDocumentRoutes);

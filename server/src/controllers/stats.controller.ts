@@ -12,7 +12,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/pagination';
 import { getCustomerStats } from '../services/customer.service';
 import { getLetterStats, listLetters } from '../services/letter.service';
-import { getSalesWorkspace } from '../services/stats.service';
+import { getDecisionAnalytics, getSalesWorkspace, type StatsRangePreset } from '../services/stats.service';
 import { getActiveChannel } from '../services/mailer.service';
 import { isDraining } from '../services/runtime-state';
 import { customerRefScope } from '../utils/access';
@@ -64,11 +64,19 @@ function processSnapshot() {
 export const overviewHandler = asyncHandler(async (req: Request, res: Response) => {
   // 复算一次 customerRefScope，避免同一仪表盘请求重复 3 次拉取可见客户 ID 列表
   const refScope = await customerRefScope(req.user);
-  const [customer, letter, recentResult, workspace] = await Promise.all([
+  const rawRange = typeof req.query.range === 'string' ? req.query.range : '30d';
+  const preset: StatsRangePreset = (['today', '7d', '30d', 'month', 'all', 'custom'] as const).includes(rawRange as StatsRangePreset)
+    ? (rawRange as StatsRangePreset)
+    : '30d';
+  const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+  const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+
+  const [customer, letter, recentResult, workspace, analytics] = await Promise.all([
     getCustomerStats(req.user),
     getLetterStats(req.user, refScope),
     listLetters(RECENT_LETTER_QUERY, req.user, { refScope }),
     getSalesWorkspace(req.user, refScope),
+    getDecisionAnalytics(req.user, refScope, { preset, from, to }),
   ]);
 
   const developmentRate = customer.total > 0 ? Number(((customer.developed / customer.total) * 100).toFixed(1)) : 0;
@@ -79,6 +87,7 @@ export const overviewHandler = asyncHandler(async (req: Request, res: Response) 
     developmentRate,
     recentLetters: recentResult.items,
     workspace,
+    analytics,
   });
 });
 

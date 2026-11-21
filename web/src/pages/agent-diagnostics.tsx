@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/common/page-header';
 import { ErrorState } from '@/components/common/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { GuardSelftestCard } from '@/components/workbench/guard-selftest-card';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, StatCard } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableSkeleton } from '@/components/ui/separator';
@@ -156,6 +157,8 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
           </CardContent>
         </Card>
       </div>
+
+      <GuardSelftestCard />
     </div>
   );
 }

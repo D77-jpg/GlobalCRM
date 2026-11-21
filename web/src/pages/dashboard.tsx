@@ -1,6 +1,10 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, RefreshCw, Sparkles, Target, Users } from 'lucide-react';
+import { ChevronDown, Globe2, ReceiptText, RefreshCw, Sparkles, Target, TrendingUp, Users } from 'lucide-react';
+import { CountryFlag } from '@/components/common/country-flag';
+import { Badge } from '@/components/ui/badge';
+import { customerDetailPath } from '@/constants';
+import { formatMoney } from '@/lib/format';
 import { PageHeader } from '@/components/common/page-header';
 import { ErrorState, InlineLoader } from '@/components/common/empty-state';
 import { SalesFunnel } from '@/components/dashboard/sales-funnel';
@@ -87,7 +91,8 @@ function TrendChart({ data }: { data: { _id: string; count: number }[] }): React
 export function DashboardPage(): React.JSX.Element {
   const { t, language } = useI18n();
   usePageTitle(t('dashboard.title'));
-  const { data, loading, error, run } = useOverviewStats();
+  const [range, setRange] = React.useState<'today' | '7d' | '30d' | 'month' | 'all'>('30d');
+  const { data, loading, error, run } = useOverviewStats(range);
   const mailChannel = useMetaStore(state => state.mailChannel);
   const project = useProjectStore(state => state.activeProject);
   const canManage = useAuthStore(selectCanManageProjects);
@@ -142,8 +147,23 @@ export function DashboardPage(): React.JSX.Element {
     <div className="workspace-page dashboard-page">
       <PageHeader title={t('dashboard.title')} description={`${project?.name || (language === 'zh' ? '当前项目' : 'Current project')} · ${date}`}
         actions={<>
+          <div className="inline-flex items-center rounded-md border border-border p-0.5 text-xs">
+            {([['today', '今日'], ['7d', '近7天'], ['30d', '近30天'], ['month', '本月'], ['all', '全部']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRange(key)}
+                className={cn('rounded px-2 py-1 transition-colors', range === key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Button variant="ghost" size="sm" onClick={() => void run()} loading={loading}>
             {!loading ? <RefreshCw className="h-3.5 w-3.5" aria-hidden /> : null}刷新
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={ROUTES.quotations}><ReceiptText className="h-4 w-4" aria-hidden />报价与 RFQ</Link>
           </Button>
           <Button variant="outline" size="sm" asChild>
             <Link to={ROUTES.prospecting}><Target className="h-4 w-4" aria-hidden />客户线索池</Link>
@@ -184,7 +204,104 @@ export function DashboardPage(): React.JSX.Element {
           </section>
           <SalesWorkspaceSection stats={data} />
 
-          <details className="dashboard-analysis panel group">
+          {data.analytics ? (
+            <section aria-label="转化与决策分析" className="grid gap-4 lg:grid-cols-3">
+              {/* Conversion Funnel */}
+              <div className="panel p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                      <TrendingUp className="h-4 w-4 text-primary" aria-hidden />询盘转化漏斗
+                    </h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      区间成交额 {formatMoney(data.analytics.quotationMetrics.acceptedAmount, 'USD')} · 在谈报价 {formatMoney(data.analytics.quotationMetrics.pipelineAmount, 'USD')}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-[10px]">高意向 {data.analytics.highIntentCount}</Badge>
+                </div>
+                <ul className="mt-4 space-y-2.5 text-xs">
+                  {data.analytics.conversionFunnel.map((step) => (
+                    <li key={step.stage}>
+                      <div className="mb-1 flex justify-between gap-2">
+                        <span className="font-medium text-foreground/85">{step.label}</span>
+                        <span className="tabular-nums text-muted-foreground">{step.count} · {step.rate}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-primary/70 transition-all" style={{ width: `${Math.max(step.count > 0 ? 4 : 0, step.rate)}%` }} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Country Distribution TOP 5 */}
+              <div className="panel p-4">
+                <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                  <Globe2 className="h-4 w-4 text-primary" aria-hidden />客户国家分布（TOP 5）
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">所选时间区间内客户来源市场分布</p>
+                {data.analytics.countryDistribution.length === 0 ? (
+                  <p className="py-8 text-center text-xs text-muted-foreground">当前区间暂无新增客户数据</p>
+                ) : (
+                  <ul className="mt-4 space-y-3 text-xs">
+                    {data.analytics.countryDistribution.map((c) => (
+                      <li key={c.country}>
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 truncate font-medium">
+                            {c.country !== '其他' && c.country !== '未填写' ? <CountryFlag value={c.country} /> : null}
+                            {c.country}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">{c.count} 位 · {c.pct}%</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full rounded-full bg-emerald-500/75" style={{ width: `${Math.max(4, c.pct)}%` }} />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Priority Follow-Up Suggestions */}
+              <div className="panel p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                      <Sparkles className="h-4 w-4 text-primary" aria-hidden />高优跟进建议
+                    </h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      综合未解决问题（{data.analytics.openQuestionsCount}）、逾期与报价进度排序
+                    </p>
+                  </div>
+                </div>
+                {data.analytics.priorityFollowUps.length === 0 ? (
+                  <p className="py-8 text-center text-xs text-muted-foreground">当前没有待推进的活跃客户</p>
+                ) : (
+                  <ul className="mt-3 divide-y divide-border text-xs">
+                    {data.analytics.priorityFollowUps.slice(0, 5).map((item, idx) => (
+                      <li key={item.customerId} className="py-2 first:pt-0 last:pb-0">
+                        <Link to={customerDetailPath(item.customerId)} className="group block">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="flex min-w-0 items-center gap-1.5 font-medium group-hover:text-primary">
+                              <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] font-bold text-primary">
+                                {idx + 1}
+                              </span>
+                              <CountryFlag value={item.country} />
+                              <span className="truncate">{item.company || item.name}</span>
+                            </span>
+                            <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] tabular-nums">{item.score}分</Badge>
+                          </div>
+                          <p className="mt-0.5 truncate pl-5 text-[11px] text-muted-foreground">{item.reason}</p>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+          ) : null}
+
+          <details open className="dashboard-analysis panel group">
             <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 sm:px-5">
               <h2 className="section-title">业务分析</h2>
               <span className="min-w-0 flex-1 text-xs text-muted-foreground">销售阶段、客户分布与发送趋势</span>

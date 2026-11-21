@@ -21,11 +21,17 @@ import {
   deleteQuotation,
   getCustomerQuotation,
   getQuotation,
+  getQuotationSummary,
   listCustomerQuotations,
+  listProductHistoricalQuotes,
   listQuotations,
+  reviewQuotationApproval,
+  submitQuotationApproval,
   updateQuotation,
   updateQuotationStatus,
 } from '../services/quotation.service';
+import { renderCrmQuotationPdf } from '../services/quotation-pdf.service';
+import { requireProjectId } from '../utils/access';
 import type {
   CreateQuotationInput,
   ListQuotationsQuery,
@@ -46,6 +52,39 @@ export const listQuotationsHandler = asyncHandler(async (req: Request, res: Resp
 export const getQuotationHandler = asyncHandler(async (req: Request, res: Response) => {
   const data = await getQuotation(req.params.id, req.user);
   sendSuccess(res, data);
+});
+
+/** GET /api/quotations/summary —— 报价工作台状态统计 KPI */
+export const getQuotationSummaryHandler = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await getQuotationSummary(req.user));
+});
+
+/** GET /api/quotations/history-by-product?q=... —— 同款/相似产品本项目历史报价参考 */
+export const listProductHistoricalQuotesHandler = asyncHandler(async (req: Request, res: Response) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  sendSuccess(res, await listProductHistoricalQuotes(q, req.user));
+});
+
+/** GET /api/quotations/:id/pdf —— 导出 PDF 报价单 */
+export const downloadQuotationPdfHandler = asyncHandler(async (req: Request, res: Response) => {
+  await getQuotation(req.params.id, req.user);
+  const projectId = String(requireProjectId(req.user));
+  const pdf = await renderCrmQuotationPdf({ projectId, quotationId: req.params.id });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('ETag', pdf.etag);
+  res.setHeader('Content-Disposition', `attachment; filename="${pdf.asciiFilename}"; filename*=UTF-8''${encodeURIComponent(pdf.filename)}`);
+  res.send(pdf.buffer);
+});
+
+/** POST /api/quotations/:id/submit-approval —— 提交内部核价审批 */
+export const submitQuotationApprovalHandler = asyncHandler(async (req: Request, res: Response) => {
+  const note = typeof req.body?.note === 'string' ? req.body.note : undefined;
+  sendSuccess(res, await submitQuotationApproval(req.params.id, note, req.user!));
+});
+
+/** POST /api/quotations/:id/review-approval —— 管理员审批/驳回报价单 */
+export const reviewQuotationApprovalHandler = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await reviewQuotationApproval(req.params.id, req.body.decision, req.body.note, req.user!));
 });
 
 /** POST /api/quotations —— customerId 必须在 body 中 */

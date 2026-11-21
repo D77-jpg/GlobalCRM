@@ -107,7 +107,9 @@ export function createApp(): Application {
     if (req.headers['access-control-request-private-network'] === 'true' && origin && isAllowedCorsOrigin(origin)) {
       res.setHeader('Access-Control-Allow-Private-Network', 'true');
     }
-    return req.path.startsWith('/api/tracking/') ? next() : crmCors(req, res, next);
+    return req.path.startsWith('/api/tracking/') || req.path.startsWith('/api/channels/whatsapp/webhook/')
+      ? next()
+      : crmCors(req, res, next);
   });
   app.use(compression());
 
@@ -117,10 +119,20 @@ export function createApp(): Application {
    */
   const largeBodyJson = express.json({ limit: '25mb' });
   const largeBodyUrl = express.urlencoded({ extended: true, limit: '25mb' });
+  const webhookBodyJson = express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  });
   const defaultBodyJson = express.json({ limit: '2mb' });
   const defaultBodyUrl = express.urlencoded({ extended: true, limit: '2mb' });
   const LARGE_BODY_ROUTE = /^\/api\/(?:customers\/import|customers\/[^/]+\/attachments|attachments|knowledge|customs\/import|prospecting\/import|projects|agent\/playbooks)/;
-  app.use((req, res, next) => (LARGE_BODY_ROUTE.test(req.path) ? largeBodyJson : defaultBodyJson)(req, res, next));
+  app.use((req, res, next) => (
+    req.path.startsWith('/api/channels/whatsapp/webhook/')
+      ? webhookBodyJson
+      : LARGE_BODY_ROUTE.test(req.path) ? largeBodyJson : defaultBodyJson
+  )(req, res, next));
   app.use((req, res, next) => (LARGE_BODY_ROUTE.test(req.path) ? largeBodyUrl : defaultBodyUrl)(req, res, next));
 
   /* ---------- 访问日志 ---------- */

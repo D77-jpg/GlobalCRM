@@ -108,6 +108,8 @@ const customerFields = {
   leadSource: optionalText(120),
   // 跟进优先级（更新时可不传表示保持原值）
   priority: customerPrioritySchema,
+  intentScore: z.coerce.number().min(0).max(100).optional(),
+  sampleStatus: z.enum(['none', 'requested', 'making', 'sent', 'approved']).optional(),
   // 更新时可以不传，表示保持原值
   tags: tagsSchema.optional(),
   ownerId: ownerInputSchema,

@@ -27,6 +27,7 @@ import { buildMailCustomerPlan, importMailCustomers } from '../services/mail-cus
 import { listOutreachFollowUps } from '../services/outreach-followup.service';
 
 import {inboundAgentScope} from '../services/agent/mail-access';
+import { translateLetter } from '../services/agent/translation.service';
 const router = Router();
 router.use(requireAuth);
 const idSchema = z.string().regex(/^[a-fA-F0-9]{24}$/);
@@ -168,6 +169,30 @@ router.get('/:id', validate({ params, query: z.object({ direction: z.enum(['inbo
   const customer = doc.customerId ? await getCustomerByIdOrThrow(String(doc.customerId), req.user) : null;
   sendSuccess(res, { mail, thread, customer });
 }));
+router.post('/:id/translate', validate({
+  params,
+  body: z.object({ direction: z.enum(['inbound', 'outbound']).default('inbound') }).default({ direction: 'inbound' }),
+}), asyncHandler(async (req, res) => {
+  const dir = req.body.direction as 'inbound' | 'outbound';
+  let subject = '';
+  let plain = '';
+  if (dir === 'outbound') {
+    const doc = await outgoing(req.params.id, req.user!);
+    subject = doc.subject || '';
+    plain = (doc.contentText || doc.content.replace(/<[^>]+>/g, ' ')).replace(/\s{3,}/g, '\n\n').trim();
+  } else {
+    const doc = await inbound(req.params.id, req.user!);
+    subject = doc.subject || '';
+    plain = (doc.text || doc.html.replace(/<[^>]+>/g, ' ')).replace(/\s{3,}/g, '\n\n').trim();
+  }
+  if (!plain) {
+    sendSuccess(res, { subject: subject || undefined, body: '（该邮件暂无可翻译正文）' });
+    return;
+  }
+  const translated = await translateLetter({ subject: subject || undefined, body: plain.slice(0, 6000) });
+  sendSuccess(res, translated);
+}));
+
 router.post('/:id/read', validate({ params, body: z.object({ read: z.boolean() }) }), asyncHandler(async (req, res) => {
   await inbound(req.params.id, req.user!);
   const change = req.body.read ? { $addToSet: { readBy: req.user!.id } } : { $pull: { readBy: req.user!.id } };

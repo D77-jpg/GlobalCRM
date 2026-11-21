@@ -29,6 +29,9 @@ export interface Product {
   priceTiers: ProductPriceTier[];
   moq?: string;
   leadTime?: string;
+  imageUrl?: string;
+  unitCost?: number;
+  targetMarginPct?: number;
   notes?: string;
   source?: string;
   effectiveFrom?: string | Date;
@@ -46,9 +49,11 @@ export interface ProductImportResult {
 export interface QuoteCheckItem {
   requestedName: string;
   requestedQuantity?: number;
-  product?: { id: string; sku: string; name: string; category?: string };
+  requestedUnitPrice?: number;
+  product?: { id: string; sku: string; name: string; category?: string; unitCost?: number; targetMarginPct?: number };
   tier?: { minQuantity: number; maxQuantity?: number; unitPrice: number; currency: string; moq?: string; leadTime?: string };
   quoted?: { quotationId: string; quotationNo: string; productName: string; quantity: number; unitPrice: number; currency: string; createdAt: string | Date };
+  margin?: { unitCost: number; proposedPrice: number; marginPct: number; targetMarginPct: number; belowTarget: boolean };
   status: 'matched' | 'catalog_missing' | 'product_missing' | 'quantity_missing' | 'price_mismatch' | 'below_catalog' | 'review_required';
   messages: string[];
 }

@@ -492,7 +492,7 @@ export class OpenAIResponsesProvider implements AgentProvider {
     const { body, status } = await this.postModel({
       model: this.config.model,
       store: false,
-      ...(request.outputFormat?{text:{format:request.outputFormat},...this.structuredOutputOptions()}:{}),
+      ...(request.outputFormat ? { text: { format: request.outputFormat }, ...this.structuredOutputOptions() } : {}),
       instructions: request.instructions,
       input: request.input,
       tools: request.tools,

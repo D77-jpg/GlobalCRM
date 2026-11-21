@@ -22,7 +22,27 @@ export const industryRuleSchema = z.object({
   priority: z.number().int().min(-100).max(100).optional(),
 }).strict();
 
+export const guardrailRedlineSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  pattern: z.string().trim().min(1).max(350),
+  message: z.string().trim().min(1).max(400),
+  severity: z.enum(['bad', 'warn']).default('bad'),
+  skipSegment: z.string().trim().max(20).optional(),
+  enabled: z.boolean().default(true),
+}).strict();
+
+export const writingRuleSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  text: z.string().trim().min(1).max(500),
+  enabled: z.boolean().default(true),
+  source: z.string().trim().max(120).optional(),
+}).strict();
+
 export const brandProfileSchema = z.object({
+  brandKey: z.enum(['genesis', 'ironhue', 'velaturo', 'general']).optional(),
+  pricingMode: z.enum(['catalog_tiered', 'costing_approved']).optional(),
+  guardrailRedlines: z.array(guardrailRedlineSchema).max(100).optional(),
+  teamWritingRules: z.array(writingRuleSchema).max(100).optional(),
   approvedActions: z.array(z.string().trim().min(1).max(400)).max(20).optional(),
   approvedOffers: z.array(approvedOfferSchema).max(30).optional(),
   industryRules: z.array(industryRuleSchema).max(100).optional(),
