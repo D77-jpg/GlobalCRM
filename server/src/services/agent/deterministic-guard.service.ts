@@ -24,6 +24,15 @@ export interface ApprovedQuoteRecord {
   }[];
 }
 
+export type WorkbenchReplyScenario =
+  | 'auto'
+  | 'inquiry'
+  | 'followup'
+  | 'sample_artwork'
+  | 'order_logistics'
+  | 'complaint'
+  | 'acknowledgement';
+
 export interface DeterministicGuardContext {
   brandKey?: string;
   policies?: Pick<IProjectPolicy, 'code' | 'topic' | 'valueZh' | 'valueEn' | 'external' | 'confirmed'>[];
@@ -40,6 +49,8 @@ export interface DeterministicGuardContext {
   signatureText?: string;
   lang?: string;
   destination?: string;
+  scenario?: WorkbenchReplyScenario;
+  isOngoingThread?: boolean;
 }
 
 export interface ReplyScoreResult {
@@ -701,30 +712,64 @@ export function composeDeterministicKbReply(ctx: DeterministicGuardContext): KbC
   const greetingName = ctx.contactName?.trim().split(/\s+/)[0] || [...names][0] || '';
   const bodyParts: string[] = [greetingName ? `Hi ${greetingName},` : 'Hello,', ''];
   const itemLines = extractItemLines(inbound);
-  if (itemLines.length >= 4) {
+  const isOngoing = Boolean(ctx.isOngoingThread)
+    || /^(?:re|fw|fwd|回复|答复)\s*[:：]/i.test((ctx.threadSubject || '').trim())
+    || Boolean(ctx.threadText && ctx.threadText.trim().length > 80 && /(?:Us:|Buyer:)/i.test(ctx.threadText));
+  const resolvedScenario: Exclude<WorkbenchReplyScenario, 'auto'> =
+    ctx.scenario && ctx.scenario !== 'auto'
+      ? ctx.scenario
+      : reqs.some((r) => r.group === 'complaint')
+        ? 'complaint'
+        : isOngoing
+          ? 'followup'
+          : 'inquiry';
+
+  if (itemLines.length >= 4 && (resolvedScenario === 'inquiry' || resolvedScenario === 'followup')) {
     bodyParts.push(`Thanks for sharing the detailed list (${itemLines.length} items: ${itemLines.join(', ')}). We will review each line and confirm what we manufacture directly so the quotation is clear item by item.`, '');
+  } else if (resolvedScenario === 'complaint') {
+    bodyParts.push('Thank you for bringing this to our attention and sharing the details. We are reviewing the issue carefully with our quality and production team.', '');
+  } else if (resolvedScenario === 'order_logistics') {
+    bodyParts.push('Thank you for your update regarding the order and shipment schedule.', '');
+  } else if (resolvedScenario === 'sample_artwork') {
+    bodyParts.push('Thank you for your feedback on the sample and artwork details.', '');
+  } else if (resolvedScenario === 'acknowledgement') {
+    bodyParts.push('Thank you for the update — noted on our side.', '');
+  } else if (resolvedScenario === 'followup') {
+    bodyParts.push('Thank you for your follow-up and the update.', '');
   } else {
     bodyParts.push('Thanks for reaching out with your inquiry.', '');
   }
-  if (paragraphs.length > 0) {
+
+  if (paragraphs.length > 0 && resolvedScenario !== 'acknowledgement') {
     bodyParts.push(paragraphs.join('\n\n'), '');
   }
-  if (uncovered.length > 0) {
+  if (uncovered.length > 0 && resolvedScenario !== 'acknowledgement') {
     bodyParts.push('I will check the remaining points in your message with our team and come back to you shortly.', '');
   }
 
+  const wantsQuote = resolvedScenario === 'inquiry'
+    || (resolvedScenario === 'followup' && /\b(quote|quotation|price|pricing|cost|offer)\b/i.test(inbound));
   const have = detectProvidedKinds(`${inbound}\n${ctx.threadText || ''}`);
   const missingPrompts: string[] = [];
   if (!have.has('size')) missingPrompts.push('the exact dimensions');
   if (!have.has('qty')) missingPrompts.push('the target quantity');
   if (!have.has('colour')) missingPrompts.push('the colour or PMS reference');
-  if (missingPrompts.length > 0 && !reqs.some((r) => r.group === 'complaint' || r.group === 'scope')) {
+
+  if (wantsQuote && missingPrompts.length > 0 && !reqs.some((r) => r.group === 'complaint' || r.group === 'scope')) {
     const joined = missingPrompts.length === 1
       ? missingPrompts[0]
       : `${missingPrompts.slice(0, -1).join(', ')} and ${missingPrompts[missingPrompts.length - 1]}`;
     bodyParts.push(`To prepare an accurate quotation, could you share ${joined}?`, '');
-  } else if (!reqs.some((r) => r.group === 'complaint' || r.group === 'scope')) {
+  } else if (wantsQuote && !reqs.some((r) => r.group === 'complaint' || r.group === 'scope')) {
     bodyParts.push('That gives us what we need to prepare the quotation for you.', '');
+  } else if (resolvedScenario === 'complaint') {
+    bodyParts.push('If convenient, please share photos and the affected quantity so our team can verify promptly and advise the next step.', '');
+  } else if (resolvedScenario === 'sample_artwork') {
+    bodyParts.push('Please let us know if you would like any adjustments before we move forward with the next sample or artwork step.', '');
+  } else if (resolvedScenario === 'order_logistics') {
+    bodyParts.push('We will keep you updated as soon as the next production or shipping milestone is confirmed.', '');
+  } else if (resolvedScenario === 'followup' || resolvedScenario === 'acknowledgement') {
+    bodyParts.push('Please let us know how you would like to proceed, and we will follow up right away.', '');
   }
 
   bodyParts.push((ctx.signatureText || 'Best regards,\nSales Team').trim());

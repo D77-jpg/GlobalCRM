@@ -181,6 +181,8 @@ router.post('/guardrails/check', validate({
   sendSuccess(res, { checks, score });
 }));
 
+const replyScenarioEnum = z.enum(['auto', 'inquiry', 'followup', 'sample_artwork', 'order_logistics', 'complaint', 'acknowledgement']);
+
 router.post('/guardrails/kb-compose', validate({
   body: z.object({
     inboundText: z.string().min(1).max(12000),
@@ -189,6 +191,7 @@ router.post('/guardrails/kb-compose', validate({
     channel: z.enum(['email', 'whatsapp', 'alibaba', 'trademanager', 'instagram', 'web', 'chat']).optional(),
     threadSubject: z.string().max(300).optional(),
     destination: z.string().max(160).optional(),
+    scenario: replyScenarioEnum.optional(),
   }),
 }), asyncHandler(async (req, res) => {
   const projectId = requireProjectId(req.user!);
@@ -206,6 +209,7 @@ router.post('/guardrails/kb-compose', validate({
     channel: req.body.channel ?? 'email',
     threadSubject: req.body.threadSubject,
     destination: req.body.destination,
+    scenario: req.body.scenario,
   });
   sendSuccess(res, composed);
 }));
@@ -278,6 +282,7 @@ router.post('/draft-inquiry', validate({
   body: z.object({
     customerId: z.string().regex(/^[a-fA-F0-9]{24}$/).optional(),
     channel: z.enum(['email', 'whatsapp', 'alibaba', 'trademanager', 'instagram', 'web', 'chat']).optional(),
+    scenario: replyScenarioEnum.optional(),
     subject: z.string().max(300).optional(),
     inboundText: z.string().trim().min(1).max(15000),
     threadText: z.string().max(15000).optional(),

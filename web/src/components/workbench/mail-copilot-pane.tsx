@@ -40,6 +40,17 @@ const TONE_OPTIONS = [
   { id: 'formal', label: '正式' },
 ] as const;
 
+const SCENARIO_OPTIONS = [
+  { id: 'auto', label: '自动判断' },
+  { id: 'followup', label: '常规跟进' },
+  { id: 'inquiry', label: '询盘报价' },
+  { id: 'sample_artwork', label: '样品工艺' },
+  { id: 'order_logistics', label: '大货物流' },
+  { id: 'complaint', label: '售后客诉' },
+  { id: 'acknowledgement', label: '简短确认' },
+] as const;
+
+type ReplyScenario = (typeof SCENARIO_OPTIONS)[number]['id'];
 type DraftKey = 'B' | 'A' | 'K';
 
 export function MailCopilotPane({
@@ -53,6 +64,7 @@ export function MailCopilotPane({
   onApplyReply,
 }: MailCopilotPaneProps): React.JSX.Element {
   const [channel, setChannel] = React.useState<'email' | 'whatsapp' | 'alibaba' | 'trademanager' | 'instagram'>('email');
+  const [scenario, setScenario] = React.useState<ReplyScenario>('auto');
   const [pasteSubject, setPasteSubject] = React.useState(initialSubject);
   const [pasteText, setPasteText] = React.useState(initialInbound);
   const [instruction, setInstruction] = React.useState('');
@@ -119,6 +131,7 @@ export function MailCopilotPane({
       const res = await apiPost<MultiChannelDraftResult>('/workbench/draft-inquiry', {
         customerId,
         channel: mode === 'mail' ? 'email' : channel,
+        scenario,
         subject: effectiveSubject,
         inboundText: body,
         threadText: mode === 'mail' ? threadText : undefined,
@@ -322,18 +335,37 @@ export function MailCopilotPane({
           </div>
         ) : null}
 
-        <Input
-          value={instruction}
-          onChange={(e) => setInstruction(e.target.value)}
-          placeholder="可选指示：例如“先不报运费，重点追问 PMS 色号和尺寸”"
-          className="h-8 text-xs"
-        />
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[11px] text-muted-foreground">场景：</span>
+            {SCENARIO_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setScenario(opt.id)}
+                className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                  scenario === opt.id
+                    ? 'border-primary bg-primary/10 font-medium text-primary'
+                    : 'border-border bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <Input
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            placeholder="可选指示：如“礼貌催上周报价反馈”或“告知大货下周出货并确认收货地址”"
+            className="h-8 text-xs"
+          />
+        </div>
 
         {!result ? (
           <div className="rounded-lg border border-dashed border-border p-4 text-center text-muted-foreground">
-            <p className="font-medium text-foreground">一键生成：AI 完整版 · AI 简洁版 · 知识库秒回</p>
+            <p className="font-medium text-foreground">支持询盘首回、多轮跟进、打样工艺、大货物流与客诉处理</p>
             <p className="mt-1 text-[11px] leading-relaxed">
-              自动对照本项目对外口径表与红线白名单打分（Alt+1/2/3 切换），绝不编造未批准金额或假附件。
+              一键生成 AI 完整版 · AI 简洁版 · 知识库秒回（Alt+1/2/3 切换），自动结合历史往来并对照对外口径与红线打分。
             </p>
           </div>
         ) : (

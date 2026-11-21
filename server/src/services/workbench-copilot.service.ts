@@ -33,6 +33,7 @@ import {
   type DeterministicGuardContext,
   type GuardCheckItem,
   type ReplyScoreResult,
+  type WorkbenchReplyScenario,
 } from './agent/deterministic-guard.service';
 import type { KnowledgeCategory } from './agent/knowledge-types';
 
@@ -195,6 +196,8 @@ async function buildGuardContextForProject(
     complaintLevel?: DeterministicGuardContext['complaintLevel'];
     threadSubject?: string;
     destination?: string;
+    scenario?: WorkbenchReplyScenario;
+    isOngoingThread?: boolean;
   },
 ): Promise<{
   ctx: DeterministicGuardContext;
@@ -259,6 +262,8 @@ async function buildGuardContextForProject(
     signatureText,
     lang: 'en',
     destination: params.destination,
+    scenario: params.scenario,
+    isOngoingThread: params.isOngoingThread,
   };
 
   const policiesText = policies.map((p) =>
@@ -516,10 +521,31 @@ export interface MultiChannelDraftResult {
   aiFallbackReason?: string;
 }
 
+const SCENARIO_DIRECTIVES: Record<WorkbenchReplyScenario, string> = {
+  auto: '根据【历史往来】和【当前来信】自动判断邮件所处阶段（首次询盘、报价跟进、打样与图稿确认、大货与物流同步、议价、售后客诉、日常确认等）。若是多轮往来（含 Re: 或历史记录），自然承接上下文，绝不把老会话写成首次询盘客套，也不硬要无关的尺寸/报价参数。',
+  inquiry: '场景：首次询盘与报价响应。逐项回应客户规格/MOQ/交期/工艺疑问，缺失报价关键参数时礼貌一次性问清。',
+  followup: '场景：常规跟进与推进。自然承接历史往来，推进下一步决策或礼貌了解反馈，不重复自我介绍。',
+  sample_artwork: '场景：样品、打样与图稿工艺确认。聚焦打样细节、色号/材质/版面修改与确认节点。',
+  order_logistics: '场景：大货生产、出货与物流跟进。聚焦排产进度、质检、单证、船期/快递追踪与收货确认。',
+  complaint: '场景：售后与客诉处理。先冷静共情、核实事实与证据（照片/批次/受损数量），不仓促认责或承诺未经批准的退款/补发。',
+  acknowledgement: '场景：简短确认与礼貌致谢。干练确认已收到信息并告知我方下一步动作，不做多余展开。',
+};
+
+const SCENARIO_DEFAULT_INTENT: Record<WorkbenchReplyScenario, string> = {
+  auto: '常规业务邮件回复与上下文跟进',
+  inquiry: '客户新询盘与报价条件咨询',
+  followup: '多轮业务跟进与下一步推进',
+  sample_artwork: '样品打样与图稿工艺确认',
+  order_logistics: '大货排产与出货物流同步',
+  complaint: '售后反馈与客诉核实处理',
+  acknowledgement: '已收到信息确认与简短致谢',
+};
+
 export async function draftMultiChannelInquiry(
   input: {
     customerId?: string;
     channel?: DeterministicGuardContext['channel'];
+    scenario?: WorkbenchReplyScenario;
     subject?: string;
     inboundText: string;
     threadText?: string;
@@ -532,8 +558,11 @@ export async function draftMultiChannelInquiry(
   },
   actor: AuthUser,
 ): Promise<MultiChannelDraftResult> {
+  const scenario: WorkbenchReplyScenario = input.scenario ?? 'auto';
   const cleanedInbound = cleanInboundText(input.inboundText);
   const cleanedThread = input.threadText ? cleanInboundText(input.threadText) : undefined;
+  const isOngoingThread = /^(?:re|fw|fwd|回复|答复)\s*[:：]/i.test((input.subject || '').trim())
+    || Boolean(cleanedThread && cleanedThread.includes('Us:') && cleanedThread.includes('Buyer:'));
   const attReadText = (input.inboundAttachments ?? [])
     .filter((a) => a.status === 'read' && a.text)
     .map((a) => `[附件 ${a.name}（已读）]\n${a.text!.slice(0, 6000)}`)
@@ -550,6 +579,8 @@ export async function draftMultiChannelInquiry(
     complaintLevel: input.complaintLevel,
     threadSubject: input.subject,
     destination: input.destination,
+    scenario,
+    isOngoingThread,
   });
 
   const scamSignals = detectScamSignals(cleanedInbound);
@@ -558,8 +589,10 @@ export async function draftMultiChannelInquiry(
   let fullSubject = kbDraft.subject;
   let fullBody = kbDraft.body;
   let shortBody = kbDraft.body;
-  let intentZh = '买家正在咨询产品规格、起订量或报价条件';
-  let summaryZh = '已根据项目对外口径与确定性护栏生成草稿，请核对红色/黄色提示后发送。';
+  let intentZh = scenario === 'auto'
+    ? (isOngoingThread ? '多轮业务往来跟进与细节推进' : '客户新询盘或业务咨询')
+    : SCENARIO_DEFAULT_INTENT[scenario];
+  let summaryZh = '已根据当前邮件上下文、项目对外口径与确定性护栏生成草稿，请核对提示后发送。';
   let openQuestions: MultiChannelDraftResult['analysis']['openQuestions'] = kbDraft.requests.map((r) => ({
     text: r.text,
     zh: r.text,
@@ -582,16 +615,17 @@ export async function draftMultiChannelInquiry(
         : '（无附件）';
       const turn = await provider.createTurn({
         instructions: [
-          '你是资深外贸业务总监。请根据项目的【对外口径表】和【已批准报价】撰写客户英文回复，严格遵守：',
+          '你是资深外贸业务总监，负责起草各类外贸客户往来邮件（包括但不限于首次询盘、报价跟进、打样/图稿确认、大货生产与物流、议价、售后客诉与日常简短确认）。请结合【历史往来】【对外口径表】和【已批准报价】撰写英文回复，严格遵守：',
+          `0. ${SCENARIO_DIRECTIVES[scenario]}`,
           '1. 只能引用“可对外=是”的口径数字；无批准报价时绝不写金额；无登记待发附件绝不写 attached/enclosed；不猜人名。',
           '2. 同时输出完整版 reply 和简洁版 reply_short（邮件 45-110 词，IM 60 词内），两版事实承诺一致，自然段不写电报体。',
-          '3. 如果来信明显是营销推广/系统通知/订阅邮件而非真实询盘，请在 intent_zh 和 summary_zh 中明确提醒业务员无需回复。',
+          '3. 如果来信明显是营销推广/系统通知/订阅邮件而非真实业务往来，请在 intent_zh 和 summary_zh 中明确提醒业务员无需回复。',
           '4. 严格输出符合 JSON Schema 的单个 JSON 对象，不要包含额外文字。',
         ].join('\n'),
         input: [{
           role: 'user',
           content: [
-            `渠道：${input.channel || 'email'}｜原主题：${input.subject || '（无）'}｜目的地：${input.destination || '未提供'}`,
+            `渠道：${input.channel || 'email'}｜场景：${scenario}｜是否多轮往来：${isOngoingThread ? '是' : '否'}｜原主题：${input.subject || '（无）'}｜目的地：${input.destination || '未提供'}`,
             `【对外口径表】\n${policiesText || '（无）'}`,
             writingRulesText ? `【团队写作规则】\n${writingRulesText}` : '',
             `【已批准报价】\n${approvedQuotesText}`,

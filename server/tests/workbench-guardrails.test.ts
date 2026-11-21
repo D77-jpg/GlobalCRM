@@ -162,4 +162,16 @@ test('multi-channel inquiry drafting produces K/B/A drafts, scam signals, and to
   assert.equal(learn.status, 200);
   assert.ok(learn.json.data.candidates.length >= 1);
   assert.equal(learn.json.data.adoptedCount, 1);
+
+  // Ongoing follow-up thread should NOT treat the customer as a first-time inquiry
+  const followupRes = await request('POST', '/workbench/draft-inquiry', {
+    channel: 'email',
+    scenario: 'auto',
+    subject: 'Re: Sample confirmation for black velvet pouch',
+    inboundText: 'Thanks! We received the sample yesterday and the logo looks great. Please let us know next steps.',
+    threadText: 'Us: We sent out the sample via DHL.\n\nBuyer: Thanks! We received the sample yesterday.',
+  });
+  assert.equal(followupRes.status, 200);
+  assert.ok(!followupRes.json.data.drafts.K.body.includes('reaching out with your inquiry'));
+  assert.ok(!followupRes.json.data.drafts.K.body.includes('prepare an accurate quotation'));
 });
