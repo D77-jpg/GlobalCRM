@@ -235,16 +235,85 @@ export function ProductsPage(): React.JSX.Element {
         <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">{isAdmin ? '可以手工新增，或下载 Excel 模板批量导入产品、规格和价格档。' : '请联系项目管理员维护产品目录后再做报价核对。'}</p>
         {isAdmin ? <div className="mt-4 flex flex-wrap justify-center gap-2"><Button size="sm" variant="outline" onClick={openImportDialog}><Upload className="h-3.5 w-3.5" />批量导入</Button><Button size="sm" onClick={() => setEditing(makeEmptyDraft())}><Plus className="h-3.5 w-3.5" />新增产品</Button></div> : null}
       </div> : <div className="overflow-x-auto">
-        <table className="w-full min-w-[880px] text-sm">
-          <thead className="bg-muted/40 text-left text-xs text-muted-foreground"><tr><th className="p-3 font-medium">SKU / 产品</th><th className="p-3 font-medium">规格</th><th className="p-3 font-medium">阶梯价</th><th className="p-3 font-medium">MOQ / 交期</th><th className="p-3 font-medium">更新时间</th><th className="p-3 text-right font-medium">操作</th></tr></thead>
-          <tbody>{products.map((product) => <tr key={product.id} className="border-t align-top">
-            <td className="p-3"><div className="flex items-center gap-2"><span className="font-mono text-xs font-semibold">{product.sku}</span><Badge variant={product.status === 'active' ? 'developed' : 'secondary'}>{product.status === 'active' ? '启用' : '已归档'}</Badge></div><div className="mt-1 font-medium">{product.name}</div>{product.category && <div className="mt-0.5 text-xs text-muted-foreground">{product.category}</div>}</td>
-            <td className="p-3"><div className="flex max-w-[280px] flex-wrap gap-1">{product.specs.length ? product.specs.slice(0, 6).map((spec) => <Badge key={`${spec.code}-${spec.value}`} variant="outline" title={`${spec.name}: ${spec.value}`}>{spec.name} · {spec.value}{spec.unit ? ` ${spec.unit}` : ''}</Badge>) : <span className="text-xs text-muted-foreground">未维护</span>}{product.specs.length > 6 && <span className="text-xs text-muted-foreground">+{product.specs.length - 6}</span>}</div></td>
-            <td className="p-3"><div className="max-w-[280px] text-xs leading-5">{priceSummary(product)}</div></td>
-            <td className="p-3 text-xs"><div>MOQ: {product.moq || '—'}</div><div className="text-muted-foreground">交期: {product.leadTime || '—'}</div></td>
-            <td className="p-3 text-xs text-muted-foreground">{formatDateTime(product.updatedAt)}</td>
-            <td className="p-3 text-right"><div className="flex justify-end gap-1">{isAdmin && <Button variant="ghost" size="sm" onClick={() => openProduct(product)}><Pencil className="h-3.5 w-3.5" />编辑</Button>}{isAdmin && product.status === 'active' && <Button variant="ghost" size="sm" onClick={() => void archive(product)}><Archive className="h-3.5 w-3.5" />归档</Button>}</div></td>
-          </tr>)}</tbody>
+        <table className="w-full min-w-[980px] table-fixed text-sm">
+          <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+            <tr>
+              <th className="w-[28%] p-3 font-medium">SKU / 产品</th>
+              <th className="w-[27%] p-3 font-medium">规格</th>
+              <th className="w-[15%] p-3 font-medium">阶梯价 / 参考</th>
+              <th className="w-[14%] p-3 font-medium">MOQ / 交期</th>
+              <th className="w-[9%] p-3 font-medium">更新时间</th>
+              <th className="w-[7%] p-3 text-right font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>{products.map((product) => {
+            const visibleSpecs = product.specs.filter((s) => s.code !== 'PRICE_RANGE');
+            const refRange = product.specs.find((s) => s.code === 'PRICE_RANGE')?.value;
+            return <tr key={product.id} className="border-t align-top">
+              <td className="p-3">
+                <div className="flex items-start gap-2.5">
+                  {product.imageUrl ? (
+                    <img
+                      src={product.imageUrl}
+                      alt={product.name}
+                      className="h-11 w-11 shrink-0 rounded-md border border-border object-cover bg-muted/30"
+                      loading="lazy"
+                    />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-xs font-semibold">{product.sku}</span>
+                      <Badge variant={product.status === 'active' ? 'developed' : 'secondary'}>{product.status === 'active' ? '启用' : '已归档'}</Badge>
+                    </div>
+                    <div className="mt-1 break-words text-[13px] font-medium leading-snug">{product.name}</div>
+                    {product.category && <div className="mt-0.5 text-xs text-muted-foreground">{product.category}</div>}
+                  </div>
+                </div>
+              </td>
+              <td className="p-3">
+                <div className="space-y-1 overflow-hidden">
+                  {visibleSpecs.length ? visibleSpecs.slice(0, 4).map((spec) => (
+                    <div
+                      key={`${spec.code}-${spec.value}`}
+                      title={`${spec.name}: ${spec.value}${spec.unit ? ` ${spec.unit}` : ''}`}
+                      className="truncate rounded border border-border/70 bg-muted/25 px-2 py-0.5 text-[11px] leading-5 text-foreground/90"
+                    >
+                      <span className="font-medium text-muted-foreground">{spec.name}：</span>
+                      <span>{spec.value}{spec.unit ? ` ${spec.unit}` : ''}</span>
+                    </div>
+                  )) : <span className="text-xs text-muted-foreground">未维护</span>}
+                  {visibleSpecs.length > 4 && (
+                    <div className="text-[11px] text-muted-foreground">+{visibleSpecs.length - 4} 项规格（点编辑查看）</div>
+                  )}
+                </div>
+              </td>
+              <td className="p-3">
+                <div className="break-words text-xs leading-5">
+                  {product.priceTiers.length > 0 ? (
+                    priceSummary(product)
+                  ) : refRange ? (
+                    <div className="space-y-0.5">
+                      <div className="font-medium text-foreground">按需核价</div>
+                      <div className="text-[11px] text-muted-foreground">{refRange}</div>
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">{priceSummary(product)}</span>
+                  )}
+                </div>
+              </td>
+              <td className="p-3 text-xs leading-5">
+                <div className="break-words font-medium">MOQ: {product.moq || '—'}</div>
+                <div className="mt-0.5 break-words text-[11px] text-muted-foreground">交期: {product.leadTime || '—'}</div>
+              </td>
+              <td className="p-3 text-[11px] text-muted-foreground tabular-nums">{formatDateTime(product.updatedAt)}</td>
+              <td className="p-3 text-right">
+                <div className="flex flex-col items-end gap-1">
+                  {isAdmin && <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openProduct(product)}><Pencil className="h-3.5 w-3.5" />编辑</Button>}
+                  {isAdmin && product.status === 'active' && <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => void archive(product)}><Archive className="h-3.5 w-3.5" />归档</Button>}
+                </div>
+              </td>
+            </tr>;
+          })}</tbody>
         </table>
       </div>}
     </div>
