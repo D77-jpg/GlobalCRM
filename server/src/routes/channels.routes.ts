@@ -17,6 +17,7 @@ import {
   updateChannelConversation,
   verifyWhatsAppWebhookChallenge,
 } from '../services/channels.service';
+import { syncAlibabaInquiriesFromMail } from '../services/alibaba-mail-ingest.service';
 
 const idParams = z.object({ id: z.string().regex(/^[a-fA-F0-9]{24}$/) });
 const channelEnum = z.enum(OMNICHANNEL_TYPES);
@@ -141,6 +142,15 @@ channelsRoutes.post('/conversations/:id/create-customer', validate({ params: idP
 
 channelsRoutes.post('/messages/:id/translate', validate({ params: idParams }), asyncHandler(async (req, res) => {
   sendSuccess(res, await translateChannelMessage(req.params.id, req.user!));
+}));
+
+channelsRoutes.post('/alibaba/sync-from-mail', validate({
+  body: z.object({
+    limit: z.number().int().min(1).max(500).optional(),
+  }).optional(),
+}), asyncHandler(async (req, res) => {
+  const limit = req.body && typeof req.body.limit === 'number' ? req.body.limit : undefined;
+  sendSuccess(res, await syncAlibabaInquiriesFromMail(req.user!, { limit }));
 }));
 
 export default channelsRoutes;
