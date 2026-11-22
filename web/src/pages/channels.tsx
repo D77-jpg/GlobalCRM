@@ -8,6 +8,7 @@ import {
   FileText,
   Languages,
   Loader2,
+  Mail,
   MessageSquare,
   MessageSquarePlus,
   RefreshCw,
@@ -100,6 +101,7 @@ export function ChannelsPage(): React.JSX.Element {
     whatsappConnected: false,
   });
   const [listLoading, setListLoading] = React.useState(false);
+  const [syncingAlibaba, setSyncingAlibaba] = React.useState(false);
 
   const [channelFilter, setChannelFilter] = React.useState<'all' | OmnichannelType>('all');
   const [tab, setTab] = React.useState<'all' | 'unread' | 'followup' | 'starred'>('all');
@@ -355,6 +357,31 @@ export function ChannelsPage(): React.JSX.Element {
     }
   };
 
+  const syncAlibabaFromMail = async () => {
+    setSyncingAlibaba(true);
+    try {
+      const res = await apiPost<{
+        scanned: number;
+        imported: number;
+        skipped: number;
+        conversationsTouched: number;
+      }>('/channels/alibaba/sync-from-mail', { limit: 200 });
+      if (res.imported > 0) {
+        toast.success(`已同步 ${res.imported} 条阿里询盘（归入 ${res.conversationsTouched} 个会话）`);
+        setChannelFilter('alibaba');
+      } else if (res.scanned > 0) {
+        toast.info(`已扫描 ${res.scanned} 封阿里通知邮件，全部询盘均已同步`);
+      } else {
+        toast.info('当前项目邮箱暂无阿里国际站询盘通知邮件');
+      }
+      await loadList();
+    } catch (e) {
+      toast.error(toErrorMessage(e, '同步阿里询盘邮件失败'));
+    } finally {
+      setSyncingAlibaba(false);
+    }
+  };
+
   const saveConfig = async () => {
     setSavingCfg(true);
     try {
@@ -437,6 +464,16 @@ export function ChannelsPage(): React.JSX.Element {
             </div>
           </div>
 
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300"
+            onClick={() => void syncAlibabaFromMail()}
+            disabled={syncingAlibaba}
+          >
+            {syncingAlibaba ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+            同步阿里询盘
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -625,6 +662,13 @@ export function ChannelsPage(): React.JSX.Element {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5">
+                  {detail.conversation.channel === 'alibaba' ? (
+                    <Button asChild variant="outline" size="sm" className="h-7 text-xs border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300">
+                      <a href="https://message.alibaba.com/" target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-3 w-3" />阿里消息中心
+                      </a>
+                    </Button>
+                  ) : null}
                   <Select
                     value={detail.conversation.status}
                     onValueChange={(v) => void patchConv({ status: v as ConversationStatus })}
