@@ -15,6 +15,7 @@ import { freshReplyText, htmlToPlainText } from '../utils/text';
 import { getProjectMailConfig } from './project-mail-config.service';
 import { getPersonalImapConfig, listPersonalImapConfigs, type PersonalImapConfig } from './mail-account.service';
 import { suppressEmail } from './mail-compliance.service';
+import { ingestAlibabaMailToChannel } from './alibaba-mail-ingest.service';
 
 const logger = createLogger('imap-sync');
 const addresses = (value?: AddressObject | AddressObject[]) => (value ? (Array.isArray(value) ? value : [value]).flatMap(a => a.value.map(v => (v.address || '').trim().toLowerCase()).filter(Boolean)) : []);
@@ -324,7 +325,9 @@ export async function importMail(source: Buffer, account?: string, projectId?: s
     if (!existing) throw error;
     doc = existing;
   }
-  return finishInboundCompliance(doc);
+  const completed = await finishInboundCompliance(doc);
+  await ingestAlibabaMailToChannel(completed).catch(() => undefined);
+  return completed;
 }
 
 const syncing = new Set<string>();

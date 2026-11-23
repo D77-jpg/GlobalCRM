@@ -270,3 +270,152 @@ test('manual multi-channel conversation logs bilingual bubbles, syncs FollowUp t
   const followUps = followUpRes.json.data.items ?? followUpRes.json.data ?? [];
   assert.ok(Array.isArray(followUps) && followUps.some((f: any) => String(f.content).includes('[Alibaba 我方回复]')));
 });
+
+test('Alibaba inquiry mail parser cleans boilerplate, skips Trade Assurance/promo notices, and syncs idempotently via HTTP', async () => {
+  const { parseAlibabaInquiryMail } = await import('../src/services/alibaba-mail-ingest.service');
+  const { MailMessage } = await import('../src/models/MailMessage');
+  const { runWithTenant } = await import('../src/models/tenant-context');
+
+  // 1. Standard inquiry email with header/footer boilerplate
+  const parsedStandard = parseAlibabaInquiryMail({
+    from: 'feedback@email.alibaba.com',
+    fromName: 'feedback@service.alibaba.com',
+    subject: '【Alibaba Inquiry Notification】Elena Vance from Canada has sent you an inquiry',
+    text: [
+      'Trade Center',
+      '重要提示 Notice',
+      '该买家隐藏了邮箱号码， 请勿直接回复该邮件！',
+      'Message Origin does not match Registered Location',
+      '【阿里巴巴提醒您】及时、专业的回复有助于买家再次与您沟通，提升交易机会！',
+      '立即回复',
+      'Elena Vance',
+      'Hi there, what is your MOQ for 8x10cm velvet jewelry pouches with gold foil logo?',
+      'Email Setting | Customer Services |',
+      'Alibaba.com Hong Kong Limited.',
+      '=={"feedbackid":"9900112233"}==',
+    ].join('\n'),
+  });
+  assert.ok(parsedStandard);
+  assert.equal(parsedStandard.buyerName, 'Elena Vance');
+  assert.equal(parsedStandard.buyerCountry, 'Canada');
+  assert.equal(parsedStandard.feedbackId, '9900112233');
+  assert.equal(
+    parsedStandard.messageText,
+    'Hi there, what is your MOQ for 8x10cm velvet jewelry pouches with gold foil logo?',
+  );
+
+  // 2. Trade Assurance and marketing emails must be skipped
+  assert.equal(
+    parseAlibabaInquiryMail({
+      from: 'credit@notice.alibaba.com',
+      subject: '【Alibaba.com】Trade Assurance order payment notice',
+      text: 'Your buyer has submitted payment.',
+    }),
+    null,
+  );
+  assert.equal(
+    parseAlibabaInquiryMail({
+      from: 'supplier@service.alibaba.com',
+      subject: '【阿里国际站】物流首单立减50元',
+      text: '推广活动通知',
+    }),
+    null,
+  );
+
+  // 3. Seed fictional MailMessage rows in Project A (2 follow-ups from same buyer + 2 skipped notices)
+  const { Project } = await import('../src/models');
+  const projA = await runWithTenant({ bypass: true, source: 'test-alibaba-seed' }, () =>
+    Project.findById(projectIdA).select('organizationId').lean(),
+  );
+  assert.ok(projA?.organizationId);
+
+  const now = Date.now();
+  await runWithTenant({ organizationId: String(projA.organizationId), source: 'test-alibaba-seed' }, async () => {
+    await MailMessage.create([
+      {
+        projectId: projectIdA,
+        visibility: 'project_shared',
+        dedupKey: 'test-ali-dedup-1',
+        threadId: 'test-ali-thread-1',
+        messageId: '<ali-msg-1@email.alibaba.com>',
+        subject: '【Alibaba Inquiry Notification】Elena Vance from Canada has sent you an inquiry',
+        normalizedSubject: 'alibaba inquiry notification elena vance',
+        from: 'feedback@email.alibaba.com',
+        fromName: 'feedback@service.alibaba.com',
+        to: ['sales@example.test'],
+        text: 'Trade Center\n立即回复\nElena Vance\nHi, can you quote 500 pcs custom cotton drawstring bags?\nAlibaba.com Hong Kong Limited.\n=={"feedbackid":"9900112233"}==',
+        sentAt: new Date(now - 60_000),
+      },
+      {
+        projectId: projectIdA,
+        visibility: 'project_shared',
+        dedupKey: 'test-ali-dedup-2',
+        threadId: 'test-ali-thread-1',
+        messageId: '<ali-msg-2@email.alibaba.com>',
+        subject: '【Alibaba Notification】Elena Vance from Canada',
+        normalizedSubject: 'alibaba notification elena vance',
+        from: 'feedback@email.alibaba.com',
+        fromName: 'feedback@service.alibaba.com',
+        to: ['sales@example.test'],
+        text: 'Trade Center\n立即回复\nElena Vance\nSize is 12x15cm with black ribbon and gold logo.\nFAQ:\n1. 询盘标题变任务提醒\n=={"feedbackid":"9900112233"}==',
+        sentAt: new Date(now - 30_000),
+      },
+      {
+        projectId: projectIdA,
+        visibility: 'project_shared',
+        dedupKey: 'test-ali-dedup-3',
+        threadId: 'test-ali-thread-2',
+        messageId: '<ali-promo-1@service.alibaba.com>',
+        subject: '【阿里国际站】物流首单立减50元',
+        normalizedSubject: '物流首单立减50元',
+        from: 'supplier@service.alibaba.com',
+        to: ['sales@example.test'],
+        text: '活动提醒',
+        sentAt: new Date(now - 20_000),
+      },
+      {
+        projectId: projectIdA,
+        visibility: 'project_shared',
+        dedupKey: 'test-ali-dedup-4',
+        threadId: 'test-ali-thread-3',
+        messageId: '<ali-ta-1@notice.alibaba.com>',
+        subject: 'Trade Assurance Order Update',
+        normalizedSubject: 'trade assurance order update',
+        from: 'credit@notice.alibaba.com',
+        to: ['sales@example.test'],
+        text: 'Order paid',
+        sentAt: new Date(now - 10_000),
+      },
+    ]);
+  });
+
+  // 4. Trigger HTTP 1-click sync
+  const sync1 = await request('POST', '/channels/alibaba/sync-from-mail', { limit: 50 });
+  assert.equal(sync1.status, 200);
+  assert.equal(sync1.json.data.imported, 2);
+  assert.equal(sync1.json.data.conversationsTouched, 1);
+
+  // 5. Re-running sync is 100% idempotent
+  const sync2 = await request('POST', '/channels/alibaba/sync-from-mail', { limit: 50 });
+  assert.equal(sync2.status, 200);
+  assert.equal(sync2.json.data.imported, 0);
+
+  // 6. Verify Elena Vance conversation has both messages cleanly grouped in Project A, and invisible in Project B
+  const listA = await request('GET', '/channels/conversations?channel=alibaba&search=Elena');
+  assert.equal(listA.status, 200);
+  assert.equal(listA.json.data.items.length, 1);
+  const elenaConv = listA.json.data.items[0];
+  assert.equal(elenaConv.contactName, 'Elena Vance');
+  assert.equal(elenaConv.contactCountry, 'Canada');
+  assert.ok(elenaConv.tags.includes('Alibaba 询盘'));
+
+  const detail = await request('GET', `/channels/conversations/${elenaConv.id}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.json.data.messages.length, 2);
+  assert.equal(detail.json.data.messages[0].text, 'Hi, can you quote 500 pcs custom cotton drawstring bags?');
+  assert.equal(detail.json.data.messages[1].text, 'Size is 12x15cm with black ribbon and gold logo.');
+
+  const listB = await request('GET', '/channels/conversations?channel=alibaba&search=Elena', undefined, projectIdB);
+  assert.equal(listB.status, 200);
+  assert.equal(listB.json.data.items.length, 0);
+});
