@@ -1,6 +1,6 @@
 {
   "name": "globalcrm-web",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "private": true,
   "type": "module",
   "description": "GlobalCRM - Web (Vite + React 18 + TypeScript + Tailwind + shadcn/ui)",

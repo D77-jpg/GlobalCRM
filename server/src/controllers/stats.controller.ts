@@ -91,13 +91,15 @@ export const overviewHandler = asyncHandler(async (req: Request, res: Response) 
   });
 });
 
+const APP_VERSION = '2.7.0';
+
 /** 不依赖数据库的存活探针：容器重启循环不应因为 Mongo 慢查询误杀进程。 */
 export const liveHandler = (_req: Request, res: Response) => {
   sendSuccess(res, {
     status: 'ok',
     uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
-    version: '2.6.0',
+    version: APP_VERSION,
   });
 };
 
@@ -115,7 +117,7 @@ export const healthHandler = asyncHandler(async (_req: Request, res: Response) =
     checks: { database: { ok: database.ok, latencyMs: database.latencyMs }, draining },
     process: processSnapshot(),
     mailChannel: getActiveChannel(),
-    version: '2.6.0',
+    version: APP_VERSION,
   }, ready ? 200 : 503);
 });
 

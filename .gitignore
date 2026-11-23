@@ -55,6 +55,7 @@ tmp/
 # ---- Local business / customer data (real customer PII, never commit) ----
 Genesis-*.xlsx
 Monarc Jewellery*.md
+deploy-bundles/
 # Local UI evidence can contain customer names, emails, and phone numbers.
 docs/ui-refactor/screenshots/
 
