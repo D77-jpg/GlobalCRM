@@ -8,7 +8,9 @@ import { requireProjectId } from '../utils/access';
 import {
   auditLegacyOutreachCampaigns,
   controlOutreachEnrollment,
+  drainQueuedOutreachTasks,
   getOutreachAutomationOverview,
+  getOutreachEnrollmentDiagnostics,
   migrateLegacyOutreachModes,
   pauseOutreachAutomation,
   regenerateOutreachEnrollmentDraft,
@@ -122,6 +124,10 @@ router.post('/reverify-unverified', validate({
   sendSuccess(res, await reverifyUnverifiedOutreachDrafts(req.user!, { enrollmentIds }, targetUserId(req)));
 }));
 
+router.post('/drain-queued-tasks', asyncHandler(async (req, res) => {
+  sendSuccess(res, await drainQueuedOutreachTasks(req.user!, targetUserId(req)));
+}));
+
 for (const action of ['pause', 'resume'] as const) {
   router.post(`/enrollments/:id/${action}`, validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
     sendSuccess(res, await controlOutreachEnrollment(req.user!, req.params.id, action, targetUserId(req)));
@@ -130,6 +136,10 @@ for (const action of ['pause', 'resume'] as const) {
 
 router.post('/enrollments/:id/regenerate', validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
   sendSuccess(res, await regenerateOutreachEnrollmentDraft(req.user!, req.params.id, targetUserId(req)));
+}));
+
+router.get('/enrollments/:id/diagnostics', validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
+  sendSuccess(res, await getOutreachEnrollmentDiagnostics(req.user!, req.params.id, targetUserId(req)));
 }));
 
 export default router;

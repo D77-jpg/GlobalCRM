@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {AgentTask,type AgentTaskDocument} from '../../models/AgentTask';
 import {ApiError} from '../../utils/ApiError';
+import {agentFailure} from './agent-errors';
 export const workflowLabels:Record<string,string>={research_customer:'分析客户官网与经营线索',read_context:'读取授权往来',extract_requirements:'整理需求与已知信息',load_rules:'读取项目销售规则',retrieve_0:'检索业务依据',retrieve_1:'补查未回答问题',retrieve_2:'补查剩余依据',assess_evidence:'核对适用条件与缺口',generate_email:'生成邮件草稿',audit_claims:'逐项核对事实',handoff:'交给业务员审核'};
 export const workflowHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export interface EvidenceWorkflow {epoch:number;check:()=>Promise<unknown>;run<T>(key:string,input:unknown,action:()=>Promise<T>,options?:{cache?:boolean;tool?:string}):Promise<T>}
@@ -29,6 +30,6 @@ export function taskEvidenceWorkflow(task:AgentTaskDocument,token:string,check:(
    const result=await action();await check();const serialized=JSON.stringify(result);if(serialized.length>160000)throw new ApiError(413,'步骤证据超过单次保留范围，请缩小资料','PAYLOAD_TOO_LARGE');
    Object.assign(record,{state:'completed',completedAt:new Date().toISOString(),durationMs:elapsed(),payload:clone(result)});
    const saved=await AgentTask.updateOne(settlementFence,{$set:{workflowRecords:records},$inc:{version:1,workflowActiveMs:record.durationMs!-reservationMs}});if(!saved.matchedCount)throw Error('TASK_INTERRUPTED');return result;
-  }catch(error){record.state='failed';record.durationMs=elapsed();record.error='步骤未完成，结果未交付';delete record.payload;await AgentTask.updateOne(settlementFence,{$set:{workflowRecords:records},$inc:{version:1,workflowActiveMs:record.durationMs-reservationMs}});throw error;}
+  }catch(error){const failure=agentFailure(error);record.state='failed';record.durationMs=elapsed();record.error=failure.code||'步骤未完成，结果未交付';delete record.payload;await AgentTask.updateOne(settlementFence,{$set:{workflowRecords:records},$inc:{version:1,workflowActiveMs:record.durationMs-reservationMs}});throw error;}
  }};
 }

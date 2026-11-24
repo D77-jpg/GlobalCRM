@@ -322,25 +322,39 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
    attempts++;const transcript=await verifier.check({segments:parts,evidence}).catch(()=>verifier.check({segments:parts,evidence}));
    checks=checkSemanticResults(candidate,bundle,transcript,customer,options.previousOutreach,options.outreachStep??1);
     // A paragraph can mix a verified sentence with an unsupported one. Recheck
-    // its sentences only after the whole paragraph failed; a sentence is kept
-    // only when the verifier marks it supported and its quotes still validate.
-    if(checks.some(c=>c.status!=='supported'&&c.status!=='non_claim')){
-     const refined:ClaimCheck[]=[];
+    // its sentences in ONE batched verifier call on the final round only (never
+    // loop serially per paragraph on Round 0 when a whole-message rewrite is
+    // about to run anyway); a sentence is kept only when supported + valid quotes.
+    const isFinalRound = round === 1 || !verifier.rewrite;
+    if(isFinalRound && checks.some(c=>c.status!=='supported'&&c.status!=='non_claim')){
+     const batchParts:{id:string;text:string;block:number;parentId:string}[]=[];
+     const retryByParent=new Map<string,{id:string;text:string;block:number}[]>();
      for(const item of checks){
-      if(item.status==='supported'||item.status==='non_claim'){refined.push(item);continue;}
+      if(item.status==='supported'||item.status==='non_claim')continue;
       const pieces=sentenceSegments(item.text);
-      if(pieces.length<2){refined.push(item);continue;}
-      const retryParts=pieces.map((text,index)=>({id:`${item.id}retry${index}`,text,block:item.block}));
-      let retryTranscript:Awaited<ReturnType<SemanticVerifier['check']>>;
-      try{retryTranscript=await verifier.check({segments:retryParts,evidence});}catch{refined.push(item);continue;}
-      const local=retryParts.map(part=>{
-       const verdict=retryTranscript.find(x=>x.id===part.id);
-       if(!verdict)return {...part,status:'unverifiable' as const,sourceIds:[],reason:'句级核验未覆盖该句'};
-       return checkSemanticResults(part.text,bundle,[{...verdict,id:'s0'}],customer)[0];
-      });
-      if(local.some(c=>c.status==='supported'||c.status==='non_claim'))refined.push(...local);else refined.push(item);
+      if(pieces.length<2)continue;
+      const partsForItem=pieces.map((text,index)=>({id:`${item.id}retry${index}`,text,block:item.block??0}));
+      retryByParent.set(item.id,partsForItem);
+      for(const p of partsForItem)batchParts.push({...p,parentId:item.id});
      }
-     checks=refined;
+     if(batchParts.length && batchParts.length<=64){
+      let retryTranscript:Awaited<ReturnType<SemanticVerifier['check']>>|undefined;
+      try{retryTranscript=await verifier.check({segments:batchParts.map(({id,text})=>({id,text})),evidence});}catch{retryTranscript=undefined;}
+      if(retryTranscript){
+       const refined:ClaimCheck[]=[];
+       for(const item of checks){
+        const retryParts=retryByParent.get(item.id);
+        if(!retryParts){refined.push(item);continue;}
+        const local=retryParts.map(part=>{
+         const verdict=retryTranscript!.find(x=>x.id===part.id);
+         if(!verdict)return {...part,status:'unverifiable' as const,sourceIds:[],reason:'句级核验未覆盖该句'};
+         return checkSemanticResults(part.text,bundle,[{...verdict,id:'s0'}],customer)[0];
+        });
+        if(local.some(c=>c.status==='supported'||c.status==='non_claim'))refined.push(...local);else refined.push(item);
+       }
+       checks=refined;
+      }
+     }
     }
    // Unsupported facts stay unsupported, regardless of vocabulary or numbers.
    // Greetings and closed information requests are the only non-claim exemptions.
