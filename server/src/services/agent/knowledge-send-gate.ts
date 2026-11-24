@@ -1,4 +1,6 @@
 import type { ProjectApprovedOffer } from '../../models/Project';
+import type { LetterSignature } from '../letter-signature';
+import { splitSignatureText } from '../letter-signature';
 import type {KnowledgeReview} from './knowledge-types';
 import {
   detectCrossEmailRepetition,
@@ -15,7 +17,7 @@ const BLOCKING_REVIEW_CODES = new Set([
   'access_changed',
 ]);
 
-const HIGH_RISK_CLAIM = /\b(?:price|pricing|discount|free(?![\s-]+weights?)|sample|shipping|freight|payment|deposit|stock|exclusive|guarantee(?:d)?|certif(?:ied|icate)|legal|contract)\b|价格|报价|折扣|免费|样品|运费|付款|定金|库存|独家|保证|认证|合同|法律/i;
+const HIGH_RISK_CLAIM = /\b(?:price|pricing|discount|sample|shipping|freight|payment|deposit|stock|exclusive|guarantee(?:d)?|certif(?:ied|icate)|legal|contract)\b|(?<!\bfeel\s+)\bfree(?![\s-]+weights?)\b|价格|报价|折扣|免费|样品|运费|付款|定金|库存|独家|保证|认证|合同|法律/i;
 
 export function knowledgeReviewRequiresApproval(review?:KnowledgeReview):boolean{
  if(!review)return false;
@@ -47,6 +49,7 @@ export interface AutomatedReviewOptions {
   bodyText?: string;
   subject?: string;
   approvedOffers?: ProjectApprovedOffer[];
+  signature?: LetterSignature;
   sparseInfo?: boolean;
   enforceWordFloor?: boolean;
 }
@@ -72,7 +75,8 @@ export function automatedReviewIssue(
   const questions = review.factAudit.checks.flatMap(check => check.text.match(/[?？]/g) ?? []);
   if (questions.length !== 1) return '本封开发信应保留一个明确的回复问题';
  }
- const combinedText = options?.bodyText?.trim() || review.factAudit.checks.map(check => check.text).join('\n\n');
+ const rawCombinedText = options?.bodyText?.trim() || review.factAudit.checks.map(check => check.text).join('\n\n');
+ const combinedText = options?.signature ? splitSignatureText(rawCombinedText, options.signature).body : rawCombinedText;
  const quality = evaluateOutreachDraftQuality({
   bodyText: combinedText,
   subject: options?.subject,

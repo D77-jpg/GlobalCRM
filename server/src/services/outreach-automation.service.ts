@@ -30,7 +30,7 @@ import {
   hasInboundReplySince,
   syncOutreachFollowUps,
 } from './outreach-followup.service';
-import type { OutreachStep } from './project-profile';
+import { resolveProjectSalesProfile, type OutreachStep } from './project-profile';
 
 const logger = createLogger('outreach-automation');
 const AUTO_TARGET_STATUSES = ['pending', 'contacted'] as const;
@@ -62,6 +62,12 @@ export function isCircuitFailedEnrollmentReason(lastError?: string | null): bool
   if (!lastError) return false;
   if (/状态异常|占位符|SMTP|发件箱/.test(lastError)) return false;
   return /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i.test(lastError);
+}
+
+export function isAiUpstreamFailedEnrollmentReason(lastError?: string | null): boolean {
+  if (!lastError) return false;
+  if (/状态异常|占位符|SMTP|发件箱/.test(lastError)) return false;
+  return /AI\s*(?:任务|上游|请求|通道)|OPENAI_|HTTP\s*5\d\d|HTTP\s*429|TASK_WORKFLOW_LIMIT|超时|熔断|并发队列已满/i.test(lastError);
 }
 
 const FACT_AUDIT_FAILURE_CATEGORY_LABELS: Record<FactAuditFailureCategory, string> = {
@@ -342,6 +348,7 @@ export interface OutreachAutomationOverview {
     blocked: number;
     failed: number;
     circuitFailed: number;
+    aiFailed: number;
     unverifiedDrafts: number;
     exceptionQueueCount: number;
     approvedProofBlocksCount: number;
@@ -703,7 +710,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
         status: { $in: ['draft', 'queued', 'scheduled', 'sending', 'retrying'] },
       })
         .sort({ createdAt: -1 })
-        .select('_id customerId outreachStep status needsReview review knowledgeReview updatedAt createdAt')
+        .select('_id customerId outreachStep status subject contentText needsReview review knowledgeReview updatedAt createdAt')
         .lean()
       : Promise.resolve([]),
     queueCustomerIds.length
@@ -765,8 +772,20 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     status: 'failed',
     lastError: { $regex: /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i },
   });
-  const projectDoc = await Project.findById(config.projectId).select('brandProfile.approvedProofBlocks').lean();
+  const aiFailedCount = await OutreachAutomationEnrollment.countDocuments({
+    ...projectFilter,
+    status: 'failed',
+    lastError: {
+      $regex: /AI\s*(?:任务|上游|请求|通道)|OPENAI_|HTTP\s*5\d\d|HTTP\s*429|TASK_WORKFLOW_LIMIT|超时|熔断|并发队列已满/i,
+      $not: /状态异常|占位符|SMTP|发件箱/,
+    },
+  });
+  const projectDoc = await Project.findById(config.projectId)
+    .select('code slug name companyName industry website mailFrom senderName brandProfile')
+    .lean();
   const approvedProofBlocksCount = (projectDoc?.brandProfile?.approvedProofBlocks ?? []).filter((b) => b.enabled && b.text?.trim()).length;
+  const projectSignature = resolveProjectSalesProfile(projectDoc).signature;
+  const projectApprovedOffers = projectDoc?.brandProfile?.approvedOffers;
 
   let unverifiedDrafts = 0;
   const queueRows: OutreachAutomationQueueRow[] = rows.map((row) => {
@@ -783,14 +802,23 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const key = `${String(row.customerId)}:${nextStep}`;
     const nextLetter = queueLetterMap.get(key);
     const nextLetterStatus = nextLetter ? String(nextLetter.status) : undefined;
-    const draftReady = nextLetterStatus === 'draft';
     const audit = row.status !== 'completed' && actualStep < MAX_AUTO_STEPS
       ? inspectOutreachDraftAudit(nextLetter)
       : { needsReverify: false };
+    const rowSendGateIssue = row.status !== 'completed' && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'draft' && !audit.needsReverify
+      ? automatedReviewIssue(nextLetter?.knowledgeReview, nextLetter?.outreachStep, {
+        bodyText: nextLetter?.contentText,
+        subject: nextLetter?.subject,
+        approvedOffers: projectApprovedOffers,
+        signature: projectSignature,
+      })
+      : undefined;
+    const draftBlockedFromAutoSend = audit.needsReverify || Boolean(rowSendGateIssue);
+    const draftReady = nextLetterStatus === 'draft' && !draftBlockedFromAutoSend;
     const latestTask = queueTaskMap.get(key);
     const taskStatus = latestTask ? String(latestTask.status) : undefined;
     const taskInFlight = taskStatus === 'queued' || taskStatus === 'running';
-    if (audit.needsReverify && !taskInFlight) unverifiedDrafts += 1;
+    if (draftBlockedFromAutoSend && !taskInFlight) unverifiedDrafts += 1;
 
     const buyerSchedule = config.useBuyerTimezone || customer?.timezone
       ? resolveBuyerTimezone({
@@ -814,8 +842,8 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     if (row.status !== 'completed' && actualStep < MAX_AUTO_STEPS) {
       if (taskStatus === 'running') draftStage = 'waiting_model';
       else if (taskStatus === 'queued') draftStage = 'reverify_queued';
-      else if (nextLetterStatus === 'draft' && !audit.needsReverify) draftStage = 'draft_saved_verified';
-      else if (nextLetterStatus === 'draft' && audit.needsReverify) draftStage = 'draft_audit_failed';
+      else if (nextLetterStatus === 'draft' && !draftBlockedFromAutoSend) draftStage = 'draft_saved_verified';
+      else if (nextLetterStatus === 'draft' && draftBlockedFromAutoSend) draftStage = 'draft_audit_failed';
       else if (!nextLetter && taskStatus === 'failed') draftStage = 'task_failed';
     }
 
@@ -825,12 +853,15 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     else if (row.status === 'paused') phase = 'paused';
     else if (row.status === 'blocked') phase = 'blocked';
     else if (row.status === 'failed') phase = 'failed';
+    else if (nextLetterStatus === 'draft' && draftBlockedFromAutoSend) phase = 'failed';
     else if (nextRunAt.getTime() > now.getTime()) phase = 'waiting';
     else if (!recipientWindowOpen) phase = 'waiting';
     else if (nextLetterStatus === 'draft') phase = 'ready';
     else if (nextLetterStatus) phase = 'sending';
     else if (taskStatus && taskStatus !== 'failed') phase = 'generating';
     else phase = 'due';
+
+    const draftAuditReason = audit.reason || rowSendGateIssue;
 
     const taskStep = latestTask?.currentStep ? String(latestTask.currentStep) : undefined;
     const taskErrorCode = latestTask?.status === 'failed' && latestTask.error?.code ? String(latestTask.error.code) : undefined;
@@ -854,7 +885,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       draftStage,
       draftReady,
       ...(nextLetter?._id ? { draftId: String(nextLetter._id) } : {}),
-      ...(audit.needsReverify && !taskInFlight ? { draftNeedsReverify: true, draftAuditReason: audit.reason } : {}),
+      ...(draftBlockedFromAutoSend && !taskInFlight ? { draftNeedsReverify: true, draftAuditReason } : {}),
       ...(nextLetter?.updatedAt ? { draftUpdatedAt: new Date(nextLetter.updatedAt).toISOString() } : {}),
       ...(latestTask?._id ? { taskId: String(latestTask._id), taskStatus } : {}),
       ...(taskStep ? { taskStep, taskStepLabel: TASK_STEP_LABELS[taskStep] ?? taskStep } : {}),
@@ -894,6 +925,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       blocked: counts.blocked ?? 0,
       failed: counts.failed ?? 0,
       circuitFailed: circuitFailedCount,
+      aiFailed: aiFailedCount,
       unverifiedDrafts,
       exceptionQueueCount: unverifiedDrafts,
       approvedProofBlocksCount,
@@ -1475,6 +1507,7 @@ export async function drainQueuedOutreachTasks(
 export async function recoverCircuitFailedEnrollments(
   actor: AuthUser,
   targetUserId?: string,
+  options?: { includeUpstreamAiFailures?: boolean },
 ): Promise<{
   scanned: number;
   recovered: number;
@@ -1484,6 +1517,7 @@ export async function recoverCircuitFailedEnrollments(
   const target = await resolveTargetUser(actor, targetUserId);
   const config = await getConfig(actor, target.id);
   const now = new Date();
+  const includeUpstream = Boolean(options?.includeUpstreamAiFailures);
 
   const failedRows = await OutreachAutomationEnrollment.find({
     ...scope(actor, target.id),
@@ -1527,23 +1561,38 @@ export async function recoverCircuitFailedEnrollments(
     const upstreamFailedCount = recentFailedTasks.filter((t) => !isCircuitRejectError(t.error)).length;
     const hasCircuitTask = recentFailedTasks.some((t) => isCircuitRejectError(t.error));
     const circuitReason = isCircuitFailedEnrollmentReason(row.lastError);
+    const aiUpstreamReason = isAiUpstreamFailedEnrollmentReason(row.lastError);
+    const hasAnyAiFailedTask = recentFailedTasks.length > 0;
 
-    if ((!circuitReason && !hasCircuitTask) || upstreamFailedCount >= 3) {
+    if (includeUpstream) {
+      if (!aiUpstreamReason && !hasAnyAiFailedTask) {
+        skipped += 1;
+        continue;
+      }
+    } else if ((!circuitReason && !hasCircuitTask) || upstreamFailedCount >= 3) {
       skipped += 1;
       continue;
     }
 
-    const circuitTaskIds = recentFailedTasks.filter((t) => isCircuitRejectError(t.error)).map((t) => t._id);
-    if (circuitTaskIds.length > 0) {
+    const cancelTaskIds = (includeUpstream
+      ? recentFailedTasks
+      : recentFailedTasks.filter((t) => isCircuitRejectError(t.error))
+    ).map((t) => t._id);
+    if (cancelTaskIds.length > 0) {
       await AgentTask.updateMany(
-        { _id: { $in: circuitTaskIds }, status: 'failed' },
+        { _id: { $in: cancelTaskIds }, status: 'failed' },
         {
           $set: { status: 'cancelled' },
           $unset: { leaseToken: 1, leaseUntil: 1 },
           $inc: { version: 1 },
           $push: {
             events: {
-              $each: [{ at: now, message: '清理因 AI 通道熔断/并发保护（未发往上游）导致的失败任务记录。' }],
+              $each: [{
+                at: now,
+                message: includeUpstream
+                  ? '切换 AI 模型后清理旧模型失败任务记录并重置重试预算。'
+                  : '清理因 AI 通道熔断/并发保护（未发往上游）导致的失败任务记录。',
+              }],
               $slice: -100,
             },
           },
@@ -1722,7 +1771,7 @@ export async function getOutreachEnrollmentDiagnostics(
       outreachStep: nextStep,
       status: { $ne: 'cancelled' },
     }).sort({ createdAt: -1 }).lean(),
-    Project.findById(config.projectId).select('brandProfile').lean(),
+    Project.findById(config.projectId).select('code slug name companyName industry website mailFrom senderName brandProfile').lean(),
   ]);
 
   const buyerSchedule = config.useBuyerTimezone || customer.timezone
@@ -1809,6 +1858,7 @@ export async function getOutreachEnrollmentDiagnostics(
       bodyText: latestDraft.contentText,
       subject: latestDraft.subject,
       approvedOffers: project?.brandProfile?.approvedOffers,
+      signature: resolveProjectSalesProfile(project).signature,
     });
     if (automatedIssue) {
       sendGateIssue = automatedIssue;

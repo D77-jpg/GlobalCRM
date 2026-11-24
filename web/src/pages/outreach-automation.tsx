@@ -212,6 +212,9 @@ function phaseBadge(
   row: OutreachAutomationQueueRow,
   windowOpen: boolean,
 ): { label: string; variant: 'outline' | 'warning' | 'failed' | 'muted' | 'developed'; detail?: string } {
+  if (row.draftStage === 'draft_audit_failed') {
+    return { label: '草稿不可自动发送', variant: 'failed' };
+  }
   const effectiveOpen = row.recipientWindowOpen ?? windowOpen;
   if (!effectiveOpen && ['due', 'ready', 'generating', 'sending'].includes(row.phase)) {
     return { label: '等待当地发送时段', variant: 'outline' };
@@ -229,6 +232,9 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
   if (row.draftStage === 'reverify_queued') {
     return '已入队等待模型处理';
   }
+  if (row.draftStage === 'draft_audit_failed') {
+    return '草稿已保存，但未通过核验/质量检查（不可自动发送，请点「诊断」或「单条重核」）';
+  }
   if (row.draftStage === 'task_failed') {
     return row.taskRetryAt
       ? `下次退避重试：${formatDateTime(row.taskRetryAt)}`
@@ -239,11 +245,11 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
   }
   switch (row.phase) {
     case 'waiting':
-      return `${formatRelative(row.nextRunAt)}（${formatDateTime(row.nextRunAt)}）${row.draftReady ? ' · 草稿已保存' : ''}`;
+      return `${formatRelative(row.nextRunAt)}（${formatDateTime(row.nextRunAt)}）${row.draftReady ? ' · 草稿已过核验待发' : ''}`;
     case 'generating':
       return '正在生成并核验草稿';
     case 'ready':
-      return '草稿已就绪，等待发送队列';
+      return row.draftReady ? '草稿已过核验，等待发送队列' : '等待核验与发送检查';
     case 'sending':
       return '正在通过 SMTP 发送';
     case 'due':
@@ -553,27 +559,32 @@ export function OutreachAutomationPage(): React.JSX.Element {
     }
   };
 
-  const recoverCircuitFailed = async (): Promise<void> => {
+  const recoverCircuitFailed = async (includeUpstreamAiFailures = false): Promise<void> => {
     setBusy(true);
     setError('');
     try {
       const res = await apiPost<{ scanned: number; recovered: number; skipped: number; overview: OutreachAutomationOverview }>(
         scoped('/outreach-automation/recover-circuit-failed'),
-        {},
+        includeUpstreamAiFailures ? { includeUpstreamAiFailures: true } : {},
       );
       setOverview(res.overview);
       setForm(res.overview.config);
       if (res.recovered > 0) {
-        toast.success(`已恢复 ${res.recovered} 位因 AI 熔断误停的客户`, {
-          description: res.overview.config.enabled
-            ? '已错峰排程并在单账号并发上限 3 条内逐步恢复；历史发信失败和合规停止的客户未受影响。'
-            : '已重置为暂停待发状态（总开关仍关闭），不会触发发送；历史发信失败和合规停止的客户未受影响。',
-        });
+        toast.success(
+          includeUpstreamAiFailures
+            ? `已用当前模型重新恢复 ${res.recovered} 位旧 AI 失败客户`
+            : `已恢复 ${res.recovered} 位因 AI 熔断误停的客户`,
+          {
+            description: res.overview.config.enabled
+              ? '已错峰排程并在单账号并发上限 3 条内逐步恢复；历史发信失败和合规停止的客户未受影响。'
+              : '已重置为暂停待发状态（总开关仍关闭），不会触发发送；历史发信失败和合规停止的客户未受影响。',
+          },
+        );
       } else {
-        toast.info('当前没有因 AI 熔断误停的客户需要恢复');
+        toast.info('当前没有符合条件的 AI 失败客户需要恢复');
       }
     } catch (caught) {
-      setError(toErrorMessage(caught, '恢复熔断受影响客户失败'));
+      setError(toErrorMessage(caught, '恢复失败客户失败'));
     } finally {
       setBusy(false);
     }
@@ -598,6 +609,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + (overview?.stats.blocked ?? 0);
   const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
   const circuitFailedCount = overview?.stats.circuitFailed ?? 0;
+  const aiFailedCount = overview?.stats.aiFailed ?? 0;
   const circuitOpen = Boolean(overview?.circuit?.open);
   const circuitCooldownSec = Math.ceil((overview?.circuit?.cooldownRemainingMs ?? 0) / 1000);
   const queuedTasksCount = overview?.stats.queuedTasks ?? 0;
@@ -718,7 +730,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 今天这个邮箱的 {overview.config.dailyLimit} 封额度已用完，明天发送时段会继续。
               </p>
             ) : null}
-            {circuitOpen || circuitFailedCount > 0 ? (
+            {circuitOpen || circuitFailedCount > 0 || aiFailedCount > 0 ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-2.5 text-xs text-destructive">
                 <div className="flex min-w-0 items-start gap-2">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -726,26 +738,43 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     <p className="font-semibold">
                       {circuitOpen
                         ? `AI 通道处于熔断冷却中（剩余约 ${circuitCooldownSec} 秒），期间已暂停新建任务且不消耗客户重试次数`
-                        : `发现 ${circuitFailedCount} 位客户曾因 AI 通道熔断/并发保护误停`}
+                        : circuitFailedCount > 0
+                          ? `发现 ${circuitFailedCount} 位客户曾因 AI 通道熔断/并发保护误停（共 ${aiFailedCount} 位旧 AI 失败客户）`
+                          : `发现 ${aiFailedCount} 位客户因历史 AI 超时/502 达到重试上限而停发`}
                     </p>
                     <p className="leading-5 text-muted-foreground">
-                      熔断拦截未实际发往上游模型，不应耗尽客户级重试机会。点击右侧按钮可仅恢复这些受熔断影响的客户并错峰排程（不动历史发信失败与合规停止客户）。
+                      切换更稳定的模型（如 DeepSeek）后，点击右侧按钮可一键清理旧 AI 失败记录并错峰恢复（严格不动历史 SMTP 发信失败与合规停止客户）。
                     </p>
                   </div>
                 </div>
-                {circuitFailedCount > 0 ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0 border-destructive/40 bg-background text-destructive hover:bg-destructive/10"
-                    disabled={busy}
-                    onClick={() => void recoverCircuitFailed()}
-                  >
-                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-                    恢复熔断受影响客户（{circuitFailedCount}）
-                  </Button>
-                ) : null}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {circuitFailedCount > 0 ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 border-destructive/40 bg-background text-destructive hover:bg-destructive/10"
+                      disabled={busy}
+                      onClick={() => void recoverCircuitFailed(false)}
+                    >
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                      仅恢复熔断误停（{circuitFailedCount}）
+                    </Button>
+                  ) : null}
+                  {aiFailedCount > 0 ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 border-destructive/40 bg-background text-destructive hover:bg-destructive/10"
+                      disabled={busy}
+                      onClick={() => void recoverCircuitFailed(true)}
+                    >
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                      切模型后恢复旧 AI 失败（{aiFailedCount}）
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
             {unverifiedCount > 0 ? (

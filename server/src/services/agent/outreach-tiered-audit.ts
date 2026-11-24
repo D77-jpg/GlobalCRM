@@ -7,7 +7,7 @@ import type { CustomerCheckContext, EvidenceQuote } from './fact-verifier';
  * Mirrors the exact hard policy boundary in fact-verifier.ts.
  */
 export const RED_TIER_POLICY_RE =
-  /\b(?:moq|minimum\s+order|minimum|price|pricing|payment|cost|discount|freight|ship(?:ping|s|ped|ment)?|lead[ -]?time|deliver\w*|certif\w*|fsc|iso|bsci|free(?![\s-]+weights?)|capacity|guarantee\w*|warrant\w*|exclusive|stock|inventory|refund|replace|reserve|hold|sample|offer|deal|contract|legal)\b|起订|价格|报价|费用|运费|付款|定金|交期|认证|证书|免费|保证|质保|产能|库存|现货|备货|样品|折扣|退款|独家|合同|法律|承诺/i;
+  /\b(?:moq|minimum\s+order|minimum|price|pricing|payment|cost|discount|freight|ship(?:ping|s|ped|ment)?|lead[ -]?time|deliver\w*|certif\w*|fsc|iso|bsci|capacity|guarantee\w*|warrant\w*|exclusive|stock|inventory|refund|replace|reserve|hold|sample|offer|deal|contract|legal)\b|(?<!\bfeel\s+)\bfree(?![\s-]+weights?)\b|起订|价格|报价|费用|运费|付款|定金|交期|认证|证书|免费|保证|质保|产能|库存|现货|备货|样品|折扣|退款|独家|合同|法律|承诺/i;
 
 export const SUPPLIER_VOICE_RE =
   /\b(?:we|our|us)\b|\bi\s+(?:can|will|offer|supply|provide|guarantee|manufacture|produce|make)\b|我们|我方|我司/i;
