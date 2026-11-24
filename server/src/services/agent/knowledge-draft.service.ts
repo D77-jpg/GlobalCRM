@@ -30,10 +30,8 @@ export async function regenerateKnowledgeDraft(
   const saved=await saveMailReplyDraft(analysis.id,{expectedVersion:analysis.version,idempotencyKey:'kb-save-'+id+'-'+requestKey},actor);
   return {letterId:saved.letterId,customerId:letter.customerId};
  }
- const step = letter.outreachStep === 1 || letter.outreachStep === 2 || letter.outreachStep === 3
-  ? letter.outreachStep
-  : undefined;
- const previousOutreach = step && step > 1
+ const step = letter.outreachStep && letter.outreachStep > 1 ? letter.outreachStep : undefined;
+ const previousOutreach = step
   ? await previousOutreachDrafts(String(requireProjectId(actor)), letter.customerId, step, true)
   : undefined;
  const analysis=await createCustomerAnalysis(
@@ -41,14 +39,19 @@ export async function regenerateKnowledgeDraft(
   actor,
   {
    taskKind,
-   firstOutreach:taskKind==='first_outreach' && (!step || step === 1),
+   firstOutreach:taskKind==='first_outreach' && !step,
    outreachStep:step,
    previousOutreach,
    forcedSegmentCode:options?.angleCode?.trim() || undefined,
    userRequest:userInstruction,
   },
  );
- const saved=await saveAnalysisEmailDraft(analysis.id,{expectedVersion:analysis.version,idempotencyKey:'kb-save-'+id+'-'+requestKey},actor);
+ const saved=await saveAnalysisEmailDraft(
+  analysis.id,
+  {expectedVersion:analysis.version,idempotencyKey:'kb-save-'+id+'-'+requestKey},
+  actor,
+  {outreachStep:letter.outreachStep},
+ );
  return {letterId:saved.letterId,customerId:letter.customerId,analysisId:analysis.id,angleCode:analysis.knowledgeReview?.context?.playbook?.segmentCode};
 }
 

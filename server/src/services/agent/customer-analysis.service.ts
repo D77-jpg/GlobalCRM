@@ -590,7 +590,12 @@ export async function updateCustomerAnalysis(id: string, input: UpdateAgentCusto
   return dto(updated);
 }
 
-export async function saveAnalysisEmailDraft(id: string, input: ConfirmAgentAnalysisActionBody, actor: AuthUser) {
+export async function saveAnalysisEmailDraft(
+  id: string,
+  input: ConfirmAgentAnalysisActionBody,
+  actor: AuthUser,
+  options?: { outreachStep?: number },
+) {
   const identifiers = scope(actor);
   const current = await getAnalysisOrThrow(id, actor);
   if(await hasProtectedCustomerMail(String(current.customerId),actor.projectId!))throw ApiError.conflict('客户已有停止营销联系记录，不能准备营销草稿');
@@ -613,11 +618,12 @@ export async function saveAnalysisEmailDraft(id: string, input: ConfirmAgentAnal
     const project = await Project.findById(requireProjectId(actor)).select('code slug name companyName industry website mailFrom senderName brandProfile').lean();
     const signature = resolveProjectSalesProfile(project).signature;
     const content = renderLetterContent(locked.emailDraft.bodyText, signer, signature, true);
+    const resolvedOutreachStep = locked.outreachStep ?? options?.outreachStep;
     const result = await sendLetter({
       customerId: String(locked.customerId), subject: locked.emailDraft.subject, content, markAsDeveloped: false,
       saveAsDraft: true, requestKey: `agent-analysis-email:${locked.id}`,
-      ...(locked.outreachStep ? { outreachStep: locked.outreachStep } : {}),
-      ...(locked.outreachStep || locked.knowledgeReview?.taskType === 'first_outreach' ? { agentAnalysisId: locked.id } : {}),
+      ...(resolvedOutreachStep ? { outreachStep: resolvedOutreachStep } : {}),
+      ...(resolvedOutreachStep || locked.knowledgeReview?.taskType === 'first_outreach' ? { agentAnalysisId: locked.id } : {}),
     }, actor);
     if(locked.knowledgeReview)await DevelopmentLetter.updateOne({_id:result.letter.id,projectId:requireProjectId(actor),knowledgeReview:{$exists:false}},{$set:{knowledgeReview:{...locked.knowledgeReview,bodyHash:draftHash(result.letter.contentText)}}});
     if (result.letter.status !== 'draft' || result.delivered) throw ApiError.internal('草稿安全校验失败');
