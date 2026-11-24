@@ -17,6 +17,8 @@ import { getCurrentMailSender } from './mail-account.service';
 import { queueOutreachStep } from './agent/outreach-sequence.service';
 import { hasProtectedCustomerMail } from './agent/mail-thread-analysis.service';
 import { draftHash } from './agent/knowledge-grounding';
+import { automatedReviewIssue } from './agent/knowledge-send-gate';
+import { workflowLabels } from './agent/evidence-workflow';
 import { assertAutomaticDraftCanSend, resendLetter } from './letter.service';
 import {
   cancelPendingOutreachLetters,
@@ -31,6 +33,29 @@ const MAX_AUTO_STEPS = 3;
 const DAY_MS = 86_400_000;
 const TICK_MS = 15_000;
 const MAX_QUEUE_ROWS = 80;
+export const MAX_INFLIGHT_OUTREACH_TASKS = 3;
+const TASK_BACKOFF_MS = [5 * 60_000, 15 * 60_000, 45 * 60_000] as const;
+
+const TASK_STEP_LABELS: Record<string, string> = {
+  locate_customer: '定位客户',
+  research_customer: '分析客户官网',
+  analyze_customer: 'AI 生成并核验草稿',
+  save_draft: '保存开发信草稿',
+  verify_draft: '核对草稿归属',
+  ...workflowLabels,
+};
+
+export function humanizeTaskError(error?: { code?: string; message?: string } | null): string {
+  if (!error) return '任务执行失败';
+  const code = String(error.code ?? '');
+  if (code === 'OPENAI_TIMEOUT') return 'AI 请求超时（模型响应超过单次时限）';
+  if (code === 'OPENAI_CIRCUIT_OPEN') return 'AI 通道暂时熔断保护中（30 秒后自动探测恢复）';
+  if (code === 'OPENAI_CAPACITY') return 'AI 并发队列已满，稍后自动重试';
+  if (code === 'TASK_WORKFLOW_LIMIT') return '单次任务累计耗时或重试次数达上限';
+  if (/^OPENAI_HTTP_5\d\d$/.test(code)) return `AI 上游服务返回 ${code.replace('OPENAI_HTTP_', 'HTTP ')}（网关暂时不可用）`;
+  if (/^OPENAI_HTTP_429$/.test(code)) return 'AI 上游触发限流（HTTP 429）';
+  return error.message || code || '任务执行失败';
+}
 
 const REVERIFY_ISSUE_CODES = new Set([
   'draft_unverified',
@@ -109,6 +134,14 @@ export interface OutreachAutomationConfigDto {
   version: number;
 }
 
+export type OutreachDraftStage =
+  | 'reverify_queued'
+  | 'waiting_model'
+  | 'draft_saved_verified'
+  | 'draft_audit_failed'
+  | 'task_failed'
+  | 'none';
+
 export interface OutreachAutomationQueueRow {
   id: string;
   customerId: string;
@@ -123,11 +156,24 @@ export interface OutreachAutomationQueueRow {
   nextStep: number;
   /** waiting=等待下一次；generating=准备草稿；ready=待发送；sending=发送中；due=到期待处理。 */
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
+  /** 明确区分草稿/核验/任务执行阶段，避免“进行中”掩盖核验失败或 AI 任务失败。 */
+  draftStage: OutreachDraftStage;
   draftReady: boolean;
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
   draftUpdatedAt?: string;
+  taskId?: string;
+  taskStatus?: string;
+  taskStep?: string;
+  taskStepLabel?: string;
+  taskError?: string;
+  taskErrorCode?: string;
+  taskRetryAt?: string;
+  taskDurationMs?: number;
+  effectiveTimezone: string;
+  timezoneSource: 'explicit' | 'country' | 'fallback';
+  recipientWindowOpen: boolean;
   nextRunAt: string;
   lastError?: string;
   lastSentAt?: string;
@@ -172,6 +218,9 @@ export interface OutreachAutomationOverview {
     blocked: number;
     failed: number;
     unverifiedDrafts: number;
+    queuedTasks: number;
+    runningTasks: number;
+    failedTasks: number;
     sentToday: number;
     remainingToday: number;
   };
@@ -501,7 +550,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     .map((id) => new Types.ObjectId(id));
   const customers = customerIds.length
     ? await Customer.find({ _id: { $in: customerIds }, projectId: config.projectId })
-      .select('name company email status letterCount outreachStep nextFollowUpAt')
+      .select('name company email status letterCount outreachStep nextFollowUpAt timezone country address phone')
       .lean()
     : [];
   const customerMap = new Map(customers.map((customer) => [String(customer._id), customer]));
@@ -518,9 +567,9 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     );
     return Math.min(MAX_AUTO_STEPS, actualStep + 1);
   }))];
-  const [queueLetters, queueTasks] = queueCustomerIds.length
-    ? await Promise.all([
-      DevelopmentLetter.find({
+  const [queueLetters, queueTasks, taskStatusCounts] = await Promise.all([
+    queueCustomerIds.length
+      ? DevelopmentLetter.find({
         projectId: config.projectId,
         customerId: { $in: queueCustomerIds },
         outreachStep: { $in: queueNextSteps },
@@ -528,25 +577,49 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       })
         .sort({ createdAt: -1 })
         .select('_id customerId outreachStep status needsReview review knowledgeReview updatedAt createdAt')
-        .lean(),
-      AgentTask.find({
+        .lean()
+      : Promise.resolve([]),
+    queueCustomerIds.length
+      ? AgentTask.find({
         projectId: config.projectId,
+        userId: config.userId,
         customerId: { $in: queueCustomerIds },
         outreachStep: { $in: queueNextSteps },
-        status: { $in: ['queued', 'running', 'paused', 'waiting_input', 'awaiting_review'] },
-      }).select('customerId outreachStep status').lean(),
-    ])
-    : [[], []];
+        status: { $in: ['queued', 'running', 'paused', 'waiting_input', 'awaiting_review', 'failed'] },
+      })
+        .sort({ createdAt: -1 })
+        .select('_id customerId outreachStep status currentStep error attempts workflowActiveMs createdAt updatedAt')
+        .lean()
+      : Promise.resolve([]),
+    AgentTask.aggregate<{ _id: string; count: number }>([
+      {
+        $match: {
+          projectId: config.projectId,
+          userId: config.userId,
+          outreachStep: { $in: [1, 2, 3] },
+          status: { $in: ['queued', 'running', 'failed'] },
+        },
+      },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+  ]);
+  const taskTotals = taskStatusCounts.reduce<Record<string, number>>((acc, item) => {
+    acc[String(item._id)] = Number(item.count);
+    return acc;
+  }, {});
   const queueLetterMap = new Map<string, (typeof queueLetters)[number]>();
   for (const letter of queueLetters) {
     const key = `${String(letter.customerId)}:${Number(letter.outreachStep)}`;
     if (!queueLetterMap.has(key)) queueLetterMap.set(key, letter);
   }
-  const queueTaskMap = new Map<string, string>();
+  const queueTaskMap = new Map<string, (typeof queueTasks)[number]>();
   for (const task of queueTasks) {
     const key = `${String(task.customerId)}:${Number(task.outreachStep)}`;
-    if (!queueTaskMap.has(key) || task.status === 'queued' || task.status === 'running') {
-      queueTaskMap.set(key, String(task.status));
+    const existing = queueTaskMap.get(key);
+    if (!existing) {
+      queueTaskMap.set(key, task);
+    } else if ((task.status === 'running' || task.status === 'queued') && existing.status !== 'running' && existing.status !== 'queued') {
+      queueTaskMap.set(key, task);
     }
   }
   const counts = grouped.reduce<Record<string, number>>((acc, row) => {
@@ -556,7 +629,8 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   const enrolled = grouped.reduce((total, row) => total + Number(row.count), 0);
   const sentTodayBucket = await OutreachAutomationDay.findOne({ campaignId: config._id, day: dayIn(config.timezone, now) }).lean();
   const sentToday = Number(sentTodayBucket?.sent ?? 0);
-  const windowOpen = isWithinSendWindow(configDto(config), now);
+  const cfgDto = configDto(config);
+  const windowOpen = isWithinSendWindow(cfgDto, now);
 
   let unverifiedDrafts = 0;
   const queueRows: OutreachAutomationQueueRow[] = rows.map((row) => {
@@ -577,12 +651,38 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const audit = row.status !== 'completed' && actualStep < MAX_AUTO_STEPS
       ? inspectOutreachDraftAudit(nextLetter)
       : { needsReverify: false };
-    const taskStatus = queueTaskMap.get(key);
+    const latestTask = queueTaskMap.get(key);
+    const taskStatus = latestTask ? String(latestTask.status) : undefined;
     const taskInFlight = taskStatus === 'queued' || taskStatus === 'running';
     if (audit.needsReverify && !taskInFlight) unverifiedDrafts += 1;
-    const hasTask = Boolean(taskStatus);
+
+    const buyerSchedule = config.useBuyerTimezone || customer?.timezone
+      ? resolveBuyerTimezone({
+        timezone: customer?.timezone,
+        country: customer?.country,
+        address: customer?.address,
+        phone: customer?.phone,
+      }, config.timezone)
+      : { timezone: config.timezone, source: 'fallback' as const, workdays: [1, 2, 3, 4, 5] };
+    const recipientWindow = {
+      windowStart: config.windowStart,
+      windowEnd: config.windowEnd,
+      timezone: buyerSchedule.timezone,
+      workdays: buyerSchedule.workdays,
+    };
+    const recipientWindowOpen = isWithinSendWindow(recipientWindow, now);
     const nextRunAt = new Date(row.nextRunAt);
-    const effectiveAt = nextSendWindow(configDto(config), nextRunAt.getTime() > now.getTime() ? nextRunAt : now);
+    const effectiveAt = nextSendWindow(recipientWindow, nextRunAt.getTime() > now.getTime() ? nextRunAt : now);
+
+    let draftStage: OutreachDraftStage = 'none';
+    if (row.status !== 'completed' && actualStep < MAX_AUTO_STEPS) {
+      if (taskStatus === 'running') draftStage = 'waiting_model';
+      else if (taskStatus === 'queued') draftStage = 'reverify_queued';
+      else if (nextLetterStatus === 'draft' && !audit.needsReverify) draftStage = 'draft_saved_verified';
+      else if (nextLetterStatus === 'draft' && audit.needsReverify) draftStage = 'draft_audit_failed';
+      else if (!nextLetter && taskStatus === 'failed') draftStage = 'task_failed';
+    }
+
     let phase: OutreachAutomationQueueRow['phase'];
     if (row.status === 'completed' || actualStep >= MAX_AUTO_STEPS) phase = 'completed';
     else if (taskInFlight) phase = 'generating';
@@ -590,11 +690,18 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     else if (row.status === 'blocked') phase = 'blocked';
     else if (row.status === 'failed') phase = 'failed';
     else if (nextRunAt.getTime() > now.getTime()) phase = 'waiting';
-    else if (!windowOpen) phase = 'waiting';
+    else if (!recipientWindowOpen) phase = 'waiting';
     else if (nextLetterStatus === 'draft') phase = 'ready';
     else if (nextLetterStatus) phase = 'sending';
-    else if (hasTask) phase = 'generating';
+    else if (taskStatus && taskStatus !== 'failed') phase = 'generating';
     else phase = 'due';
+
+    const taskStep = latestTask?.currentStep ? String(latestTask.currentStep) : undefined;
+    const taskErrorCode = latestTask?.status === 'failed' && latestTask.error?.code ? String(latestTask.error.code) : undefined;
+    const taskError = latestTask?.status === 'failed' ? humanizeTaskError(latestTask.error) : undefined;
+    const taskRetryAt = draftStage === 'task_failed' && nextRunAt.getTime() > now.getTime()
+      ? nextRunAt.toISOString()
+      : undefined;
 
     return {
       id: String(row._id),
@@ -608,10 +715,20 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       actualStep,
       nextStep,
       phase,
+      draftStage,
       draftReady,
       ...(nextLetter?._id ? { draftId: String(nextLetter._id) } : {}),
       ...(audit.needsReverify && !taskInFlight ? { draftNeedsReverify: true, draftAuditReason: audit.reason } : {}),
       ...(nextLetter?.updatedAt ? { draftUpdatedAt: new Date(nextLetter.updatedAt).toISOString() } : {}),
+      ...(latestTask?._id ? { taskId: String(latestTask._id), taskStatus } : {}),
+      ...(taskStep ? { taskStep, taskStepLabel: TASK_STEP_LABELS[taskStep] ?? taskStep } : {}),
+      ...(taskError ? { taskError } : {}),
+      ...(taskErrorCode ? { taskErrorCode } : {}),
+      ...(taskRetryAt ? { taskRetryAt } : {}),
+      ...(latestTask?.workflowActiveMs ? { taskDurationMs: Number(latestTask.workflowActiveMs) } : {}),
+      effectiveTimezone: buyerSchedule.timezone,
+      timezoneSource: buyerSchedule.source,
+      recipientWindowOpen,
       nextRunAt: effectiveAt.toISOString(),
       ...(row.lastError ? { lastError: row.lastError } : {}),
       ...(row.lastSentAt ? { lastSentAt: new Date(row.lastSentAt).toISOString() } : {}),
@@ -619,7 +736,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   });
 
   return {
-    config: configDto(config),
+    config: cfgDto,
     windowOpen,
     mailbox: mailbox.account ? {
       email: mailbox.account.email,
@@ -640,6 +757,9 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       blocked: counts.blocked ?? 0,
       failed: counts.failed ?? 0,
       unverifiedDrafts,
+      queuedTasks: taskTotals.queued ?? 0,
+      runningTasks: taskTotals.running ?? 0,
+      failedTasks: taskTotals.failed ?? 0,
       sentToday,
       remainingToday: Math.max(0, effectiveDailyLimit(config) - sentToday),
     },
@@ -913,14 +1033,26 @@ async function supersedeUnverifiedDraftAndRequeue(
   if (step >= MAX_AUTO_STEPS) return { queued: false, skippedReason: '三封开发信已完成' };
   const nextStep = (step + 1) as OutreachStep;
 
-  const inFlight = await AgentTask.exists({
+  // For explicit single-row regeneration/test-run, also cancel any stale queued duplicate tasks
+  // for this (customerId, nextStep) so the new single test task executes cleanly without duplicates.
+  const runningNow = await AgentTask.exists({
     projectId: config.projectId,
     userId: config.userId,
     customerId: customer._id,
     outreachStep: nextStep,
-    status: { $in: ['queued', 'running'] },
+    status: 'running',
   });
-  if (inFlight) return { queued: false, skippedReason: '已有核验生成任务在执行中' };
+  if (runningNow) return { queued: false, skippedReason: '已有核验生成任务正在执行中' };
+  if (options.onlyIfUnverified) {
+    const queuedNow = await AgentTask.exists({
+      projectId: config.projectId,
+      userId: config.userId,
+      customerId: customer._id,
+      outreachStep: nextStep,
+      status: 'queued',
+    });
+    if (queuedNow) return { queued: false, skippedReason: '已有核验生成任务在排队中' };
+  }
 
   const draft = await findDraft(config.projectId, customer._id, nextStep);
   if (draft) {
@@ -950,14 +1082,15 @@ async function supersedeUnverifiedDraftAndRequeue(
     return { queued: false, skippedReason: '当前无待重核验草稿' };
   }
 
-  // Cancel any terminal/waiting task for this step so planForCustomer allows clean regeneration.
+  // Cancel any terminal/waiting (and for explicit single-row regen, stale queued) task for this step
+  // so planForCustomer allows clean regeneration with zero duplicate tasks.
   await AgentTask.updateMany(
     {
       projectId: config.projectId,
       userId: config.userId,
       customerId: customer._id,
       outreachStep: nextStep,
-      status: { $in: ['awaiting_review', 'paused', 'failed', 'waiting_input'] },
+      status: { $in: options.onlyIfUnverified ? ['awaiting_review', 'paused', 'failed', 'waiting_input'] : ['queued', 'awaiting_review', 'paused', 'failed', 'waiting_input'] },
     },
     {
       $set: { status: 'cancelled' },
@@ -1102,6 +1235,263 @@ export async function regenerateOutreachEnrollmentDraft(
   return { ...res, overview };
 }
 
+/**
+ * 清理积压的排队中（queued）自动开发 AI 任务（不动正在 running 的任务，也不删除已保存草稿），
+ * 方便在出现大量排队堆积时一键清队列后再做“单条试跑验收”。
+ */
+export async function drainQueuedOutreachTasks(
+  actor: AuthUser,
+  targetUserId?: string,
+): Promise<{ cancelled: number; overview: OutreachAutomationOverview }> {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const now = new Date();
+  const result = await AgentTask.updateMany(
+    {
+      projectId: config.projectId,
+      userId: config.userId,
+      outreachStep: { $in: [1, 2, 3] },
+      status: 'queued',
+    },
+    {
+      $set: { status: 'cancelled' },
+      $unset: { leaseToken: 1, leaseUntil: 1 },
+      $inc: { version: 1 },
+      $push: {
+        events: {
+          $each: [{ at: now, message: '管理员/业务员主动清理积压排队任务，便于单条试跑验收。' }],
+          $slice: -100,
+        },
+      },
+    },
+  );
+  const overview = await getOutreachAutomationOverview(actor, target.id);
+  return { cancelled: result.modifiedCount, overview };
+}
+
+export interface OutreachEnrollmentDiagnostics {
+  enrollmentId: string;
+  customerId: string;
+  customerName: string;
+  company?: string;
+  email?: string;
+  enrollmentStatus: string;
+  currentStep: number;
+  nextStep: number;
+  lastError?: string;
+  timezone: {
+    effectiveTimezone: string;
+    source: 'explicit' | 'country' | 'fallback';
+    windowStart: string;
+    windowEnd: string;
+    windowOpen: boolean;
+    nextSendAt: string;
+    useBuyerTimezone: boolean;
+    defaultTimezone: string;
+  };
+  latestTask: {
+    id: string;
+    status: string;
+    currentStep?: string;
+    currentStepLabel?: string;
+    attempts: number;
+    errorCode?: string;
+    errorMessage?: string;
+    totalDurationMs: number;
+    createdAt: string;
+    updatedAt: string;
+    steps: {
+      key: string;
+      label: string;
+      state: string;
+      attempts: number;
+      durationMs?: number;
+      error?: string;
+      verifyMode?: string;
+      checksCount?: number;
+      issuesCount?: number;
+      completeness?: string;
+    }[];
+    recentEvents: { at: string; step?: string; message: string }[];
+  } | null;
+  latestDraft: {
+    id: string;
+    status: string;
+    outreachStep?: number;
+    subject: string;
+    updatedAt: string;
+    needsReverify: boolean;
+    auditReason?: string;
+    sendGateIssue?: string;
+    completeness?: string;
+    factAuditMode?: string;
+    checksTotal: number;
+    checksSupported: number;
+    checksNonClaim: number;
+    checksFailed: number;
+    issues: { code: string; message: string }[];
+  } | null;
+}
+
+/** 按单条客户串联最新 AI 任务各步骤耗时/错误码、草稿保存与逐项核验结果、以及买家时区排程。 */
+export async function getOutreachEnrollmentDiagnostics(
+  actor: AuthUser,
+  enrollmentId: string,
+  targetUserId?: string,
+): Promise<OutreachEnrollmentDiagnostics> {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const enrollment = await OutreachAutomationEnrollment.findOne({
+    _id: enrollmentId,
+    ...scope(actor, target.id),
+    campaignId: config._id,
+  }).lean();
+  if (!enrollment) throw ApiError.notFound('自动开发队列项不存在');
+
+  const customer = await Customer.findOne({ _id: enrollment.customerId, projectId: config.projectId })
+    .select('name company email status letterCount outreachStep nextFollowUpAt timezone country address phone')
+    .lean();
+  if (!customer) throw ApiError.notFound('客户不存在或已删除');
+
+  const now = new Date();
+  const actualStep = Math.min(
+    MAX_AUTO_STEPS,
+    Math.max(
+      Number(customer.outreachStep ?? 0),
+      Math.min(MAX_AUTO_STEPS, Number(customer.letterCount ?? 0)),
+      Number(enrollment.currentStep ?? 0),
+    ),
+  );
+  const nextStep = Math.min(MAX_AUTO_STEPS, actualStep + 1);
+
+  const [latestTask, latestDraft, project] = await Promise.all([
+    AgentTask.findOne({
+      projectId: config.projectId,
+      userId: config.userId,
+      customerId: customer._id,
+      outreachStep: nextStep,
+    }).sort({ createdAt: -1 }).lean(),
+    DevelopmentLetter.findOne({
+      projectId: config.projectId,
+      customerId: customer._id,
+      outreachStep: nextStep,
+      status: { $ne: 'cancelled' },
+    }).sort({ createdAt: -1 }).lean(),
+    Project.findById(config.projectId).select('brandProfile').lean(),
+  ]);
+
+  const buyerSchedule = config.useBuyerTimezone || customer.timezone
+    ? resolveBuyerTimezone({
+      timezone: customer.timezone,
+      country: customer.country,
+      address: customer.address,
+      phone: customer.phone,
+    }, config.timezone)
+    : { timezone: config.timezone, source: 'fallback' as const, workdays: [1, 2, 3, 4, 5] };
+  const recipientWindow = {
+    windowStart: config.windowStart,
+    windowEnd: config.windowEnd,
+    timezone: buyerSchedule.timezone,
+    workdays: buyerSchedule.workdays,
+  };
+  const nextRunAt = new Date(enrollment.nextRunAt);
+  const effectiveAt = nextSendWindow(recipientWindow, nextRunAt.getTime() > now.getTime() ? nextRunAt : now);
+
+  const taskSteps = (latestTask?.workflowRecords ?? []).map((record) => {
+    const payload = (record.payload ?? undefined) as {
+      review?: {
+        completeness?: string;
+        factAudit?: { mode?: string; checks?: unknown[] };
+        issues?: unknown[];
+      };
+    } | undefined;
+    return {
+      key: String(record.key),
+      label: workflowLabels[record.key] ?? String(record.key),
+      state: String(record.state),
+      attempts: Number(record.attempts ?? 1),
+      ...(record.durationMs !== undefined ? { durationMs: Number(record.durationMs) } : {}),
+      ...(record.error ? { error: String(record.error) } : {}),
+      ...(record.key === 'audit_claims' && payload?.review ? {
+        verifyMode: payload.review.factAudit?.mode,
+        checksCount: payload.review.factAudit?.checks?.length ?? 0,
+        issuesCount: payload.review.issues?.length ?? 0,
+        completeness: payload.review.completeness,
+      } : {}),
+    };
+  });
+
+  const audit = latestDraft ? inspectOutreachDraftAudit(latestDraft) : { needsReverify: false };
+  const checks = latestDraft?.knowledgeReview?.factAudit?.checks ?? [];
+  const sendGateIssue = latestDraft?.status === 'draft'
+    ? automatedReviewIssue(latestDraft.knowledgeReview, latestDraft.outreachStep, {
+      bodyText: latestDraft.contentText,
+      subject: latestDraft.subject,
+      approvedOffers: project?.brandProfile?.approvedOffers,
+    })
+    : undefined;
+
+  return {
+    enrollmentId: String(enrollment._id),
+    customerId: String(customer._id),
+    customerName: customer.name,
+    ...(customer.company ? { company: customer.company } : {}),
+    ...(customer.email ? { email: customer.email } : {}),
+    enrollmentStatus: enrollment.status,
+    currentStep: actualStep,
+    nextStep,
+    ...(enrollment.lastError ? { lastError: enrollment.lastError } : {}),
+    timezone: {
+      effectiveTimezone: buyerSchedule.timezone,
+      source: buyerSchedule.source,
+      windowStart: config.windowStart,
+      windowEnd: config.windowEnd,
+      windowOpen: isWithinSendWindow(recipientWindow, now),
+      nextSendAt: effectiveAt.toISOString(),
+      useBuyerTimezone: Boolean(config.useBuyerTimezone),
+      defaultTimezone: config.timezone,
+    },
+    latestTask: latestTask ? {
+      id: String(latestTask._id),
+      status: String(latestTask.status),
+      ...(latestTask.currentStep ? {
+        currentStep: String(latestTask.currentStep),
+        currentStepLabel: TASK_STEP_LABELS[String(latestTask.currentStep)] ?? String(latestTask.currentStep),
+      } : {}),
+      attempts: Number(latestTask.attempts ?? 0),
+      ...(latestTask.error?.code ? { errorCode: String(latestTask.error.code) } : {}),
+      ...(latestTask.error ? { errorMessage: humanizeTaskError(latestTask.error) } : {}),
+      totalDurationMs: Number(latestTask.workflowActiveMs ?? 0)
+        || taskSteps.reduce((sum, s) => sum + (s.durationMs ?? 0), 0),
+      createdAt: new Date(latestTask.createdAt).toISOString(),
+      updatedAt: new Date(latestTask.updatedAt).toISOString(),
+      steps: taskSteps,
+      recentEvents: (latestTask.events ?? []).slice(-8).map((ev) => ({
+        at: new Date(ev.at).toISOString(),
+        ...(ev.step ? { step: String(ev.step) } : {}),
+        message: String(ev.message),
+      })),
+    } : null,
+    latestDraft: latestDraft ? {
+      id: String(latestDraft._id),
+      status: String(latestDraft.status),
+      ...(latestDraft.outreachStep ? { outreachStep: Number(latestDraft.outreachStep) } : {}),
+      subject: String(latestDraft.subject ?? ''),
+      updatedAt: new Date(latestDraft.updatedAt).toISOString(),
+      needsReverify: audit.needsReverify,
+      ...(audit.reason ? { auditReason: audit.reason } : {}),
+      ...(sendGateIssue ? { sendGateIssue } : {}),
+      ...(latestDraft.knowledgeReview?.completeness ? { completeness: latestDraft.knowledgeReview.completeness } : {}),
+      ...(latestDraft.knowledgeReview?.factAudit?.mode ? { factAuditMode: latestDraft.knowledgeReview.factAudit.mode } : {}),
+      checksTotal: checks.length,
+      checksSupported: checks.filter((c) => c.status === 'supported').length,
+      checksNonClaim: checks.filter((c) => c.status === 'non_claim').length,
+      checksFailed: checks.filter((c) => c.status !== 'supported' && c.status !== 'non_claim').length,
+      issues: (latestDraft.knowledgeReview?.issues ?? []).map((i) => ({ code: i.code, message: i.message })),
+    } : null,
+  };
+}
+
 async function markEnrollment(
   enrollmentId: Types.ObjectId,
   set: Record<string, unknown>,
@@ -1203,6 +1593,48 @@ async function processEnrollment(
   if (!draft) {
     if (await hasActiveTask(config.projectId, customer._id, nextStep)) {
       await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + 30_000) });
+      return { sent: false };
+    }
+    // Check recent failed tasks for this exact (customer, step) to prevent duplicate task storms
+    // when upstream AI hits 502/timeout/circuit-breaker; enforce exponential backoff and hard cap at 3 fails/24h.
+    const recentFailed = await AgentTask.find({
+      projectId: config.projectId,
+      userId: config.userId,
+      customerId: customer._id,
+      outreachStep: nextStep,
+      status: 'failed',
+      createdAt: { $gte: new Date(now.getTime() - DAY_MS) },
+    }).sort({ updatedAt: -1 }).limit(4).select('error updatedAt currentStep').lean();
+    if (recentFailed.length > 0) {
+      const latestFail = recentFailed[0]!;
+      const reason = humanizeTaskError(latestFail.error);
+      if (recentFailed.length >= 3) {
+        await markEnrollment(enrollment._id, {
+          status: 'failed',
+          lastError: `AI 任务连续失败 ${recentFailed.length} 次（${reason}），已停止自动重建，请单条试跑排查`,
+          nextRunAt: new Date(now.getTime() + DAY_MS),
+        });
+        return { sent: false };
+      }
+      const backoffMs = TASK_BACKOFF_MS[Math.min(recentFailed.length - 1, TASK_BACKOFF_MS.length - 1)];
+      const retryAt = new Date(new Date(latestFail.updatedAt).getTime() + backoffMs);
+      if (now.getTime() < retryAt.getTime()) {
+        await markEnrollment(enrollment._id, {
+          lastError: `AI 任务失败（${reason}），等待自动退避重试`,
+          nextRunAt: retryAt,
+        });
+        return { sent: false };
+      }
+    }
+    // Backpressure cap: never flood 60 queued tasks into the worker while the AI provider is busy/slow.
+    const inFlightCampaignTasks = await AgentTask.countDocuments({
+      projectId: config.projectId,
+      userId: config.userId,
+      outreachStep: { $in: [1, 2, 3] },
+      status: { $in: ['queued', 'running'] },
+    });
+    if (inFlightCampaignTasks >= MAX_INFLIGHT_OUTREACH_TASKS) {
+      await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + 60_000) });
       return { sent: false };
     }
     if (enrollment.queuedStep === nextStep && enrollment.queuedAt

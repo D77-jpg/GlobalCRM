@@ -121,7 +121,7 @@ export const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().min(1).default('gpt-5.6-luna'),
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(45000),
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(180000).default(75000),
   AI_MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(12).default(6),
   /** 单次送入模型的字符预算；超长历史会优先保留最新内容并记录截断。 */
   AI_MAX_INPUT_CHARS: z.coerce.number().int().min(4000).max(500000).default(60000),

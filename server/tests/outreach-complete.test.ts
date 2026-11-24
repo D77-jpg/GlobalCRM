@@ -1051,3 +1051,182 @@ test('Section 8: admin can batch-reverify a paused rep unverified/partial drafts
     assert.equal(checks[0].quotes[0].start, 14);
   });
 });
+
+test('Section 9: outreach diagnostics, task stage separation, drain-queued-tasks, buyer timezone, and batched sentence check', async () => {
+  const { OutreachAutomationEnrollment } = await import('../src/models');
+  const { AgentTask } = await import('../src/models/AgentTask');
+  const {
+    drainQueuedOutreachTasks,
+    getOutreachAutomationOverview,
+    getOutreachEnrollmentDiagnostics,
+  } = await import('../src/services/outreach-automation.service');
+  const { verifyGroundedEmail } = await import('../src/services/agent/fact-verifier');
+
+  // 1. Batched sentence refinement uses 1 single check call for multiple multi-sentence failed paragraphs (not N serial calls)
+  let sentenceCheckCalls = 0;
+  const mockBundle = {
+    projectId: projectAId,
+    status: 'ready' as const,
+    sources: [{
+      sourceId: 'knowledge:ironhue:v1',
+      title: 'Ironhue Catalog',
+      version: 1,
+      kind: 'knowledge' as const,
+      category: 'product' as const,
+      content: 'IRONHUE builds calibrated plates and Olympic barbells.',
+      source: 'fixture',
+      applicability: '',
+      products: [],
+      validFrom: '2020-01-01',
+      terms: [],
+    }],
+    topics: [],
+    issues: [],
+    facts: [],
+  };
+  const batchedVerifier = {
+    model: 'batched-fixture',
+    async check({ segments }: { segments: { id: string; text: string }[] }) {
+      sentenceCheckCalls += 1;
+      return segments.map((s) => ({
+        id: s.id,
+        status: 'unsupported' as const,
+        quotes: [],
+        reason: 'unsupported in fixture',
+      }));
+    },
+  };
+  await verifyGroundedEmail(
+    'First bad claim. Second bad claim.\n\nThird bad claim. Fourth bad claim.',
+    mockBundle,
+    { taskType: 'first_outreach' },
+    batchedVerifier,
+  );
+  // 1 paragraph-level check + 1 single batched sentence-level check = 2 total (previously 3+)
+  assert.equal(sentenceCheckCalls, 2);
+
+  // 2. Diagnostics, stage separation, buyer timezone, and draining queued backlog
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const rep = await User.create({
+      organizationId: orgA,
+      username: 'fictional_ironhue_diag_rep',
+      passwordHash: 'not-a-real-bcrypt-hash',
+      displayName: 'Diag Rep',
+      role: 'user',
+      status: 'active',
+      projectIds: [new Types.ObjectId(projectAId)],
+    });
+    const campaign = await OutreachAutomationConfig.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      actorRole: 'user',
+      enabled: false,
+      rolloutMode: 'active',
+      dailyLimit: 20,
+      perDomainLimit: 3,
+      windowStart: '09:30',
+      windowEnd: '17:30',
+      timezone: 'Asia/Shanghai',
+      useBuyerTimezone: true,
+    });
+    const swedenBuyer = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Nordic Gym Fixture',
+      company: 'Nordic Fitness AB',
+      country: 'Sweden',
+      email: 'nordic@example.test',
+      status: 'pending',
+      source: 'manual',
+    });
+    const enrollment = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: swedenBuyer._id,
+      status: 'active',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 5 * 60_000),
+      taskIds: [],
+    });
+
+    const sessionId = new Types.ObjectId();
+    // Create 1 failed task + 2 excess queued tasks + 1 running task
+    await AgentTask.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        userId: rep._id,
+        sessionId,
+        actorRole: 'user',
+        goal: 'Step 1',
+        requestKey: 'diag-failed-1',
+        customerId: swedenBuyer._id,
+        kind: 'first_outreach',
+        outreachStep: 1,
+        status: 'failed',
+        currentStep: 'analyze_customer',
+        attempts: 1,
+        error: { code: 'OPENAI_TIMEOUT', message: '模型响应超时', retryable: true },
+        workflowActiveMs: 75200,
+        workflowRecords: [{
+          key: 'generate_email',
+          epoch: 0,
+          inputHash: 'h1',
+          state: 'failed',
+          startedAt: new Date().toISOString(),
+          attempts: 1,
+          reused: 0,
+          durationMs: 75200,
+          error: 'OPENAI_TIMEOUT',
+        }],
+        events: [{ at: new Date(), step: 'analyze_customer', message: '模型响应超时' }],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        userId: rep._id,
+        sessionId,
+        actorRole: 'user',
+        goal: 'Step 1 queued backlog 1',
+        requestKey: 'diag-queued-1',
+        customerId: new Types.ObjectId(),
+        kind: 'first_outreach',
+        outreachStep: 1,
+        status: 'queued',
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        userId: rep._id,
+        sessionId,
+        actorRole: 'user',
+        goal: 'Step 1 queued backlog 2',
+        requestKey: 'diag-queued-2',
+        customerId: new Types.ObjectId(),
+        kind: 'first_outreach',
+        outreachStep: 1,
+        status: 'queued',
+      },
+    ]);
+
+    const overview = await getOutreachAutomationOverview(actorA, rep.id);
+    assert.equal(overview.stats.queuedTasks, 2);
+    assert.equal(overview.stats.failedTasks, 1);
+    const row = overview.queue.find((q) => q.id === enrollment.id);
+    assert.ok(row);
+    assert.equal(row!.draftStage, 'task_failed');
+    assert.equal(row!.taskErrorCode, 'OPENAI_TIMEOUT');
+    assert.equal(row!.effectiveTimezone, 'Europe/Stockholm');
+    assert.equal(row!.timezoneSource, 'country');
+
+    const diag = await getOutreachEnrollmentDiagnostics(actorA, enrollment.id, rep.id);
+    assert.equal(diag.timezone.effectiveTimezone, 'Europe/Stockholm');
+    assert.equal(diag.timezone.source, 'country');
+    assert.equal(diag.latestTask?.errorCode, 'OPENAI_TIMEOUT');
+    assert.equal(diag.latestTask?.steps[0]?.error, 'OPENAI_TIMEOUT');
+    assert.equal(diag.latestTask?.steps[0]?.durationMs, 75200);
+    assert.equal(diag.latestDraft, null);
+
+    const drained = await drainQueuedOutreachTasks(actorA, rep.id);
+    assert.equal(drained.cancelled, 2);
+    assert.equal(drained.overview.stats.queuedTasks, 0);
+  });
+});

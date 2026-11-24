@@ -408,7 +408,10 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
       const altPlaybook = selectOutreachPlaybook({ ...context.playbookBaseInput, forcedSegmentCode: runnerUpAlt.code });
       let selectedMode: 'dual_draft' | 'evidence_rank' = 'evidence_rank';
       let altScore = (runnerUpAlt.score ?? 3) * 1.5 + 50;
-      if (altPlaybook && (options?.dualAngle || activeProvider.name === 'openai' || activeProvider.name === 'mock')) {
+      // Only execute a second live LLM draft + verification pass when explicitly requested (options.dualAngle).
+      // Running dual live drafts unconditionally on background Step-1 outreach doubled model calls, latency,
+      // and upstream 502/timeout risk and frequently tripped the single-task deadline before save_draft.
+      if (altPlaybook && options?.dualAngle) {
         try {
           const altInput: CustomerAnalysisInput = {
             ...context.input,

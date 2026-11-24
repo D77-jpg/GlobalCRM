@@ -1697,6 +1697,14 @@ export interface OutreachAutomationMailbox {
   };
 }
 
+export type OutreachDraftStage =
+  | 'reverify_queued'
+  | 'waiting_model'
+  | 'draft_saved_verified'
+  | 'draft_audit_failed'
+  | 'task_failed'
+  | 'none';
+
 export interface OutreachAutomationQueueRow {
   id: string;
   customerId: string;
@@ -1709,11 +1717,23 @@ export interface OutreachAutomationQueueRow {
   actualStep: number;
   nextStep: number;
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
+  draftStage?: OutreachDraftStage;
   draftReady: boolean;
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
   draftUpdatedAt?: string;
+  taskId?: string;
+  taskStatus?: string;
+  taskStep?: string;
+  taskStepLabel?: string;
+  taskError?: string;
+  taskErrorCode?: string;
+  taskRetryAt?: string;
+  taskDurationMs?: number;
+  effectiveTimezone?: string;
+  timezoneSource?: 'explicit' | 'country' | 'fallback';
+  recipientWindowOpen?: boolean;
   nextRunAt: string;
   lastError?: string;
   lastSentAt?: string;
@@ -1741,6 +1761,9 @@ export interface OutreachAutomationOverview {
     blocked: number;
     failed: number;
     unverifiedDrafts?: number;
+    queuedTasks?: number;
+    runningTasks?: number;
+    failedTasks?: number;
     sentToday: number;
     remainingToday: number;
   };
