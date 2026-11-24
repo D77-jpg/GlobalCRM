@@ -255,12 +255,12 @@ export async function knowledgeFreshness(review:KnowledgeReview,actor:AuthUser):
  const result:KnowledgeFreshness={checkedAt:new Date().toISOString(),changed:[]};
  if(review.projectId!==String(requireProjectId(actor)))return {...result,failed:true};
  try{
-  if(review.context.brandRevision!==undefined){
+  if(review.context?.brandRevision!==undefined){
    const current=await ProjectPlaybook.findOne({projectId:requireProjectId(actor)}).select('version').lean();
    if((current?.version??0)!==review.context.brandRevision)result.changed.push({sourceId:'brand-package',title:'品牌资料包',reason:'品牌版本已变化，请重新生成'});
   }
-  if(review.context.customerId){const customer=await getCustomerByIdOrThrow(review.context.customerId,actor);if(review.context.customerProfile&&JSON.stringify(customerProfileOf(customer))!==JSON.stringify(review.context.customerProfile))result.changed.push({sourceId:'profile:'+review.context.customerId,title:'客户资料',reason:'本稿使用的客户事实已变化'});}
-  if(review.context.customerWebsites?.length){
+  if(review.context?.customerId){const customer=await getCustomerByIdOrThrow(review.context.customerId,actor);if(review.context.customerProfile&&JSON.stringify(customerProfileOf(customer))!==JSON.stringify(review.context.customerProfile))result.changed.push({sourceId:'profile:'+review.context.customerId,title:'客户资料',reason:'本稿使用的客户事实已变化'});}
+  if(review.context?.customerWebsites?.length){
    if(!review.context.customerId)return {...result,failed:true};
    const current=await (await import('../website/research.service')).websiteCustomerEvidence(review.context.customerId,actor);
    for(const source of review.context.customerWebsites){const match=current.find(s=>s.sourceId===source.sourceId);if(!match||match.content.sha256!==source.sha256||match.content.url!==source.url||match.content.text!==source.text||match.content.collectedAt!==source.collectedAt)result.changed.push({sourceId:source.sourceId,title:'客户官网原文',reason:'官网调查快照已变化或当前不可访问，请重新生成'});}

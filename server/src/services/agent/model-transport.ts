@@ -98,12 +98,38 @@ function releaseSlot(tenantKey: string): void {
   drainQueue();
 }
 
+export function modelCircuitState(): { open: boolean; openCount: number; cooldownRemainingMs: number } {
+  const now = Date.now();
+  let openCount = 0;
+  let cooldownRemainingMs = 0;
+  for (const c of circuits.values()) {
+    if (!c.openedAt) continue;
+    const elapsed = now - c.openedAt;
+    if (elapsed < COOLDOWN_MS) {
+      openCount++;
+      cooldownRemainingMs = Math.max(cooldownRemainingMs, COOLDOWN_MS - elapsed);
+    } else if (c.probe) {
+      openCount++;
+      cooldownRemainingMs = Math.max(cooldownRemainingMs, 2000);
+    }
+  }
+  return { open: openCount > 0, openCount, cooldownRemainingMs };
+}
+
+export function resetModelCircuitsForTest(): void {
+  if (process.env.NODE_ENV === 'test' || process.env.NODE_TEST_CONTEXT) {
+    circuits.clear();
+  }
+}
+
 export function modelTransportStatus() {
+  const circuit = modelCircuitState();
   return {
     ...metrics,
     active: totalActive(),
     queueLength: waitQueue.length,
-    openCircuits: [...circuits.values()].filter((c) => c.openedAt && Date.now() - c.openedAt < COOLDOWN_MS).length,
+    openCircuits: circuit.openCount,
+    cooldownRemainingMs: circuit.cooldownRemainingMs,
     cooldownMs: COOLDOWN_MS,
     maxConcurrent: MAX_GLOBAL_CONCURRENT,
     maxPerTenant: MAX_TENANT_CONCURRENT,

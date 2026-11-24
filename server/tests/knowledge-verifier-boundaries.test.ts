@@ -198,3 +198,69 @@ test('fact verifier accepts fenced JSON and zero placeholder offsets without deg
  assert.equal(resolved!.start,14);
  assert.equal(resolved!.end,14+'IRONHUE manufactures free-weight equipment.'.length);
 });
+
+test('fact verifier classifies model_call_failed, output_parse_failed, quote_mismatch and unsupported_claims while preserving real checks',async()=>{
+ const {AgentProviderError}=await import('../src/services/agent/provider');
+ const product={sourceId:'knowledge:ironhue-cap:v1',title:'IRONHUE cap',version:1,kind:'knowledge' as const,category:'product' as const,content:'IRONHUE manufactures rubber bumper plates.',source:'fixture',applicability:'',products:[],validFrom:'2020-01-01',terms:[]};
+ const b={...bundle,sources:[product]};
+ const body='Dear Nordic team,\n\nIRONHUE manufactures rubber bumper plates.\n\nWe also ship overnight to Mars.\n\nWhich SKU line fits your store best?';
+
+ // 1. Circuit open / timeout -> model_call_failed, NEVER blindly retried for OPENAI_CIRCUIT_OPEN
+ let circuitCalls=0;
+ const circuitRes=await verifyGroundedEmail(body,b,{...options,taskType:'first_outreach',outreachStep:1,recipientName:'Nordic'},{
+  model:'fixture-circuit',
+  async check(){circuitCalls++;throw new AgentProviderError('OPENAI_CIRCUIT_OPEN');},
+ });
+ assert.equal(circuitCalls,1,'OPENAI_CIRCUIT_OPEN must not be blindly retried');
+ assert.equal(circuitRes.review.factAudit?.mode,'unavailable');
+ assert.equal(circuitRes.review.factAudit?.failureCategory,'model_call_failed');
+ assert.equal(circuitRes.review.factAudit?.failureCode,'OPENAI_CIRCUIT_OPEN');
+ assert.equal(circuitRes.review.factAudit?.failureStage,'round0_check');
+ assert.ok(knowledgeReviewSendIssue(circuitRes.review));
+
+ // 2. Invalid JSON -> output_parse_failed
+ const parseRes=await verifyGroundedEmail(body,b,{...options,taskType:'first_outreach',outreachStep:1,recipientName:'Nordic'},{
+  model:'fixture-bad-json',
+  async check(){throw new Error('INVALID_FACT_AUDIT_JSON');},
+ });
+ assert.equal(parseRes.review.factAudit?.mode,'unavailable');
+ assert.equal(parseRes.review.factAudit?.failureCategory,'output_parse_failed');
+ assert.equal(parseRes.review.factAudit?.failureCode,'INVALID_FACT_AUDIT_JSON');
+ assert.ok(knowledgeReviewSendIssue(parseRes.review));
+
+ // 3. Quote mismatch -> mode='semantic', failureCategory='quote_mismatch', real checks preserved, still blocked
+ const quoteMismatchRes=await verifyGroundedEmail(body,b,{...options,taskType:'first_outreach',outreachStep:1,recipientName:'Nordic'},{
+  model:'fixture-quote-mismatch',
+  async check({segments}){
+   return segments.map(p=>({
+    id:p.id,
+    status:'supported' as const,
+    quotes:[{sourceId:product.sourceId,quote:'paraphrased quote not in source',start:0,end:10}],
+    reason:'supported',
+   }));
+  },
+ });
+ assert.equal(quoteMismatchRes.review.factAudit?.mode,'semantic');
+ assert.equal(quoteMismatchRes.review.factAudit?.failureCategory,'quote_mismatch');
+ assert.equal(quoteMismatchRes.review.factAudit?.failureCode,'QUOTE_OFFSET_MISMATCH');
+ assert.ok(quoteMismatchRes.review.factAudit?.checks.some(c=>c.status==='unsupported'&&/引用里没有能对上/.test(c.reason)));
+ assert.ok(knowledgeReviewSendIssue(quoteMismatchRes.review));
+
+ // 4. Genuine unsupported claim after rewrite -> mode='semantic', failureCategory='unsupported_claims', real checks preserved (NOT wiped to unverifiable)
+ const unsupportedRes=await verifyGroundedEmail(body,b,{...options,taskType:'first_outreach',outreachStep:1,recipientName:'Nordic'},{
+  model:'fixture-unsupported',
+  async check({segments}){
+   return segments.map(p=>p.text.includes('rubber bumper plates')
+    ?{id:p.id,status:'supported' as const,quotes:[{sourceId:product.sourceId,quote:'IRONHUE manufactures rubber bumper plates.',start:0,end:42}],reason:'direct match'}
+    :{id:p.id,status:'unsupported' as const,quotes:[],reason:'no Mars shipping in evidence'});
+  },
+  async rewrite({body:draft}){return draft;},
+ });
+ assert.equal(unsupportedRes.review.factAudit?.mode,'semantic');
+ assert.equal(unsupportedRes.review.factAudit?.failureCategory,'unsupported_claims');
+ assert.equal(unsupportedRes.review.factAudit?.failureCode,'UNSUPPORTED_AFTER_REWRITE');
+ assert.ok(unsupportedRes.review.factAudit?.checks.some(c=>c.status==='supported'));
+ assert.ok(unsupportedRes.review.factAudit?.checks.some(c=>c.status==='unsupported'&&c.reason.includes('Mars')));
+ assert.ok(!unsupportedRes.review.factAudit?.checks.every(c=>c.status==='unverifiable'));
+ assert.ok(knowledgeReviewSendIssue(unsupportedRes.review));
+});

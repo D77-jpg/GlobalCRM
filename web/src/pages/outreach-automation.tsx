@@ -51,6 +51,28 @@ interface EnrollmentDiagnosticsDto {
   currentStep: number;
   nextStep: number;
   lastError?: string;
+  sendReadiness?: {
+    status:
+      | 'ready_to_send'
+      | 'waiting_buyer_window'
+      | 'blocked_by_send_gate'
+      | 'blocked_by_audit'
+      | 'task_in_progress'
+      | 'task_failed'
+      | 'completed'
+      | 'stopped'
+      | 'no_draft';
+    label: string;
+    detail: string;
+    auditPassed: boolean;
+    sendGatePassed: boolean;
+    sendGateIssues: string[];
+    bodyHashValid?: boolean;
+    knowledgeFresh?: boolean;
+    staleSources?: { sourceId: string; title: string; reason: string }[];
+    waitingForWindow: boolean;
+    waitingForSchedule: boolean;
+  };
   timezone: {
     effectiveTimezone: string;
     source: 'explicit' | 'country' | 'fallback';
@@ -67,6 +89,7 @@ interface EnrollmentDiagnosticsDto {
     currentStep?: string;
     currentStepLabel?: string;
     attempts: number;
+    failureClass?: 'circuit_rejected' | 'upstream_error' | 'none';
     errorCode?: string;
     errorMessage?: string;
     totalDurationMs: number;
@@ -83,6 +106,8 @@ interface EnrollmentDiagnosticsDto {
       checksCount?: number;
       issuesCount?: number;
       completeness?: string;
+      failureCategory?: string;
+      failureCode?: string;
     }[];
     recentEvents: { at: string; step?: string; message: string }[];
   } | null;
@@ -97,10 +122,22 @@ interface EnrollmentDiagnosticsDto {
     sendGateIssue?: string;
     completeness?: string;
     factAuditMode?: string;
+    failureCategory?: string;
+    failureCategoryLabel?: string;
+    failureCode?: string;
+    failureStage?: string;
+    failureStageLabel?: string;
+    failureDetail?: string;
     checksTotal: number;
     checksSupported: number;
     checksNonClaim: number;
     checksFailed: number;
+    failedChecks?: {
+      id: string;
+      status: string;
+      reason: string;
+      excerpt: string;
+    }[];
     issues: { code: string; message: string }[];
   } | null;
 }
@@ -510,6 +547,32 @@ export function OutreachAutomationPage(): React.JSX.Element {
     }
   };
 
+  const recoverCircuitFailed = async (): Promise<void> => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await apiPost<{ scanned: number; recovered: number; skipped: number; overview: OutreachAutomationOverview }>(
+        scoped('/outreach-automation/recover-circuit-failed'),
+        {},
+      );
+      setOverview(res.overview);
+      setForm(res.overview.config);
+      if (res.recovered > 0) {
+        toast.success(`已恢复 ${res.recovered} 位因 AI 熔断误停的客户`, {
+          description: res.overview.config.enabled
+            ? '已错峰排程并在单账号并发上限 3 条内逐步恢复；历史发信失败和合规停止的客户未受影响。'
+            : '已重置为暂停待发状态（总开关仍关闭），不会触发发送；历史发信失败和合规停止的客户未受影响。',
+        });
+      } else {
+        toast.info('当前没有因 AI 熔断误停的客户需要恢复');
+      }
+    } catch (caught) {
+      setError(toErrorMessage(caught, '恢复熔断受影响客户失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const loadDiagnostics = React.useCallback(async (enrollmentId: string) => {
     setDiagRowId(enrollmentId);
     setDiagOpen(true);
@@ -528,6 +591,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const canStart = (overview?.config.rolloutMode === 'shadow' || Boolean(mailbox?.canSend)) && Boolean(overview?.stats.eligible || overview?.stats.enrolled);
   const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + (overview?.stats.blocked ?? 0);
   const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
+  const circuitFailedCount = overview?.stats.circuitFailed ?? 0;
+  const circuitOpen = Boolean(overview?.circuit?.open);
+  const circuitCooldownSec = Math.ceil((overview?.circuit?.cooldownRemainingMs ?? 0) / 1000);
   const queuedTasksCount = overview?.stats.queuedTasks ?? 0;
   const runningTasksCount = overview?.stats.runningTasks ?? 0;
   const failedTasksCount = overview?.stats.failedTasks ?? 0;
@@ -645,6 +711,36 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <p className="mt-3 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
                 今天这个邮箱的 {overview.config.dailyLimit} 封额度已用完，明天发送时段会继续。
               </p>
+            ) : null}
+            {circuitOpen || circuitFailedCount > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-2.5 text-xs text-destructive">
+                <div className="flex min-w-0 items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold">
+                      {circuitOpen
+                        ? `AI 通道处于熔断冷却中（剩余约 ${circuitCooldownSec} 秒），期间已暂停新建任务且不消耗客户重试次数`
+                        : `发现 ${circuitFailedCount} 位客户曾因 AI 通道熔断/并发保护误停`}
+                    </p>
+                    <p className="leading-5 text-muted-foreground">
+                      熔断拦截未实际发往上游模型，不应耗尽客户级重试机会。点击右侧按钮可仅恢复这些受熔断影响的客户并错峰排程（不动历史发信失败与合规停止客户）。
+                    </p>
+                  </div>
+                </div>
+                {circuitFailedCount > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 border-destructive/40 bg-background text-destructive hover:bg-destructive/10"
+                    disabled={busy}
+                    onClick={() => void recoverCircuitFailed()}
+                  >
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                    恢复熔断受影响客户（{circuitFailedCount}）
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
             {unverifiedCount > 0 ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
@@ -981,6 +1077,42 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <p className="flex items-center gap-2 py-6 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden />读取中…</p>
             ) : diagData ? (
               <>
+                {diagData.sendReadiness ? (
+                  <div className={`rounded-md border p-3 space-y-1.5 ${
+                    diagData.sendReadiness.status === 'ready_to_send' || diagData.sendReadiness.status === 'waiting_buyer_window' || diagData.sendReadiness.status === 'completed'
+                      ? 'border-emerald-300/70 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+                      : diagData.sendReadiness.status === 'blocked_by_send_gate' || diagData.sendReadiness.status === 'blocked_by_audit' || diagData.sendReadiness.status === 'task_failed'
+                        ? 'border-destructive/40 bg-destructive/5'
+                        : 'bg-muted/20'
+                  }`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={
+                        diagData.sendReadiness.status === 'ready_to_send' || diagData.sendReadiness.status === 'waiting_buyer_window' || diagData.sendReadiness.status === 'completed'
+                          ? 'developed'
+                          : diagData.sendReadiness.status === 'blocked_by_send_gate' || diagData.sendReadiness.status === 'blocked_by_audit' || diagData.sendReadiness.status === 'task_failed'
+                            ? 'failed'
+                            : 'outline'
+                      }>
+                        {diagData.sendReadiness.label}
+                      </Badge>
+                      <span className="text-[11px] text-muted-foreground">
+                        正文核验：{diagData.sendReadiness.auditPassed ? '通过' : '未通过'}
+                        {' · '}发送闸门：{diagData.sendReadiness.sendGatePassed ? '通过' : '未通过'}
+                        {diagData.sendReadiness.bodyHashValid !== undefined ? ` · 正文指纹：${diagData.sendReadiness.bodyHashValid ? '一致' : '已变更'}` : ''}
+                        {diagData.sendReadiness.knowledgeFresh !== undefined ? ` · 依据新鲜度：${diagData.sendReadiness.knowledgeFresh ? '最新' : '已过期'}` : ''}
+                      </span>
+                    </div>
+                    <p className="leading-5 text-foreground">{diagData.sendReadiness.detail}</p>
+                    {diagData.sendReadiness.sendGateIssues.length > 0 ? (
+                      <ul className="list-disc pl-4 text-destructive">
+                        {diagData.sendReadiness.sendGateIssues.map((msg, idx) => (
+                          <li key={idx}>{msg}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div className="rounded-md border bg-muted/20 p-3 space-y-1">
                   <p className="font-semibold text-foreground">买家实际排程时区（第 {diagData.nextStep} 封）</p>
                   <p className="text-muted-foreground">
@@ -991,13 +1123,23 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 </div>
 
                 <div className="rounded-md border p-3 space-y-2">
-                  <p className="font-semibold text-foreground">最新草稿与逐项核验结果</p>
+                  <p className="font-semibold text-foreground">最新草稿与逐项核验分层</p>
                   {diagData.latestDraft ? (
                     <div className="space-y-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant={diagData.latestDraft.needsReverify || diagData.latestDraft.sendGateIssue ? 'failed' : 'developed'}>
-                          {diagData.latestDraft.needsReverify || diagData.latestDraft.sendGateIssue ? '未通过自动发送核验' : '草稿已保存且核验通过'}
+                          {diagData.latestDraft.needsReverify
+                            ? (diagData.latestDraft.failureCategoryLabel ? `核验失败 · ${diagData.latestDraft.failureCategoryLabel}` : '正文核验未通过')
+                            : diagData.latestDraft.sendGateIssue
+                              ? '正文核验通过 · 其他发送检查未通过'
+                              : '草稿已保存且核验通过'}
                         </Badge>
+                        {diagData.latestDraft.failureStageLabel ? (
+                          <Badge variant="outline">阶段：{diagData.latestDraft.failureStageLabel}</Badge>
+                        ) : null}
+                        {diagData.latestDraft.failureCode ? (
+                          <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{diagData.latestDraft.failureCode}</code>
+                        ) : null}
                         <span className="text-muted-foreground">
                           第 {diagData.latestDraft.outreachStep ?? '—'} 封 · completeness={diagData.latestDraft.completeness ?? '—'} · mode={diagData.latestDraft.factAuditMode ?? '—'}
                         </span>
@@ -1006,6 +1148,27 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       <p className="text-muted-foreground">
                         逐项核验：总计 {diagData.latestDraft.checksTotal} 项 · 支持 {diagData.latestDraft.checksSupported} · 非事实 {diagData.latestDraft.checksNonClaim} · 未通过 {diagData.latestDraft.checksFailed} · 更新于 {formatDateTime(diagData.latestDraft.updatedAt)}
                       </p>
+                      {diagData.latestDraft.failureDetail ? (
+                        <p className="rounded bg-amber-50/70 px-2 py-1 text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
+                          核验分层说明：{diagData.latestDraft.failureDetail}
+                        </p>
+                      ) : null}
+                      {diagData.latestDraft.failedChecks && diagData.latestDraft.failedChecks.length > 0 ? (
+                        <div className="space-y-1 rounded border bg-muted/20 p-2">
+                          <p className="font-medium text-foreground">未通过核验的段落/句子（{diagData.latestDraft.failedChecks.length} 处）：</p>
+                          <ul className="space-y-1.5">
+                            {diagData.latestDraft.failedChecks.map((chk, idx) => (
+                              <li key={`${chk.id}-${idx}`} className="rounded bg-background p-1.5 text-[11px]">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <Badge variant="failed" className="px-1.5 py-0 text-[10px]">{chk.status}</Badge>
+                                  <span className="font-medium text-destructive">{chk.reason}</span>
+                                </div>
+                                {chk.excerpt ? <p className="mt-1 text-muted-foreground">摘录：{chk.excerpt}</p> : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                       {diagData.latestDraft.sendGateIssue ? (
                         <p className="text-destructive">自动发送闸门原因：{diagData.latestDraft.sendGateIssue}</p>
                       ) : null}
@@ -1034,7 +1197,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       </p>
                       {diagData.latestTask.errorMessage ? (
                         <p className="rounded bg-destructive/10 px-2 py-1 text-destructive">
-                          失败原因：{diagData.latestTask.errorMessage}
+                          {diagData.latestTask.failureClass === 'circuit_rejected' ? '[熔断/并发保护，未发往上游] ' : '[实际发往上游失败] '}
+                          {diagData.latestTask.errorMessage}
                           {diagData.latestTask.errorCode ? ` (${diagData.latestTask.errorCode})` : ''}
                         </p>
                       ) : null}
@@ -1056,7 +1220,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                   <TableCell className="py-1.5 text-[11px]">{s.state}</TableCell>
                                   <TableCell className="py-1.5 text-[11px] tabular-nums">{s.durationMs ? `${(s.durationMs / 1000).toFixed(1)}s` : '—'}</TableCell>
                                   <TableCell className="py-1.5 text-[11px] text-muted-foreground">
-                                    {s.error ? <span className="text-destructive">{s.error}</span> : s.verifyMode ? `${s.verifyMode} · ${s.checksCount ?? 0} checks · ${s.issuesCount ?? 0} issues` : '—'}
+                                    {s.error
+                                      ? <span className="text-destructive">{s.error}</span>
+                                      : s.verifyMode
+                                        ? `${s.verifyMode} · ${s.checksCount ?? 0} checks · ${s.issuesCount ?? 0} issues${s.failureCategory ? ` · ${s.failureCategory}` : ''}`
+                                        : '—'}
                                   </TableCell>
                                 </TableRow>
                               ))}

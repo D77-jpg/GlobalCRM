@@ -13,6 +13,7 @@ import {
   getOutreachEnrollmentDiagnostics,
   migrateLegacyOutreachModes,
   pauseOutreachAutomation,
+  recoverCircuitFailedEnrollments,
   regenerateOutreachEnrollmentDraft,
   resumeOutreachAutomation,
   reverifyUnverifiedOutreachDrafts,
@@ -126,6 +127,10 @@ router.post('/reverify-unverified', validate({
 
 router.post('/drain-queued-tasks', asyncHandler(async (req, res) => {
   sendSuccess(res, await drainQueuedOutreachTasks(req.user!, targetUserId(req)));
+}));
+
+router.post('/recover-circuit-failed', asyncHandler(async (req, res) => {
+  sendSuccess(res, await recoverCircuitFailedEnrollments(req.user!, targetUserId(req)));
 }));
 
 for (const action of ['pause', 'resume'] as const) {

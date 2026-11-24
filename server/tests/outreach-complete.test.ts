@@ -1230,3 +1230,308 @@ test('Section 9: outreach diagnostics, task stage separation, drain-queued-tasks
     assert.equal(drained.overview.stats.queuedTasks, 0);
   });
 });
+
+test('P1-A/P1-B: circuit-breaker never burns customer retries, selective recovery skips SMTP/upstream failures, and diagnostics separate send-readiness states', async () => {
+  const { createServer } = await import('node:http');
+  const { once } = await import('node:events');
+  const {
+    OutreachAutomationConfig,
+    OutreachAutomationEnrollment,
+  } = await import('../src/models/OutreachAutomation');
+  const { AgentTask } = await import('../src/models/AgentTask');
+  const {
+    getOutreachAutomationOverview,
+    getOutreachEnrollmentDiagnostics,
+    recoverCircuitFailedEnrollments,
+    tickOutreachAutomation,
+  } = await import('../src/services/outreach-automation.service');
+  const {
+    guardedModelFetch,
+    modelCircuitState,
+    resetModelCircuitsForTest,
+  } = await import('../src/services/agent/model-transport');
+  const { draftHash } = await import('../src/services/agent/knowledge-grounding');
+
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const rep = await User.create({
+      organizationId: orgA,
+      username: 'fictional_p1_circuit_rep',
+      passwordHash: 'not-a-real-bcrypt-hash',
+      displayName: 'Circuit Rep',
+      role: 'user',
+      status: 'active',
+      projectIds: [new Types.ObjectId(projectAId)],
+    });
+    const campaign = await OutreachAutomationConfig.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      actorRole: 'user',
+      enabled: true,
+      rolloutMode: 'shadow',
+      dailyLimit: 20,
+      perDomainLimit: 3,
+      windowStart: '09:30',
+      windowEnd: '17:30',
+      timezone: 'Asia/Shanghai',
+      useBuyerTimezone: true,
+    });
+
+    const [custCircuitActive, custCircuitFailed, custUpstreamFailed, custSmtpFailed, custBlocked] = await Customer.create([
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Circuit Active Buyer', company: 'CA Co', country: 'United Kingdom', email: 'ca@example.test', status: 'pending', source: 'manual' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Circuit Failed Buyer', company: 'CF Co', country: 'Germany', email: 'cf@example.test', status: 'pending', source: 'manual' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Upstream Timeout Buyer', company: 'UT Co', country: 'France', email: 'ut@example.test', status: 'pending', source: 'manual' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'SMTP Failed Buyer', company: 'SF Co', country: 'Spain', email: 'sf@example.test', status: 'contacted', outreachStep: 1, letterCount: 1, source: 'manual' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Replied Blocked Buyer', company: 'RB Co', country: 'Italy', email: 'rb@example.test', status: 'replied', outreachRepliedAt: new Date(), source: 'manual' },
+    ]);
+
+    const past = new Date(Date.now() - 120_000);
+    const [enrCircuitActive, enrCircuitFailed, enrUpstreamFailed, enrSmtpFailed, enrBlocked] = await OutreachAutomationEnrollment.create([
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custCircuitActive._id, status: 'active', currentStep: 0, nextRunAt: past, taskIds: [] },
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custCircuitFailed._id, status: 'failed', currentStep: 0, nextRunAt: new Date(Date.now() + 86_400_000), lastError: 'AI 任务连续失败 3 次（AI 通道暂时熔断保护中），已停止自动重建', taskIds: [] },
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custUpstreamFailed._id, status: 'failed', currentStep: 0, nextRunAt: new Date(Date.now() + 86_400_000), lastError: 'AI 任务连续失败 3 次（AI 请求超时），已停止自动重建', taskIds: [] },
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custSmtpFailed._id, status: 'failed', currentStep: 1, nextRunAt: new Date(Date.now() + 86_400_000), lastError: '第 2 封状态异常：failed', taskIds: [] },
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custBlocked._id, status: 'blocked', currentStep: 0, nextRunAt: past, lastError: '客户已回复，自动开发已停止', taskIds: [] },
+    ]);
+
+    // Historic SMTP failure letter on step 2
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custSmtpFailed._id,
+      userId: rep._id,
+      outreachStep: 2,
+      subject: 'Step 2 SMTP fail fixture',
+      content: '<p>Step 2</p>',
+      contentText: 'Step 2',
+      recipientEmail: 'sf@example.test',
+      status: 'failed',
+      error: 'SMTP 550',
+    });
+
+    const sessionId = new Types.ObjectId();
+    // Seed 3 OPENAI_CIRCUIT_OPEN failures for custCircuitActive (older than 30s) — MUST NOT burn 3-retry cap!
+    const oldFailAt = new Date(Date.now() - 90_000);
+    await AgentTask.create([1, 2, 3].map((i) => ({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      sessionId,
+      actorRole: 'user',
+      goal: `Circuit fail ${i}`,
+      requestKey: `p1-circuit-active-${i}`,
+      customerId: custCircuitActive._id,
+      kind: 'first_outreach',
+      outreachStep: 1,
+      status: 'failed',
+      error: { code: 'OPENAI_CIRCUIT_OPEN', message: 'AI 通道暂时熔断保护中', retryable: true },
+      updatedAt: oldFailAt,
+    })));
+    // Seed 3 OPENAI_CIRCUIT_OPEN failures for custCircuitFailed and 3 OPENAI_TIMEOUT for custUpstreamFailed
+    await AgentTask.create([
+      ...[1, 2, 3].map((i) => ({
+        projectId: new Types.ObjectId(projectAId),
+        userId: rep._id,
+        sessionId,
+        actorRole: 'user',
+        goal: `CF ${i}`,
+        requestKey: `p1-cf-${i}`,
+        customerId: custCircuitFailed._id,
+        kind: 'first_outreach',
+        outreachStep: 1,
+        status: 'failed',
+        error: { code: 'OPENAI_CIRCUIT_OPEN', message: 'AI 通道暂时熔断保护中', retryable: true },
+      })),
+      ...[1, 2, 3].map((i) => ({
+        projectId: new Types.ObjectId(projectAId),
+        userId: rep._id,
+        sessionId,
+        actorRole: 'user',
+        goal: `UT ${i}`,
+        requestKey: `p1-ut-${i}`,
+        customerId: custUpstreamFailed._id,
+        kind: 'first_outreach',
+        outreachStep: 1,
+        status: 'failed',
+        error: { code: 'OPENAI_TIMEOUT', message: 'AI 请求超时', retryable: true },
+      })),
+    ]);
+
+    // 1. Trip real loopback 503 circuit -> verify tick creates ZERO new tasks and keeps enrollment active
+    const failServer = createServer((_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { code: 'UPSTREAM_503' } }));
+    });
+    failServer.listen(0, '127.0.0.1');
+    await once(failServer, 'listening');
+    const port = (failServer.address() as import('node:net').AddressInfo).port;
+    try {
+      for (let i = 0; i < 3; i++) await guardedModelFetch(`http://127.0.0.1:${port}/v1/responses`, {});
+      assert.equal(modelCircuitState().open, true);
+
+      const tasksBefore = await AgentTask.countDocuments({ customerId: custCircuitActive._id });
+      await tickOutreachAutomation(new Date());
+      const tasksAfter = await AgentTask.countDocuments({ customerId: custCircuitActive._id });
+      assert.equal(tasksAfter, tasksBefore, 'Must NOT spawn doomed AgentTasks while circuit is open');
+
+      const reloadedActive = await OutreachAutomationEnrollment.findById(enrCircuitActive._id).lean();
+      assert.equal(reloadedActive?.status, 'active', 'Circuit-open rejections must NEVER mark enrollment failed');
+      assert.match(String(reloadedActive?.lastError ?? ''), /熔断冷却中/);
+
+      const overviewWhileOpen = await getOutreachAutomationOverview(actorA, rep.id);
+      assert.equal(overviewWhileOpen.circuit.open, true);
+      assert.equal(overviewWhileOpen.stats.circuitFailed, 1);
+    } finally {
+      resetModelCircuitsForTest();
+      failServer.closeAllConnections();
+      await new Promise<void>((r) => failServer.close(() => r()));
+    }
+
+    // 2. Selective recovery recovers ONLY custCircuitFailed, leaving timeout/SMTP/blocked untouched
+    const rec = await recoverCircuitFailedEnrollments(actorA, rep.id);
+    assert.equal(rec.recovered, 1);
+    assert.equal(rec.skipped, 2);
+    assert.equal((await OutreachAutomationEnrollment.findById(enrCircuitFailed._id).lean())?.status, 'active');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrUpstreamFailed._id).lean())?.status, 'failed');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrSmtpFailed._id).lean())?.status, 'failed');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrBlocked._id).lean())?.status, 'blocked');
+    const cancelledCircuitTasks = await AgentTask.countDocuments({ customerId: custCircuitFailed._id, status: 'cancelled' });
+    assert.equal(cancelledCircuitTasks, 3);
+
+    // 3. Diagnostics clearly separate: blocked_by_audit vs waiting_buyer_window vs blocked_by_send_gate vs ready_to_send
+    const { AgentKnowledge } = await import('../src/models/AgentKnowledge');
+    const kbContent = 'We manufacture rubber bumper plates for gym brands with strict weight checks and steady production runs. Our factory supports custom logo molding and steady repeat supply for commercial equipment buyers across Europe.';
+    const kbDoc = await AgentKnowledge.create({
+      projectId: new Types.ObjectId(projectAId),
+      version: 1,
+      approvedVersion: 1,
+      revisions: [{
+        version: 1,
+        title: 'IRONHUE Product Fixture',
+        category: 'product',
+        content: kbContent,
+        approved: true,
+        validFrom: new Date(0),
+        createdBy: rep._id,
+        createdAt: new Date(),
+      }],
+    });
+    const validBody = [
+      'Dear CA Co team,',
+      'Gym buyers often struggle with uneven plate bounce and slow restocks when scaling a commercial free-weight range.',
+      'We manufacture rubber bumper plates for gym brands with strict weight checks and steady production runs. Our factory supports custom logo molding and steady repeat supply for commercial equipment buyers across Europe.',
+      'Which bumper plate line would you like to look at first?',
+    ].join('\n\n');
+    const validKnowledgeSource = {
+      sourceId: `knowledge:${String(kbDoc._id)}:v1`,
+      knowledgeId: String(kbDoc._id),
+      title: 'IRONHUE Product Fixture',
+      version: 1,
+      kind: 'knowledge' as const,
+      category: 'product' as const,
+      content: kbContent,
+      source: 'fixture',
+      applicability: '',
+      products: ['bumper plates'],
+      validFrom: new Date(0).toISOString(),
+      terms: [],
+    };
+    const makePassingReview = (body: string) => ({
+      version: 1 as const,
+      projectId: projectAId,
+      taskType: 'first_outreach',
+      generatedAt: new Date().toISOString(),
+      status: 'ready' as const,
+      completeness: 'complete' as const,
+      sources: [validKnowledgeSource],
+      claims: [{ text: kbContent, sourceIds: [validKnowledgeSource.sourceId] }],
+      questions: [],
+      issues: [],
+      context: {},
+      bodyHash: draftHash(body),
+      factAudit: {
+        contract: 's4.1' as const,
+        mode: 'semantic' as const,
+        attempts: 1,
+        facts: [],
+        checks: [
+          { id: 's0', text: 'Dear CA Co team,', status: 'non_claim' as const, sourceIds: [], reason: 'greeting' },
+          { id: 's1', text: 'Gym buyers often struggle with uneven plate bounce and slow restocks when scaling a commercial free-weight range.', status: 'non_claim' as const, sourceIds: [], reason: 'category insight' },
+          { id: 's2', text: kbContent, status: 'supported' as const, sourceIds: [validKnowledgeSource.sourceId], reason: 'exact' },
+          { id: 's3', text: 'Which bumper plate line would you like to look at first?', status: 'non_claim' as const, sourceIds: [], reason: 'question' },
+        ],
+      },
+    });
+
+    // (a) Waiting for schedule / buyer window (audit passed + send gate passed + future nextRunAt)
+    const draftWaiting = await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custCircuitActive._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Rubber bumper plates OEM supply',
+      content: `<p>${validBody}</p>`,
+      contentText: validBody,
+      recipientEmail: 'ca@example.test',
+      status: 'draft',
+      needsReview: false,
+      knowledgeReview: makePassingReview(validBody),
+    });
+    await OutreachAutomationEnrollment.updateOne(
+      { _id: enrCircuitActive._id },
+      { $set: { nextRunAt: new Date(Date.now() + 2 * 60 * 60_000), lastError: null } },
+    );
+    const diagWaiting = await getOutreachEnrollmentDiagnostics(actorA, enrCircuitActive.id, rep.id);
+    assert.equal(diagWaiting.sendReadiness.auditPassed, true);
+    assert.equal(diagWaiting.sendReadiness.sendGatePassed, true, JSON.stringify(diagWaiting.sendReadiness));
+    assert.equal(diagWaiting.sendReadiness.status, 'waiting_buyer_window');
+
+    // (b) Audit passed, BUT send gate failed (bodyHash tampered after verification)
+    await DevelopmentLetter.updateOne(
+      { _id: draftWaiting._id },
+      { $set: { contentText: `${validBody}\n\nUnverified extra sentence.` } },
+    );
+    const diagGateBlocked = await getOutreachEnrollmentDiagnostics(actorA, enrCircuitActive.id, rep.id);
+    assert.equal(diagGateBlocked.sendReadiness.auditPassed, true);
+    assert.equal(diagGateBlocked.sendReadiness.sendGatePassed, false);
+    assert.equal(diagGateBlocked.sendReadiness.status, 'blocked_by_send_gate');
+    assert.equal(diagGateBlocked.sendReadiness.bodyHashValid, false);
+    assert.ok(diagGateBlocked.sendReadiness.sendGateIssues.some((s) => s.includes('bodyHash')));
+
+    // (c) Audit failed with layered failureCategory + failedChecks
+    await DevelopmentLetter.updateOne(
+      { _id: draftWaiting._id },
+      {
+        $set: {
+          contentText: validBody,
+          knowledgeReview: {
+            ...makePassingReview(validBody),
+            completeness: 'partial',
+            issues: [
+              { code: 'semantic_unverified', message: '生成稿经一次重写仍有无法支持的主张' },
+              { code: 'draft_unverified', message: '正文已完成语义核验但仍存在未通过项' },
+            ],
+            factAudit: {
+              contract: 's4.1',
+              mode: 'semantic',
+              attempts: 2,
+              facts: [],
+              failureCategory: 'unsupported_claims',
+              failureCode: 'UNSUPPORTED_AFTER_REWRITE',
+              failureStage: 'round1_check',
+              failureDetail: '1 处正文主张缺少有效依据',
+              checks: [
+                { id: 's0', text: 'Dear CA Co team,', status: 'non_claim', sourceIds: [], reason: 'greeting' },
+                { id: 's1', text: 'We offer lifetime warranty on all plates.', status: 'unsupported', sourceIds: [], reason: '知识库无终身质保依据' },
+              ],
+            },
+          },
+        },
+      },
+    );
+    const diagAuditBlocked = await getOutreachEnrollmentDiagnostics(actorA, enrCircuitActive.id, rep.id);
+    assert.equal(diagAuditBlocked.sendReadiness.auditPassed, false);
+    assert.equal(diagAuditBlocked.sendReadiness.status, 'blocked_by_audit');
+    assert.equal(diagAuditBlocked.latestDraft?.failureCategory, 'unsupported_claims');
+    assert.equal(diagAuditBlocked.latestDraft?.failureStage, 'round1_check');
+    assert.equal(diagAuditBlocked.latestDraft?.failedChecks.length, 1);
+    assert.equal(diagAuditBlocked.latestDraft?.failedChecks[0]?.reason, '知识库无终身质保依据');
+  });
+});
