@@ -800,3 +800,254 @@ test('Live eval --use-crm-ai loads encrypted CRM AI provider via tenant context 
     global.fetch = originalFetch;
   }
 });
+
+test('Section 8: admin can batch-reverify a paused rep unverified/partial drafts without enabling sending or touching replied blocks', async () => {
+  const {
+    OutreachAutomationEnrollment,
+  } = await import('../src/models');
+  const { AgentTask } = await import('../src/models/AgentTask');
+  const {
+    getOutreachAutomationOverview,
+    reverifyUnverifiedOutreachDrafts,
+    inspectOutreachDraftAudit,
+  } = await import('../src/services/outreach-automation.service');
+
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const rep = await User.create({
+      organizationId: orgA,
+      username: 'fictional_carlos_rep',
+      passwordHash: 'not-a-real-bcrypt-hash',
+      displayName: 'Carlos Fixture',
+      role: 'user',
+      status: 'active',
+      projectIds: [new Types.ObjectId(projectAId)],
+    });
+
+    const repActor: AuthUser = {
+      id: rep.id,
+      organizationId: String(orgA),
+      projectId: projectAId,
+      username: rep.username,
+      displayName: rep.displayName,
+      role: 'user',
+    };
+
+    const campaign = await OutreachAutomationConfig.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      actorRole: 'user',
+      enabled: false,
+      pausedReason: '修复正文核验中，暂时暂停正式发送',
+      rolloutMode: 'active',
+      dailyLimit: 20,
+      perDomainLimit: 3,
+      windowStart: '09:30',
+      windowEnd: '17:30',
+      timezone: 'Asia/Shanghai',
+    });
+
+    const [cUnavail, cPartial, cReplied] = await Customer.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        ownerId: rep._id,
+        name: 'Fictional Gym Alpha',
+        company: 'Alpha Fitness Co.',
+        email: 'alpha@example.test',
+        status: 'pending',
+        source: 'manual',
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        ownerId: rep._id,
+        name: 'Fictional Gym Beta',
+        company: 'Beta Sports AB',
+        email: 'beta@example.test',
+        status: 'pending',
+        source: 'manual',
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        ownerId: rep._id,
+        name: 'Fictional Gym Replied',
+        company: 'Gamma Fitness Ltd',
+        email: 'gamma@example.test',
+        status: 'contacted',
+        outreachRepliedAt: new Date(),
+        source: 'manual',
+      },
+    ]);
+
+    const staleDate = new Date('2026-11-09T08:00:00.000Z');
+    const [draftUnavail, draftPartial] = await DevelopmentLetter.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: cUnavail._id,
+        recipientName: cUnavail.name,
+        recipientEmail: cUnavail.email!,
+        subject: 'Outreach Alpha',
+        content: '<p>Old draft alpha</p>',
+        contentText: 'Old draft alpha',
+        template: 'Old draft alpha',
+        status: 'draft',
+        channel: 'mock',
+        outreachStep: 1,
+        createdAt: staleDate,
+        updatedAt: staleDate,
+        knowledgeReview: {
+          version: 1,
+          projectId: projectAId,
+          taskType: 'first_outreach',
+          generatedAt: staleDate.toISOString(),
+          status: 'ready',
+          completeness: 'partial',
+          sources: [],
+          claims: [],
+          questions: [],
+          issues: [
+            { code: 'semantic_unverified', message: '语义核验暂时失败' },
+            { code: 'draft_unverified', message: '正文是模型原稿，逐项核验没有完成' },
+          ],
+          context: {},
+          bodyHash: 'stale-hash-1',
+          factAudit: {
+            contract: 's4.1',
+            mode: 'unavailable',
+            attempts: 1,
+            checks: [{ id: 's0', text: 'Old draft alpha', status: 'unverifiable', sourceIds: [], reason: 'unverified' }],
+            facts: [],
+          },
+        },
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: cPartial._id,
+        recipientName: cPartial.name,
+        recipientEmail: cPartial.email!,
+        subject: 'Outreach Beta',
+        content: '<p>Old draft beta</p>',
+        contentText: 'Old draft beta',
+        template: 'Old draft beta',
+        status: 'draft',
+        channel: 'mock',
+        outreachStep: 1,
+        createdAt: staleDate,
+        updatedAt: staleDate,
+        knowledgeReview: {
+          version: 1,
+          projectId: projectAId,
+          taskType: 'first_outreach',
+          generatedAt: staleDate.toISOString(),
+          status: 'ready',
+          completeness: 'partial',
+          sources: [],
+          claims: [],
+          questions: [],
+          issues: [{ code: 'semantic_partial', message: '部分核验' }],
+          context: {},
+          bodyHash: 'stale-hash-2',
+          factAudit: {
+            contract: 's4.1',
+            mode: 'semantic',
+            attempts: 2,
+            checks: [{ id: 's0', text: 'Old draft beta', status: 'unverifiable', sourceIds: [], reason: 'missing evidence' }],
+            facts: [],
+          },
+        },
+      },
+    ]);
+
+    assert.equal(inspectOutreachDraftAudit(draftUnavail).needsReverify, true);
+    assert.equal(inspectOutreachDraftAudit(draftPartial).needsReverify, true);
+
+    await OutreachAutomationEnrollment.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: cUnavail._id,
+        status: 'paused',
+        currentStep: 0,
+        nextRunAt: staleDate,
+        lastError: '自动发送已阻止：正文尚未完成核验',
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: cPartial._id,
+        status: 'blocked',
+        currentStep: 0,
+        nextRunAt: staleDate,
+        lastError: '模拟校验未完成：正文仍含缺少依据或冲突的内容',
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: cReplied._id,
+        status: 'blocked',
+        currentStep: 1,
+        nextRunAt: staleDate,
+        lastError: '客户已回复，自动开发已停止',
+        taskIds: [],
+      },
+    ]);
+
+    // 1. Admin inspecting rep overview sees exactly 2 unverified drafts
+    const before = await getOutreachAutomationOverview(actorA, rep.id);
+    assert.equal(before.stats.unverifiedDrafts, 2);
+    assert.equal(before.queue.filter((r) => r.draftNeedsReverify).length, 2);
+
+    // 2. Non-admin cannot reverify another user's drafts
+    await assert.rejects(
+      reverifyUnverifiedOutreachDrafts(repActor, {}, userAId),
+      /只有管理员可以管理其他业务员/,
+    );
+
+    // 3. Admin batch-reverifies rep's unverified drafts while campaign stays PAUSED
+    const res = await reverifyUnverifiedOutreachDrafts(actorA, {}, rep.id);
+    assert.equal(res.queued, 2);
+    assert.equal(res.taskIds.length, 2);
+    assert.equal(res.overview.config.enabled, false, 'Formal sending must remain paused');
+
+    // Old stale drafts archived as cancelled (never deleted)
+    const old1 = await DevelopmentLetter.findById(draftUnavail._id).lean();
+    const old2 = await DevelopmentLetter.findById(draftPartial._id).lean();
+    assert.equal(old1?.status, 'cancelled');
+    assert.equal(old2?.status, 'cancelled');
+
+    // New tasks are created under rep's own userId with outreachStep: 1
+    const newTasks = await AgentTask.find({ _id: { $in: res.taskIds } }).lean();
+    assert.equal(newTasks.length, 2);
+    for (const t of newTasks) {
+      assert.equal(String(t.userId), rep.id);
+      assert.equal(t.outreachStep, 1);
+      assert.equal(t.status, 'queued');
+    }
+
+    // Replied/blocked customer was NOT touched
+    const repliedRow = await OutreachAutomationEnrollment.findOne({ campaignId: campaign._id, customerId: cReplied._id }).lean();
+    assert.equal(repliedRow?.status, 'blocked');
+    assert.equal(repliedRow?.lastError, '客户已回复，自动开发已停止');
+
+    // 4. Verify providerFactVerifier parses fenced JSON + zero offsets cleanly against live tenant DB
+    const { providerFactVerifier } = await import('../src/services/agent/fact-verifier');
+    const fenced = '```json\n{"checks":[{"id":"s0","status":"supported","quotes":[{"sourceId":"knowledge:free-weight:v1","quote":"IRONHUE manufactures free-weight equipment.","start":0,"end":0}],"reason":"exact"}]}\n```';
+    const fakeProvider = {
+      name: 'openai' as const,
+      model: 'gpt-6.2-sol-fixture',
+      isAvailable: () => true,
+      async createTurn() { return { text: fenced, toolCalls: [], usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 } }; },
+    };
+    const verifier = providerFactVerifier(fakeProvider as never, repActor);
+    assert.ok(verifier);
+    const checks = await verifier!.check({
+      segments: [{ id: 's0', text: 'IRONHUE manufactures free-weight equipment.' }],
+      evidence: [{ sourceId: 'knowledge:free-weight:v1', text: 'Catalog note: IRONHUE manufactures free-weight equipment.' }],
+    });
+    assert.equal(checks[0].status, 'supported');
+    assert.equal(checks[0].quotes[0].start, 14);
+  });
+});

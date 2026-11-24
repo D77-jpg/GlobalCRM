@@ -1710,6 +1710,10 @@ export interface OutreachAutomationQueueRow {
   nextStep: number;
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
   draftReady: boolean;
+  draftId?: string;
+  draftNeedsReverify?: boolean;
+  draftAuditReason?: string;
+  draftUpdatedAt?: string;
   nextRunAt: string;
   lastError?: string;
   lastSentAt?: string;
@@ -1736,6 +1740,7 @@ export interface OutreachAutomationOverview {
     completed: number;
     blocked: number;
     failed: number;
+    unverifiedDrafts?: number;
     sentToday: number;
     remainingToday: number;
   };

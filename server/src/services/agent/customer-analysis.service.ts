@@ -616,6 +616,8 @@ export async function saveAnalysisEmailDraft(id: string, input: ConfirmAgentAnal
     const result = await sendLetter({
       customerId: String(locked.customerId), subject: locked.emailDraft.subject, content, markAsDeveloped: false,
       saveAsDraft: true, requestKey: `agent-analysis-email:${locked.id}`,
+      ...(locked.outreachStep ? { outreachStep: locked.outreachStep } : {}),
+      ...(locked.outreachStep || locked.knowledgeReview?.taskType === 'first_outreach' ? { agentAnalysisId: locked.id } : {}),
     }, actor);
     if(locked.knowledgeReview)await DevelopmentLetter.updateOne({_id:result.letter.id,projectId:requireProjectId(actor),knowledgeReview:{$exists:false}},{$set:{knowledgeReview:{...locked.knowledgeReview,bodyHash:draftHash(result.letter.contentText)}}});
     if (result.letter.status !== 'draft' || result.delivered) throw ApiError.internal('草稿安全校验失败');
