@@ -1092,12 +1092,14 @@ export async function resendLetter(
  */
 export async function assertAutomaticDraftCanSend(letter: DevelopmentLetterDocument, actor: AuthUser): Promise<void> {
   const review = letter.knowledgeReview;
-  const project = await Project.findById(letter.projectId).select('brandProfile').lean();
+  const project = await Project.findById(letter.projectId).select('code slug name companyName industry website mailFrom senderName brandProfile').lean();
   const approvedOffers = project?.brandProfile?.approvedOffers;
+  const signature = resolveProjectSalesProfile(project).signature;
   const blocker = automatedReviewIssue(review, letter.outreachStep, {
     bodyText: letter.contentText,
     subject: letter.subject,
     approvedOffers,
+    signature,
   });
   if (blocker) throw ApiError.conflict(`自动发送已阻止：${blocker}`);
   if (!review || review.bodyHash !== draftHash(letter.contentText)) throw ApiError.conflict('自动发送草稿在核验后发生变化');

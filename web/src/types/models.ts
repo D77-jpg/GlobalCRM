@@ -1775,6 +1775,7 @@ export interface OutreachAutomationOverview {
     blocked: number;
     failed: number;
     circuitFailed?: number;
+    aiFailed?: number;
     unverifiedDrafts?: number;
     exceptionQueueCount?: number;
     approvedProofBlocksCount?: number;

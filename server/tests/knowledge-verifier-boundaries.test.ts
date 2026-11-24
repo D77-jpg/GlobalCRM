@@ -394,3 +394,46 @@ test('Plan B: Pre-Approved Proof Blocks fast-path verifies outreach in 0 LLM cal
  );
  assert.equal(fabricated,undefined);
 });
+
+test('P1 polish: long multi-word company salutations are non_claim and multi-line signatures never inflate Step-3 word count',async()=>{
+ const {evaluateOutreachDraftQuality}=await import('../src/services/agent/outreach-quality');
+ // 1. Long multi-word company salutations -> non_claim (never unverifiable), while disguised facts stay blocked
+ const longSalutations=[
+  'Dear Axovent Commercial Fitness Systems team,',
+  'Dear Delightex Sports / BODYFIT team,',
+  'Dear EFS NI Ltd,',
+  'Dear Rebel Elite Fitness team,',
+ ];
+ for(const greeting of longSalutations){
+  const checks=checkSemanticResults(greeting,bundle,[]);
+  assert.equal(checks[0].status,'non_claim',`Greeting must be non_claim: ${greeting}`);
+ }
+ const numericCompanyCustomer={id:'c360',profile:{name:'360 Fitness Gym',company:'360 Fitness Gym',country:'UK',industry:'Fitness',interestedProducts:'plates'}};
+ assert.equal(checkSemanticResults('Dear 360 Fitness Gym team,',bundle,[],numericCompanyCustomer)[0].status,'non_claim');
+ for(const disguised of ['Hi, we make velvet pouches and gift boxes.','Dear team, our MOQ is 50 pcs.','Hello, we guarantee free shipping.']){
+  assert.notEqual(checkSemanticResults(disguised,bundle,[])[0].status,'non_claim',`Disguised claim must not be non_claim: ${disguised}`);
+ }
+
+ // 2. Step-3 closing email (~45 real body words) + full IRONHUE signature (~35 words) must NOT be falsely blocked at 80-95 words
+ const step3WithSignature=[
+  'Dear Rebel Elite Fitness team,',
+  '',
+  'I do not want to keep filling your inbox, so this will be my last note in this round.',
+  '',
+  'If free-weight sourcing comes up later, feel free to reply anytime or point me to whoever handles equipment purchasing.',
+  '',
+  'Thank you for your time.',
+  '',
+  'Carlos',
+  'Sales Manager, IRONHUE',
+  '',
+  'Free Weight & Strength Training Equipment',
+  'Wholesale · OEM · ODM · Private Label',
+  'E: sales@ironhue.com',
+  'T / WhatsApp: +86 138 6042 3022',
+  'W: ironhue.com',
+ ].join('\n');
+ const quality=evaluateOutreachDraftQuality({bodyText:step3WithSignature,step:3});
+ assert.ok(quality.wordCount<=55,`Expected signature-stripped Step-3 wordCount <= 55, got ${quality.wordCount}`);
+ assert.equal(quality.issues.filter(i=>i.severity==='block').length,0,JSON.stringify(quality.issues));
+});

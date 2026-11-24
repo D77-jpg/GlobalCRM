@@ -70,7 +70,7 @@ const AI_BUZZWORD_PATTERN = /\b(?:considered|restrained|coherent|deliberate|elev
 
 const HEAVY_CTA_PATTERN = /\b(?:full specifications|annual (?:volume|forecast|demand)|target pric(?:e|ing)|detailed requirements|send us your (?:bom|drawings|specs|forecast)|(?:schedule|hop on|jump on|book) a (?:(?:15|20|30|45|60)[\s-]*min(?:ute)?\s+)?(?:zoom\s+|video\s+)?(?:call|meeting|demo))\b/i;
 
-const FREE_PATTERN = /\b(?:free(?![\s-]+weights?)|complimentary|at no (?:cost|charge)|zero cost)\b|免费/i;
+const FREE_PATTERN = /(?<!\bfeel\s+)\bfree(?![\s-]+weights?)\b|\b(?:complimentary|at no (?:cost|charge)|zero cost)\b|免费/i;
 const SAMPLE_PATTERN = /\b(?:samples?|swatches?|color cards?|sample kit|physical sample)\b|寄样|色卡|样品|打样/i;
 const SHIPPING_PATTERN = /\b(?:shipping|freight|courier|express fee|postage|ddp|cif|fob)\b|运费|包邮|快递费/i;
 const DELIVERABLE_PATTERNS: { key: string; category: ProjectApprovedOffer['category']; regex: RegExp }[] = [
@@ -81,13 +81,59 @@ const DELIVERABLE_PATTERNS: { key: string; category: ProjectApprovedOffer['categ
   { key: 'quote_range', category: 'quote_range', regex: /\b(?:budget\s+range|ballpark\s+(?:pricing|quote)|indicative\s+pric(?:e|ing))\b|参考价区间/i },
 ];
 
+const STANDALONE_SIGNOFF_RE = /^(?:(?:best|kind|warm|many)(?:\s+(?:regards|wishes|thanks))?|regards|sincerely|cheers|thanks)[,.!\s]*$/i;
+const SIGNATURE_ROLE_RE = /^(?:sales\s+manager|account\s+manager|business\s+development|export\s+manager)\b[^.!?]{0,100}$/i;
+const SIGNATURE_CONTACT_RE = /^(?:(?:e|t|w|tel|mob|phone|whatsapp|web)\s*(?:\/\s*whatsapp)?\s*:|whatsapp\s*\+|gold supplier on alibaba|wholesale\s*[·•|])/i;
+
 export function stripSalutationAndSignoff(bodyText: string): string {
   const lines = bodyText.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim());
-  while (lines.length && (!lines[0] || /^(?:hi|hello|dear)\b/i.test(lines[0]))) lines.shift();
-  while (lines.length && (!lines[lines.length - 1] || /^(?:best|regards|warm regards|kind regards|thanks|thank you|sincerely|cheers)[,!]?$/i.test(lines[lines.length - 1]))) {
-    lines.pop();
+  while (lines.length && (!lines[0] || /^(?:hi|hello|dear|good\s+(?:morning|afternoon|evening))\b/i.test(lines[0]))) {
+    lines.shift();
   }
-  return lines.join('\n').trim();
+  // Strip trailing server-appended or model-appended multi-line email signatures
+  // (e.g., "Carlos\nSales Manager, IRONHUE\n\nFree Weight...\nE: sales@ironhue.com\n...")
+  // so fixed company signatures never inflate wordCount / paragraphCount / Step-3 length checks!
+  let cutAt = lines.length;
+  for (let i = Math.max(0, lines.length - 12); i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (!line) continue;
+    if (STANDALONE_SIGNOFF_RE.test(line)) {
+      cutAt = Math.min(cutAt, i);
+      break;
+    }
+    if (SIGNATURE_ROLE_RE.test(line)) {
+      // Also strip the short signer name line immediately above "Sales Manager, ..."
+      let start = i;
+      if (i > 0) {
+        const prev = lines[i - 1] ?? '';
+        if (prev && !/[.!?。！？]$/.test(prev) && prev.split(/\s+/).length <= 4) {
+          start = i - 1;
+        }
+      }
+      cutAt = Math.min(cutAt, start);
+      break;
+    }
+    if (SIGNATURE_CONTACT_RE.test(line)) {
+      // Walk up over short non-sentence signature lines (brand tagline / name / blank line)
+      let start = i;
+      while (start > 0) {
+        const prev = lines[start - 1] ?? '';
+        if (!prev) {
+          start--;
+          continue;
+        }
+        if (/[.!?。！？]$/.test(prev) || prev.split(/\s+/).length > 10) break;
+        start--;
+      }
+      cutAt = Math.min(cutAt, start);
+      break;
+    }
+  }
+  const trimmed = lines.slice(0, cutAt);
+  while (trimmed.length && (!trimmed[trimmed.length - 1] || STANDALONE_SIGNOFF_RE.test(trimmed[trimmed.length - 1]!))) {
+    trimmed.pop();
+  }
+  return trimmed.join('\n').trim();
 }
 
 export function splitParagraphs(bodyText: string): string[] {

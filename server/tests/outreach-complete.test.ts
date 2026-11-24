@@ -1548,5 +1548,21 @@ test('P1-A/P1-B: circuit-breaker never burns customer retries, selective recover
       saveProjectProofBlocks(actorA, [{ id: 'bad', slot: 'proof', label: 'bad', text: 'Hi {{name}}, placeholder', enabled: true }]),
       /占位符/,
     );
+
+    // 5. P1 Polish: Unverified draft NEVER reports draftReady=true or phase='ready' (no contradictory status);
+    //    and includeUpstreamAiFailures recovers old-model timeout failures while STILL skipping SMTP & blocked rows!
+    const overviewWithUnverified = await getOutreachAutomationOverview(actorA, rep.id);
+    const caRow = overviewWithUnverified.queue.find((q) => q.id === enrCircuitActive.id);
+    assert.ok(caRow);
+    assert.equal(caRow!.draftStage, 'draft_audit_failed');
+    assert.equal(caRow!.draftReady, false, 'Unverified draft must NEVER report draftReady=true');
+    assert.notEqual(caRow!.phase, 'ready', 'Unverified draft must NEVER report phase=ready');
+    assert.equal(overviewWithUnverified.stats.aiFailed, 1, 'Only timeout customer counts as aiFailed, not SMTP failure');
+
+    const recAllAi = await recoverCircuitFailedEnrollments(actorA, rep.id, { includeUpstreamAiFailures: true });
+    assert.equal(recAllAi.recovered, 1, 'Should recover the old-model timeout customer');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrUpstreamFailed._id).lean())?.status, 'active');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrSmtpFailed._id).lean())?.status, 'failed', 'Must NEVER touch historic SMTP failure');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrBlocked._id).lean())?.status, 'blocked', 'Must NEVER touch replied/blocked customer');
   });
 });

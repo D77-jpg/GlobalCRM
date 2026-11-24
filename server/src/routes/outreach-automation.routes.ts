@@ -131,8 +131,14 @@ router.post('/drain-queued-tasks', asyncHandler(async (req, res) => {
   sendSuccess(res, await drainQueuedOutreachTasks(req.user!, targetUserId(req)));
 }));
 
-router.post('/recover-circuit-failed', asyncHandler(async (req, res) => {
-  sendSuccess(res, await recoverCircuitFailedEnrollments(req.user!, targetUserId(req)));
+router.post('/recover-circuit-failed', validate({
+  body: z.object({
+    includeUpstreamAiFailures: z.boolean().optional(),
+  }).strict().optional(),
+}), asyncHandler(async (req, res) => {
+  sendSuccess(res, await recoverCircuitFailedEnrollments(req.user!, targetUserId(req), {
+    includeUpstreamAiFailures: Boolean(req.body?.includeUpstreamAiFailures),
+  }));
 }));
 
 const proofBlockItemSchema = z.object({
