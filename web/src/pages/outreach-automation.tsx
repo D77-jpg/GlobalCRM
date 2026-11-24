@@ -327,7 +327,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
     setBusy(true);
     setError('');
     try {
-      const action = row.status === 'paused' || row.status === 'failed' ? 'resume' : 'pause';
+      const action = row.status === 'paused' || row.status === 'failed' || row.status === 'blocked' ? 'resume' : 'pause';
       const next = await apiPost<OutreachAutomationOverview>(scoped(`/outreach-automation/enrollments/${row.id}/${action}`), {});
       setOverview(next);
       setForm(next.config);
@@ -339,9 +339,58 @@ export function OutreachAutomationPage(): React.JSX.Element {
     }
   };
 
+  const reverifyAllUnverified = async (): Promise<void> => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await apiPost<{
+        scanned: number;
+        queued: number;
+        skipped: number;
+        overview: OutreachAutomationOverview;
+      }>(scoped('/outreach-automation/reverify-unverified'), {});
+      setOverview(res.overview);
+      setForm(res.overview.config);
+      if (res.queued > 0) {
+        toast.success(`已提交 ${res.queued} 封未核验草稿重新生成并核验`, {
+          description: res.overview.config.enabled
+            ? '新草稿将在后台用当前模型完成逐项核验后按节奏发送。'
+            : '正式发送仍保持暂停；等待核验完成后确认无待核验项再恢复发送。',
+        });
+      } else {
+        toast.info('当前没有需要重建的未核验草稿');
+      }
+    } catch (caught) {
+      setError(toErrorMessage(caught, '批量重建未核验草稿失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regenerateRow = async (row: OutreachAutomationQueueRow): Promise<void> => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await apiPost<{
+        queued: boolean;
+        overview: OutreachAutomationOverview;
+      }>(scoped(`/outreach-automation/enrollments/${row.id}/regenerate`), {});
+      setOverview(res.overview);
+      setForm(res.overview.config);
+      toast.success(`已为 ${row.customerName} 重新提交第 ${row.nextStep} 封草稿生成与核验`, {
+        description: res.overview.config.enabled ? '核验通过后按原排程发送。' : '正式发送仍保持暂停。',
+      });
+    } catch (caught) {
+      setError(toErrorMessage(caught, '重新生成草稿失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const mailbox = overview?.mailbox;
   const canStart = (overview?.config.rolloutMode === 'shadow' || Boolean(mailbox?.canSend)) && Boolean(overview?.stats.eligible || overview?.stats.enrolled);
   const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + (overview?.stats.blocked ?? 0);
+  const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
 
   return (
     <div className="workspace-page">
@@ -435,6 +484,33 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <p className="mt-3 rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
                 今天这个邮箱的 {overview.config.dailyLimit} 封额度已用完，明天发送时段会继续。
               </p>
+            ) : null}
+            {unverifiedCount > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+                <div className="flex min-w-0 items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold">
+                      发现 {unverifiedCount} 封待发草稿尚未完成事实核验（含 partial / unavailable）
+                    </p>
+                    <p className="leading-5">
+                      切换 AI 模型不会自动重核旧草稿。点击右侧按钮将归档旧未核验草稿，并用当前模型重新生成及逐项核验
+                      {overview.config.enabled ? '。' : '（正式发送仍保持暂停，核验通过后您再手动恢复）。'}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 border-amber-400/70 bg-background text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                  disabled={busy}
+                  onClick={() => void reverifyAllUnverified()}
+                >
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                  一键重建未核验草稿（{unverifiedCount}）
+                </Button>
+              </div>
             ) : null}
           </section>
 
@@ -612,7 +688,10 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       <TableBody>
                         {overview.queue.map((row) => {
                           const status = phaseBadge(row, overview.windowOpen);
-                          const controllable = row.status === 'active' || row.status === 'paused' || row.status === 'failed';
+                          const verificationBlocked = row.status === 'blocked' && Boolean(row.lastError && /核验|依据审核|依据已变化|模拟校验|缺少依据|partial|unverif/i.test(row.lastError));
+                          const controllable = row.status === 'active' || row.status === 'paused' || row.status === 'failed' || verificationBlocked;
+                          const canRegenerate = row.status !== 'completed' && row.phase !== 'generating' && (Boolean(row.draftNeedsReverify) || verificationBlocked);
+                          const verifiedAfterRegen = !row.draftNeedsReverify && row.draftReady && row.status === 'paused' && Boolean(row.lastError?.includes('已提交重新生成并核验'));
                           return (
                             <TableRow key={row.id}>
                               <TableCell>
@@ -625,8 +704,20 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 <StepProgress row={row} />
                               </TableCell>
                               <TableCell>
-                                <Badge variant={status.variant}>{status.label}</Badge>
-                                {status.detail ? (
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <Badge variant={status.variant}>{status.label}</Badge>
+                                  {row.draftNeedsReverify ? (
+                                    <Badge variant="warning">待重核验</Badge>
+                                  ) : verifiedAfterRegen ? (
+                                    <Badge variant="developed">核验已通过</Badge>
+                                  ) : null}
+                                </div>
+                                {row.draftNeedsReverify && row.draftAuditReason ? (
+                                  <p className="mt-1 max-w-[15rem] text-[11px] leading-4 text-amber-700 dark:text-amber-300">
+                                    {row.draftAuditReason}
+                                    {row.draftUpdatedAt ? `（草稿更新：${formatDateTime(row.draftUpdatedAt)}）` : ''}
+                                  </p>
+                                ) : status.detail ? (
                                   <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${status.variant === 'warning' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
                                     {status.detail}
                                   </p>
@@ -640,11 +731,18 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 {nextActionLabel(row, overview.windowOpen, formatWindow(overview.config))}
                               </TableCell>
                               <TableCell className="text-right">
-                                {controllable ? (
-                                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void controlRow(row)}>
-                                    {row.status === 'active' ? '暂停' : '恢复'}
-                                  </Button>
-                                ) : <span className="text-xs text-muted-foreground">—</span>}
+                                <div className="inline-flex items-center justify-end gap-1">
+                                  {canRegenerate ? (
+                                    <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void regenerateRow(row)}>
+                                      重新生成
+                                    </Button>
+                                  ) : null}
+                                  {controllable ? (
+                                    <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void controlRow(row)}>
+                                      {row.status === 'active' ? '暂停' : '恢复'}
+                                    </Button>
+                                  ) : !canRegenerate ? <span className="text-xs text-muted-foreground">—</span> : null}
+                                </div>
                               </TableCell>
                             </TableRow>
                           );

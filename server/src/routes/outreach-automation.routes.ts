@@ -11,7 +11,9 @@ import {
   getOutreachAutomationOverview,
   migrateLegacyOutreachModes,
   pauseOutreachAutomation,
+  regenerateOutreachEnrollmentDraft,
   resumeOutreachAutomation,
+  reverifyUnverifiedOutreachDrafts,
   saveOutreachAutomationConfig,
   getOutreachResults,
   startOutreachAutomation,
@@ -111,10 +113,23 @@ router.post('/resume', asyncHandler(async (req, res) => {
   sendSuccess(res, await resumeOutreachAutomation(req.user!, targetUserId(req)));
 }));
 
+router.post('/reverify-unverified', validate({
+  body: z.object({
+    enrollmentIds: z.array(objectId).max(200).optional(),
+  }).strict().optional(),
+}), asyncHandler(async (req, res) => {
+  const enrollmentIds = req.body && Array.isArray(req.body.enrollmentIds) ? req.body.enrollmentIds : undefined;
+  sendSuccess(res, await reverifyUnverifiedOutreachDrafts(req.user!, { enrollmentIds }, targetUserId(req)));
+}));
+
 for (const action of ['pause', 'resume'] as const) {
   router.post(`/enrollments/:id/${action}`, validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
     sendSuccess(res, await controlOutreachEnrollment(req.user!, req.params.id, action, targetUserId(req)));
   }));
 }
+
+router.post('/enrollments/:id/regenerate', validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
+  sendSuccess(res, await regenerateOutreachEnrollmentDraft(req.user!, req.params.id, targetUserId(req)));
+}));
 
 export default router;

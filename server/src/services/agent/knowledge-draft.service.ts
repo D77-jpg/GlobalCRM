@@ -46,7 +46,12 @@ export async function regenerateKnowledgeDraft(
    userRequest:userInstruction,
   },
  );
- const saved=await saveAnalysisEmailDraft(analysis.id,{expectedVersion:analysis.version,idempotencyKey:'kb-save-'+id+'-'+requestKey},actor);
+ const saved=await saveAnalysisEmailDraft(
+  analysis.id,
+  {expectedVersion:analysis.version,idempotencyKey:'kb-save-'+id+'-'+requestKey},
+  actor,
+  {outreachStep:letter.outreachStep},
+ );
  return {letterId:saved.letterId,customerId:letter.customerId,analysisId:analysis.id,angleCode:analysis.knowledgeReview?.context?.playbook?.segmentCode};
 }
 

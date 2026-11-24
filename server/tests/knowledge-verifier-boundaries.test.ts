@@ -186,3 +186,15 @@ test('short follow-ups still retrieve knowledge before answering',()=>{
  for(const text of ['那这个呢？','多少钱','what about this?','can you make this?'])assert.equal(needsKnowledge(text),true,text);
  assert.equal(needsKnowledge('你好'),false);
 });
+
+test('fact verifier accepts fenced JSON and zero placeholder offsets without degrading to unavailable',async()=>{
+ const {parseVerifierJson}=await import('../src/services/agent/fact-verifier');
+ const {resolveEvidenceQuote}=await import('../src/services/agent/evidence-quote');
+ const fenced='Here is the JSON:\n```json\n{"checks":[{"id":"s0","status":"supported","quotes":[{"sourceId":"knowledge:free-weight:v1","quote":"IRONHUE manufactures free-weight equipment.","start":0,"end":0}],"reason":"exact"}]}\n```';
+ const parsed=parseVerifierJson(fenced) as {checks:{quotes:{sourceId:string;quote:string;start:number;end:number}[]}[]};
+ assert.equal(parsed.checks.length,1);
+ const resolved=resolveEvidenceQuote(parsed.checks[0].quotes[0],'Catalog note: IRONHUE manufactures free-weight equipment.');
+ assert.ok(resolved);
+ assert.equal(resolved!.start,14);
+ assert.equal(resolved!.end,14+'IRONHUE manufactures free-weight equipment.'.length);
+});
