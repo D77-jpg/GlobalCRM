@@ -18,9 +18,53 @@ export const CUSTOMER_INTENT_INFERENCE_RE =
 const NEGATIVE_RE =
   /\b(?:not|never|no|cannot|can't|without|except|unless)\b|不支持|不可|不能|不提供|未认证|未经|除外|除非/i;
 
+const SUPPLIER_CAPABILITY_CLAIM_RE =
+  /\b(?:manufactur\w*|produc(?:e|es|ing|tion)|factory|factories|oem|odm|specializ\w*|suppl(?:y|ies|ying)|we\s+(?:make|build|carry|have|provide))\b|制造|生产|工厂|供应/i;
+
 export function isRedTierClaim(text: string): boolean {
   const nfkc = text.normalize('NFKC');
   return /\d/.test(nfkc) || RED_TIER_POLICY_RE.test(nfkc);
+}
+
+/**
+ * Step-2 thread follow-up opener (e.g. "Quick follow-up on my previous note." /
+ * "Just circling back on my last email.") — zero factual or commercial claims.
+ */
+export function isOutreachStep2FollowUpLine(text: string, hasPrevious: boolean): boolean {
+  if (!hasPrevious) return false;
+  const value = text.trim();
+  if (!value || value.length > 220) return false;
+  if (isRedTierClaim(value) || SUPPLIER_CAPABILITY_CLAIM_RE.test(value)) return false;
+  return /^(?:(?:just\s+|briefly\s+)?(?:following\s+up|circling\s+back|checking\s+in)|(?:a\s+)?quick\s+follow[- ]?up|(?:i(?:'m|\s+am)?\s+|wanted\s+to\s+)(?:briefly\s+)?(?:follow(?:ing)?\s+up|circle\s+back|check\s+in))\b[\s\S]{0,160}\b(?:note|email|message|thread|reach[- ]?out|last\s+week|earlier)\b/i.test(value);
+}
+
+/**
+ * Step-3 low-pressure closing lines (inbox respect, last-note notice, future door,
+ * polite referral, or brief thank-you). Strictly rejects any digits, red-tier
+ * commercial commitments, or supplier capability claims.
+ */
+export function isOutreachStep3CloseLine(text: string, step: number): boolean {
+  if (step < 3) return false;
+  const value = text.trim();
+  if (!value || value.length > 240) return false;
+  if (isRedTierClaim(value) || SUPPLIER_CAPABILITY_CLAIM_RE.test(value)) return false;
+  if (
+    /\b(?:i\s+(?:do\s+not|don'?t|will\s+not|won'?t)\s+(?:want\s+to\s+)?(?:keep\s+)?(?:filling|crowding|cluttering|clogging)\s+your\s+inbox)\b/i.test(value)
+    || /\b(?:i\s+(?:do\s+not|don'?t|will\s+not|won'?t)\s+(?:want\s+to\s+)?keep\s+(?:following\s+up|reaching\s+out|bothering|emailing|messaging))\b/i.test(value)
+    || /\bthis\s+(?:is|will\s+be)\s+(?:my|our)\s+(?:last|final)\s+(?:note|email|message|follow[- ]?up)\b/i.test(value)
+    || /^(?:just\s+)?(?:a\s+)?(?:quick\s+)?(?:last|final)\s+(?:note|check[- ]?in|follow[- ]?up)\b/i.test(value)
+    || /^(?:i(?:'ll|\s+will)\s+leave\s+(?:things|it)\s+here|closing\s+the\s+loop)\b/i.test(value)
+  ) {
+    return true;
+  }
+  if (
+    /^(?:if|should|whenever)\b[\s\S]{0,180}\b(?:comes?\s+up|changes?|revisit|later|future|timing|handles?|right\s+person|colleague)\b/i.test(value)
+    || /\b(?:feel\s+free\s+to|happy\s+to|glad\s+to)\s+(?:reply|reach\s+out|reconnect|pick\s+(?:it|this)\s+up)\b/i.test(value)
+    || /^(?:thank\s+you|thanks(?:\s+(?:again|so\s+much|very\s+much))?|many\s+thanks|(?:i\s+)?appreciate)(?:\s+for)?\s+your\s+(?:time|reading|consideration)\b/i.test(value)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function normalizeBlockKey(text: string): string {

@@ -437,3 +437,35 @@ test('P1 polish: long multi-word company salutations are non_claim and multi-lin
  assert.ok(quality.wordCount<=55,`Expected signature-stripped Step-3 wordCount <= 55, got ${quality.wordCount}`);
  assert.equal(quality.issues.filter(i=>i.severity==='block').length,0,JSON.stringify(quality.issues));
 });
+
+test('Step-3 polite close variants (won\'t keep filling inbox / Thanks for your time) pass as non_claim on fast-path while disguised commitments stay blocked',async()=>{
+ const {automatedReviewIssue}=await import('../src/services/agent/knowledge-send-gate');
+ const step3Body=[
+  'Dear Nordic Fitness team,',
+  "I won't keep filling your inbox — this is my last note in this round.",
+  'If free-weight sourcing comes up later, feel free to reply anytime or point me to who handles purchasing.',
+  'Thanks for your time.',
+ ].join('\n\n');
+ let calls=0;
+ const neverCalled:SemanticVerifier={model:'should-not-run',async check(){calls++;throw new Error('Step-3 pure polite close should pass on fast-path');}};
+ const res=await verifyGroundedEmail(step3Body,bundle,{taskType:'first_outreach',outreachStep:3,recipientName:'Nordic Fitness'},neverCalled);
+ assert.equal(calls,0,'Pure polite Step-3 close should verify in 0 LLM calls');
+ assert.equal(res.review.completeness,'complete');
+ assert.ok(res.review.factAudit?.checks.every(c=>c.status==='non_claim'),JSON.stringify(res.review.factAudit?.checks));
+ assert.equal(automatedReviewIssue(res.review,3,{bodyText:res.bodyText,subject:'Re: Free-weight supply'}),undefined);
+
+ // Step-2 natural follow-up variants with previous thread
+ const prev=[{step:1,subject:'Bumper plates',bodyText:'Initial note'}];
+ for(const line of ['Quick follow-up on my previous note.','Just circling back on my last email.','Wanted to follow up briefly on my earlier message.']){
+  assert.equal(checkSemanticResults(line,bundle,[],undefined,prev,2)[0].status,'non_claim',line);
+ }
+
+ // Disguised commitments or supplier claims in Step-3 close MUST NOT be exempted as non_claim
+ for(const unsafe of [
+  "I won't keep filling your inbox — we guarantee USD 5 per piece with free shipping.",
+  "I won't keep filling your inbox, and our factory manufactures titanium plates.",
+  'Thanks for your time, we can hold stock for you.',
+ ]){
+  assert.notEqual(checkSemanticResults(unsafe,bundle,[],undefined,undefined,3)[0].status,'non_claim',unsafe);
+ }
+});

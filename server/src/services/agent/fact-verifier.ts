@@ -12,6 +12,8 @@ import {agentSafetyIdentifier,reserveAgentQuota,settleAgentQuota} from './runtim
 import {chargeTaskBudget} from './task-budget';
 import {
  isGeneralCategoryInsight,
+ isOutreachStep2FollowUpLine,
+ isOutreachStep3CloseLine,
  isRedTierClaim,
  matchApprovedProofBlocks,
  matchDeterministicCustomerOpener,
@@ -191,7 +193,9 @@ const courtesy=(s:string,customer?:CustomerCheckContext)=>{
  }
  return /^(?:hello|hi|hey|best|kind|warm|many|regards|sincerely|thanks)[,.!！。\s]*$/iu.test(text)
   || /^(?:best|kind|warm|many)\s+(?:regards|wishes)[,.!！。\s]*$/iu.test(text)
-  || /^thank you(?: for (?:your inquiry|getting in touch|your interest))?[,.!！。\s]*$/iu.test(text)
+  || /^(?:thank you|thanks|many thanks)(?:\s+(?:again|so much|very much))?(?:\s+for\s+(?:your\s+(?:time|inquiry|interest|consideration|help|reply|patience)|getting in touch|reading))?[,.!！。\s]*$/iu.test(text)
+  || /^(?:i\s+)?appreciate\s+your\s+time[,.!！。\s]*$/iu.test(text)
+  || /^(?:all the best|wishing you (?:all )?the best|have a (?:great|good|nice) (?:day|week|weekend))[,.!！。\s]*$/iu.test(text)
   || /^we look forward to (?:hearing from you|your reply)[,.!！。\s]*$/iu.test(text);
 };
 /**
@@ -277,10 +281,10 @@ export function checkSemanticResults(body:string,bundle:KnowledgeBundle,result:S
  return parts.map(part=>{
   const check=result.find(x=>x.id===part.id);const fail=(reason:string,status:ClaimCheck['status']='unsupported'):ClaimCheck=>({...part,status,sourceIds:[],reason});
   // 同一线程里的跟进句是内部上下文，不是供应商事实；只对已有前序草稿的短句豁免。
-  if(previous?.length&&/^(?:just\s+)?following up on (?:my|our) (?:(?:previous|last) )?(?:note|email|message)\b/i.test(part.text)&&!COMMITMENT_WORDS.test(part.text))return {...part,status:'non_claim',sourceIds:[],reason:'同一线程的跟进承接语'};
+  if(isOutreachStep2FollowUpLine(part.text,Boolean(previous?.length)))return {...part,status:'non_claim',sourceIds:[],reason:'同一线程的跟进承接语'};
   // 第三封的收尾段只是在结束本轮联系或询问未来采购负责人，不应被当成
-  // 供应商事实；只要不夹带报价、库存、交期等承诺，就按非事实句放行。
-  if(sequenceStep>=3&&/^(?:i (?:do not|don'?t) want to keep filling your inbox|thank you for your time|(?:if|should)\b[\s\S]{0,180}\b(?:comes?|come) up\b)/i.test(part.text)&&!COMMITMENT_WORDS.test(part.text))return {...part,status:'non_claim',sourceIds:[],reason:'低压力结束信中的礼貌收尾，不含事实承诺'};
+  // 供应商事实；只要不夹带报价、库存、交期等承诺或我方能力主张，就按非事实句放行。
+  if(isOutreachStep3CloseLine(part.text,sequenceStep))return {...part,status:'non_claim',sourceIds:[],reason:'低压力结束信中的礼貌收尾，不含事实承诺'};
   if(generalCategoryInsight(part.text))return {...part,status:'non_claim',sourceIds:[],reason:'不含具体承诺的品类观察'};
   if(courtesy(part.text,customer)||request(part.text)||lowPressureQuestion(part.text))return {...part,status:'non_claim',sourceIds:[],reason:'礼貌语或不含交易承诺的询问'};
   if(!check||count.get(part.id)!==1)return fail('核验未覆盖该段或返回重复结果','unverifiable');
@@ -439,10 +443,10 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
   if(options.outreachStep===undefined)return {parts,preMap,pendingParts:parts,usedBlocks,tierCounts};
   for(const part of parts){
    if(isRedTierClaim(part.text)){tierCounts.red++;continue;}
-   if(options.previousOutreach?.length&&/^(?:just\s+)?following up on (?:my|our) (?:(?:previous|last) )?(?:note|email|message)\b/i.test(part.text)&&!COMMITMENT_WORDS.test(part.text)){
+   if(isOutreachStep2FollowUpLine(part.text,Boolean(options.previousOutreach?.length))){
     tierCounts.green++;preMap.set(part.id,{...part,status:'non_claim',sourceIds:[],reason:'同一线程的跟进承接语'});continue;
    }
-   if((options.outreachStep??1)>=3&&/^(?:i (?:do not|don'?t) want to keep filling your inbox|thank you for your time|(?:if|should)\b[\s\S]{0,180}\b(?:comes?|come) up\b)/i.test(part.text)&&!COMMITMENT_WORDS.test(part.text)){
+   if(isOutreachStep3CloseLine(part.text,options.outreachStep??1)){
     tierCounts.green++;preMap.set(part.id,{...part,status:'non_claim',sourceIds:[],reason:'低压力结束信中的礼貌收尾，不含事实承诺'});continue;
    }
    if(generalCategoryInsight(part.text)){
@@ -481,10 +485,11 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
    const bodyText=[ensureSalutation(candidate,options),signature].filter(Boolean).join('\n\n');
    const review:KnowledgeReview={
     ...baseline.review,
+    completeness:'complete',
     sources:[...baseline.review.sources,...extraSources],
     bodyHash:draftHash(bodyText),
     claims:fastChecks.filter(c=>c.status==='supported').map(c=>({text:c.text,sourceIds:c.sourceIds})),
-    issues:baseline.review.issues.filter(i=>i.code!=='claim_rewritten'),
+    issues:baseline.review.issues.filter(i=>i.code!=='claim_rewritten'&&!((options.outreachStep??1)>=3&&i.code==='missing')),
     factAudit:{
      contract:'s4.1',
      mode:'deterministic',
