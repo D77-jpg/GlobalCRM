@@ -1533,5 +1533,20 @@ test('P1-A/P1-B: circuit-breaker never burns customer retries, selective recover
     assert.equal(diagAuditBlocked.latestDraft?.failureStage, 'round1_check');
     assert.equal(diagAuditBlocked.latestDraft?.failedChecks.length, 1);
     assert.equal(diagAuditBlocked.latestDraft?.failedChecks[0]?.reason, '知识库无终身质保依据');
+
+    // 4. Plan B: Project Approved Proof Blocks auto-extraction, save, and overview count
+    const { getProjectProofBlocks, saveProjectProofBlocks } = await import('../src/services/outreach-automation.service');
+    const initialProofs = await getProjectProofBlocks(actorA);
+    assert.ok(initialProofs.suggested.length >= 2, 'Should auto-extract English proof blocks + default CTAs from published knowledge');
+    assert.ok(initialProofs.suggested.some((b) => b.sourceKnowledgeId === String(kbDoc._id)));
+
+    const savedProofs = await saveProjectProofBlocks(actorA, initialProofs.suggested.slice(0, 4));
+    assert.equal(savedProofs.blocks.length, Math.min(4, initialProofs.suggested.length));
+    const afterProofsOverview = await getOutreachAutomationOverview(actorA, rep.id);
+    assert.equal(afterProofsOverview.stats.approvedProofBlocksCount, savedProofs.blocks.filter((b) => b.enabled).length);
+    await assert.rejects(
+      saveProjectProofBlocks(actorA, [{ id: 'bad', slot: 'proof', label: 'bad', text: 'Hi {{name}}, placeholder', enabled: true }]),
+      /占位符/,
+    );
   });
 });

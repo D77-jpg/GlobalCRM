@@ -45,6 +45,15 @@ export interface ProjectWritingRule {
   source?: string;
 }
 
+export interface ProjectApprovedProofBlock {
+  id: string;
+  slot: 'identity' | 'proof' | 'cta';
+  label: string;
+  text: string;
+  sourceKnowledgeId?: string;
+  enabled: boolean;
+}
+
 export interface ProjectBrandProfile {
   brandKey?: 'genesis' | 'ironhue' | 'velaturo' | 'general';
   pricingMode?: 'catalog_tiered' | 'costing_approved';
@@ -52,6 +61,7 @@ export interface ProjectBrandProfile {
   teamWritingRules?: ProjectWritingRule[];
   approvedActions?: string[];
   approvedOffers?: ProjectApprovedOffer[];
+  approvedProofBlocks?: ProjectApprovedProofBlock[];
   industryRules?: ProjectIndustryRule[];
   activeWritingVersion?: string;
   writingPausedReason?: string;
@@ -179,6 +189,17 @@ const ProjectSchema = new Schema<IProject>(
           allowsSample: { type: Boolean, default: false },
           allowsShipping: { type: Boolean, default: false },
           conditions: { type: String, trim: true, maxlength: 500 },
+          enabled: { type: Boolean, default: true },
+        }],
+        default: undefined,
+      },
+      approvedProofBlocks: {
+        type: [{
+          id: { type: String, required: true, trim: true, maxlength: 60 },
+          slot: { type: String, enum: ['identity', 'proof', 'cta'], default: 'proof' },
+          label: { type: String, required: true, trim: true, maxlength: 120 },
+          text: { type: String, required: true, trim: true, maxlength: 500 },
+          sourceKnowledgeId: { type: String, trim: true, maxlength: 64 },
           enabled: { type: Boolean, default: true },
         }],
         default: undefined,

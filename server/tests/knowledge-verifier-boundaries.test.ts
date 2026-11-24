@@ -264,3 +264,133 @@ test('fact verifier classifies model_call_failed, output_parse_failed, quote_mis
  assert.ok(!unsupportedRes.review.factAudit?.checks.every(c=>c.status==='unverifiable'));
  assert.ok(knowledgeReviewSendIssue(unsupportedRes.review));
 });
+
+test('Plan B: Pre-Approved Proof Blocks fast-path verifies outreach in 0 LLM calls while Red-Tier commitments stay hard-blocked',async()=>{
+ const {automatedReviewIssue}=await import('../src/services/agent/knowledge-send-gate');
+ const {recoverNonCriticalQuoteAnchor,normalizeOutreachQuestionCount}=await import('../src/services/agent/outreach-tiered-audit');
+ const ironhueSite={sourceId:'website:nordic:0',url:'https://nordic.example.test',text:'Nordic Gym carries commercial bumper plates and strength racks for studios.',sha256:'abc',collectedAt:'2026-11-24T00:00:00Z'};
+ const ironhueProfile={name:'Lars',company:'Nordic Gym',country:'Sweden',industry:'Fitness',interestedProducts:'commercial bumper plates'};
+ const proofBlocks=[
+  {id:'ih_id',slot:'identity' as const,label:'IRONHUE 定位',text:'IRONHUE is an OEM and ODM manufacturer of commercial free weights.',enabled:true},
+  {id:'ih_proof',slot:'proof' as const,label:'杠铃片工艺',text:'Our factory builds rubber bumper plates with consistent weight tolerance for gym brands.',enabled:true},
+  {id:'ih_cta',slot:'cta' as const,label:'低压力提问',text:'Which bumper plate line would be most useful to review first?',enabled:true},
+ ];
+ const product={sourceId:'knowledge:ironhue-fast:v1',title:'IRONHUE',version:1,kind:'knowledge' as const,category:'product' as const,content:'IRONHUE manufactures rubber bumper plates for commercial fitness brands.',source:'fixture',applicability:'',products:[],validFrom:'2020-01-01',terms:[]};
+ const b={...bundle,sources:[product]};
+
+ // 1. Fast-Path: Salutation + Yellow-Tier website opener + Green-Tier IRONHUE industry insight + Approved Proof Blocks + CTA -> 0 verifier LLM calls!
+ let llmCalls=0;
+ const neverCalledVerifier:SemanticVerifier={model:'should-not-run',async check(){llmCalls++;throw new Error('Verifier LLM should not be called on fast-path');}};
+ const fastBody=[
+  'Dear Lars,',
+  'I noticed your commercial bumper plates line on your website.',
+  'Commercial gym operators often look for consistent plate durability across locations.',
+  'IRONHUE is an OEM and ODM manufacturer of commercial free weights. Our factory builds rubber bumper plates with consistent weight tolerance for gym brands.',
+  'Which bumper plate line would be most useful to review first?',
+ ].join('\n\n');
+ const fastRes=await verifyGroundedEmail(fastBody,b,{
+  taskType:'first_outreach',
+  outreachStep:1,
+  recipientName:'Lars',
+  customerId:'nordic',
+  customerProfile:ironhueProfile,
+  customerWebsites:[ironhueSite],
+  approvedProofBlocks:proofBlocks,
+ },neverCalledVerifier);
+ assert.equal(llmCalls,0,'Fast-path must complete with 0 verifier LLM calls');
+ assert.equal(fastRes.review.factAudit?.fastPath,true);
+ assert.equal(fastRes.review.factAudit?.mode,'deterministic');
+ assert.equal(fastRes.review.completeness,'complete');
+ assert.equal(fastRes.review.factAudit?.tierSummary?.yellow,1);
+ assert.deepEqual(fastRes.review.factAudit?.tierSummary?.proofBlocksUsed,['ih_id','ih_proof']);
+ assert.equal(automatedReviewIssue(fastRes.review,1,{bodyText:fastRes.bodyText,subject:'Commercial bumper plates OEM supply'}),undefined);
+
+ // 2a. Red-Tier numeric promise MUST bypass fast-path AND strip fabricated numbers into partial fallback
+ let redCalls=0;
+ const redVerifier:SemanticVerifier={
+  model:'red-reject',
+  async check({segments}){
+   redCalls++;
+   return segments.map(p=>({id:p.id,status:'unsupported' as const,quotes:[],reason:'unapproved commercial promise'}));
+  },
+ };
+ const redNumericBody=fastBody.replace(
+  'Commercial gym operators often look for consistent plate durability across locations.',
+  'We guarantee USD 15 per plate with free shipping and 7-day delivery.',
+ );
+ const redNumericRes=await verifyGroundedEmail(redNumericBody,b,{
+  taskType:'first_outreach',
+  outreachStep:1,
+  recipientName:'Lars',
+  customerId:'nordic',
+  customerProfile:ironhueProfile,
+  customerWebsites:[ironhueSite],
+  approvedProofBlocks:proofBlocks,
+ },redVerifier);
+ assert.ok(redCalls>=1,'Red-Tier claim MUST go through semantic verification');
+ assert.doesNotMatch(redNumericRes.bodyText,/USD 15|free shipping|7-day/,'Fabricated numbers must never enter body');
+ assert.equal(redNumericRes.review.completeness,'partial');
+
+ // 2b. Red-Tier non-numeric commitment (free shipping / lifetime warranty) MUST NOT be silently dropped by slot fallback; stays blocked in Exception Queue
+ const redPolicyBody=fastBody.replace(
+  'Commercial gym operators often look for consistent plate durability across locations.',
+  'We guarantee free shipping and lifetime warranty on every order.',
+ );
+ const redPolicyRes=await verifyGroundedEmail(redPolicyBody,b,{
+  taskType:'first_outreach',
+  outreachStep:1,
+  recipientName:'Lars',
+  customerId:'nordic',
+  customerProfile:ironhueProfile,
+  customerWebsites:[ironhueSite],
+  approvedProofBlocks:proofBlocks,
+ },redVerifier);
+ assert.ok(redPolicyRes.review.issues.some(i=>i.code==='draft_unverified'),'Red-Tier policy failure MUST stay blocked in Exception Queue');
+ assert.ok(knowledgeReviewSendIssue(redPolicyRes.review));
+
+ // 3. Slot-Level Graceful Fallback + Single-Question Normalization:
+ //    When ONLY a non-red-tier fluff opener fails (and supplier proof is valid), drop only the bad slot and keep a clean send-ready email!
+ const fallbackBody=[
+  'Dear Lars,',
+  'Expanding studios face tricky showroom styling choices, right?',
+  'Our factory builds rubber bumper plates with consistent weight tolerance for gym brands.',
+  'Which bumper plate line would be most useful to review first?',
+ ].join('\n\n');
+ assert.equal((normalizeOutreachQuestionCount(fallbackBody,1).match(/[?？]/g)??[]).length,1);
+ const fallbackVerifier:SemanticVerifier={
+  model:'fluff-reject',
+  async check({segments}){
+   return segments.map(p=>({id:p.id,status:'unsupported' as const,quotes:[],reason:'general fluff not in source'}));
+  },
+ };
+ const fallbackRes=await verifyGroundedEmail(
+  [
+   'Dear Lars,',
+   'This unique showroom aesthetic stands out immediately.',
+   'Our factory builds rubber bumper plates with consistent weight tolerance for gym brands.',
+   'Which bumper plate line would be most useful to review first?',
+  ].join('\n\n'),
+  b,
+  {taskType:'first_outreach',outreachStep:1,recipientName:'Lars',approvedProofBlocks:proofBlocks},
+  fallbackVerifier,
+ );
+ assert.equal(fallbackRes.review.completeness,'complete');
+ assert.equal(fallbackRes.review.factAudit?.fallbackApplied,true);
+ assert.doesNotMatch(fallbackRes.bodyText,/showroom aesthetic/);
+ assert.match(fallbackRes.bodyText,/rubber bumper plates/);
+ assert.equal(automatedReviewIssue(fallbackRes.review,1,{bodyText:fallbackRes.bodyText,subject:'Commercial bumper plates OEM supply'}),undefined);
+
+ // 4. Smart quote anchor recovery for minor plural/wording variance vs hard rejection for fabricated quotes
+ const recovered=recoverNonCriticalQuoteAnchor(
+  {sourceId:product.sourceId,quote:'manufactures rubber plate for commercial fitness',start:0,end:0},
+  product.content,
+  'IRONHUE manufactures rubber plates for fitness clubs.',
+ );
+ assert.ok(recovered&&recovered.quote.includes('rubber bumper plates'));
+ const fabricated=recoverNonCriticalQuoteAnchor(
+  {sourceId:product.sourceId,quote:'ships titanium aerospace rockets overnight',start:0,end:0},
+  product.content,
+  'IRONHUE ships aerospace rockets.',
+ );
+ assert.equal(fabricated,undefined);
+});

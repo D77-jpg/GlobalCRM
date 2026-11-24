@@ -49,6 +49,10 @@ export interface KnowledgeReview {
     failureCode?:string;
     failureStage?:FactAuditStage;
     failureDetail?:string;
+    fastPath?:boolean;
+    fallbackApplied?:boolean;
+    fallbackNote?:string;
+    tierSummary?:{red:number;yellow:number;green:number;proofBlocksUsed:string[]};
   };
   version: 1; projectId: string; taskType: string; generatedAt: string;
   status: KnowledgeBundle['status']; completeness: 'complete'|'partial';

@@ -1,6 +1,9 @@
 import { Types } from 'mongoose';
 import { AgentTask } from '../models/AgentTask';
+import { AgentKnowledge } from '../models/AgentKnowledge';
 import { Customer, DevelopmentLetter, Project, User } from '../models';
+import type { ProjectApprovedProofBlock } from '../models/Project';
+import { extractSuggestedProofBlocks } from './agent/outreach-tiered-audit';
 import { runWithTenant } from '../models/tenant-context';
 import { campaignPauseReason, campaignResults } from './outreach-results.service';
 import {
@@ -340,6 +343,8 @@ export interface OutreachAutomationOverview {
     failed: number;
     circuitFailed: number;
     unverifiedDrafts: number;
+    exceptionQueueCount: number;
+    approvedProofBlocksCount: number;
     queuedTasks: number;
     runningTasks: number;
     failedTasks: number;
@@ -760,6 +765,8 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     status: 'failed',
     lastError: { $regex: /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i },
   });
+  const projectDoc = await Project.findById(config.projectId).select('brandProfile.approvedProofBlocks').lean();
+  const approvedProofBlocksCount = (projectDoc?.brandProfile?.approvedProofBlocks ?? []).filter((b) => b.enabled && b.text?.trim()).length;
 
   let unverifiedDrafts = 0;
   const queueRows: OutreachAutomationQueueRow[] = rows.map((row) => {
@@ -888,6 +895,8 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       failed: counts.failed ?? 0,
       circuitFailed: circuitFailedCount,
       unverifiedDrafts,
+      exceptionQueueCount: unverifiedDrafts,
+      approvedProofBlocksCount,
       queuedTasks: taskTotals.queued ?? 0,
       runningTasks: taskTotals.running ?? 0,
       failedTasks: taskTotals.failed ?? 0,
@@ -950,6 +959,63 @@ export async function getOutreachResults(actor: AuthUser, targetUserId?: string)
   const config = await getConfig(actor, target.id);
   const project = await Project.findById(config.projectId).select('organizationId').lean();
   return campaignResults(config.projectId, config._id, project?.organizationId?.toString());
+}
+
+/** 读取当前项目的「预审英文卖点块」以及从已发布知识库自动提取的推荐候选块。 */
+export async function getProjectProofBlocks(actor: AuthUser): Promise<{
+  blocks: ProjectApprovedProofBlock[];
+  suggested: ProjectApprovedProofBlock[];
+}> {
+  const projectId = requireProjectId(actor);
+  const [project, knowledgeRows] = await Promise.all([
+    Project.findById(projectId).select('brandProfile.approvedProofBlocks').lean(),
+    AgentKnowledge.find({
+      projectId,
+      approvedVersion: { $gt: 0 },
+      archived: { $ne: true },
+    }).select('_id approvedVersion revisions').limit(80).lean(),
+  ]);
+  const blocks: ProjectApprovedProofBlock[] = (project?.brandProfile?.approvedProofBlocks ?? []).map((b) => ({
+    id: String(b.id),
+    slot: b.slot === 'identity' || b.slot === 'cta' ? b.slot : 'proof',
+    label: String(b.label),
+    text: String(b.text),
+    ...(b.sourceKnowledgeId ? { sourceKnowledgeId: String(b.sourceKnowledgeId) } : {}),
+    enabled: Boolean(b.enabled),
+  }));
+  const publishedEntries = knowledgeRows.flatMap((row) => {
+    const rev = row.revisions.find((r) => r.version === row.approvedVersion && r.approved);
+    if (!rev) return [];
+    return [{ id: String(row._id), title: rev.title, category: rev.category ?? 'company', content: rev.content }];
+  });
+  const suggested = extractSuggestedProofBlocks(publishedEntries);
+  return { blocks, suggested };
+}
+
+/** 管理员保存项目的「预审英文卖点块」，供自动开发 4 槽位写稿与零 LLM 快速核验直通使用。 */
+export async function saveProjectProofBlocks(
+  actor: AuthUser,
+  blocks: ProjectApprovedProofBlock[],
+): Promise<{ blocks: ProjectApprovedProofBlock[] }> {
+  if (actor.role !== 'admin') throw ApiError.forbidden('只有管理员可以维护项目预审卖点块');
+  const projectId = requireProjectId(actor);
+  const cleaned: ProjectApprovedProofBlock[] = blocks.slice(0, 30).map((b, idx) => ({
+    id: (b.id || `proof_${idx + 1}`).trim().slice(0, 60),
+    slot: b.slot === 'identity' || b.slot === 'cta' ? b.slot : 'proof',
+    label: b.label.trim().slice(0, 120),
+    text: b.text.trim().slice(0, 500),
+    ...(b.sourceKnowledgeId?.trim() ? { sourceKnowledgeId: b.sourceKnowledgeId.trim().slice(0, 64) } : {}),
+    enabled: Boolean(b.enabled),
+  }));
+  for (const b of cleaned) {
+    if (!b.label || !b.text) throw ApiError.badRequest('预审卖点块的标题和英文正文不能为空');
+    if (/\{\{[^}]+\}\}/.test(b.text)) throw ApiError.badRequest('预审卖点块不能包含未替换的占位符');
+  }
+  await Project.updateOne(
+    { _id: projectId },
+    { $set: { 'brandProfile.approvedProofBlocks': cleaned } },
+  );
+  return { blocks: cleaned };
 }
 
 /** 升级前核对已有自动开发任务和排队邮件，明确哪些旧配置缺少 rolloutMode 字段。 */
@@ -1594,6 +1660,10 @@ export interface OutreachEnrollmentDiagnostics {
     failureStage?: FactAuditStage;
     failureStageLabel?: string;
     failureDetail?: string;
+    fastPath?: boolean;
+    fallbackApplied?: boolean;
+    fallbackNote?: string;
+    tierSummary?: { red: number; yellow: number; green: number; proofBlocksUsed: string[] };
     checksTotal: number;
     checksSupported: number;
     checksNonClaim: number;
@@ -1947,6 +2017,10 @@ export async function getOutreachEnrollmentDiagnostics(
       ...(sendGateIssue ? { sendGateIssue } : {}),
       ...(latestDraft.knowledgeReview?.completeness ? { completeness: latestDraft.knowledgeReview.completeness } : {}),
       ...(latestDraft.knowledgeReview?.factAudit?.mode ? { factAuditMode: latestDraft.knowledgeReview.factAudit.mode } : {}),
+      ...(latestDraft.knowledgeReview?.factAudit?.fastPath ? { fastPath: true } : {}),
+      ...(latestDraft.knowledgeReview?.factAudit?.fallbackApplied ? { fallbackApplied: true } : {}),
+      ...(latestDraft.knowledgeReview?.factAudit?.fallbackNote ? { fallbackNote: latestDraft.knowledgeReview.factAudit.fallbackNote } : {}),
+      ...(latestDraft.knowledgeReview?.factAudit?.tierSummary ? { tierSummary: latestDraft.knowledgeReview.factAudit.tierSummary } : {}),
       ...failureInfo,
       checksTotal: checks.length,
       checksSupported: checks.filter((c) => c.status === 'supported').length,

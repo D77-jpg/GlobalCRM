@@ -1748,6 +1748,15 @@ export interface OutreachAutomationRecentRow {
   status: LetterStatus;
 }
 
+export interface ProjectApprovedProofBlock {
+  id: string;
+  slot: 'identity' | 'proof' | 'cta';
+  label: string;
+  text: string;
+  sourceKnowledgeId?: string;
+  enabled: boolean;
+}
+
 export interface OutreachAutomationOverview {
   config: OutreachAutomationConfig;
   windowOpen: boolean;
@@ -1767,6 +1776,8 @@ export interface OutreachAutomationOverview {
     failed: number;
     circuitFailed?: number;
     unverifiedDrafts?: number;
+    exceptionQueueCount?: number;
+    approvedProofBlocksCount?: number;
     queuedTasks?: number;
     runningTasks?: number;
     failedTasks?: number;

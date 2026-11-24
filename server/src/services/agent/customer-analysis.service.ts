@@ -381,6 +381,7 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
       signature: context.signature,
       outreachStep: options?.outreachStep,
       previousOutreach: options?.previousOutreach,
+      approvedProofBlocks: context.input.projectProfile?.approvedProofBlocks,
     }, providerFactVerifier(activeProvider, actor, options?.taskId, options?.workflow?.check, playbookOverride && context.input.projectProfile ? { ...context.input.projectProfile, playbook: playbookOverride } : context.input.projectProfile, { outreachStep: options?.outreachStep, previousOutreach: options?.previousOutreach }), actor);
 
     let grounded = await workflowStage(options?.workflow, 'audit_claims', { body: parsed.emailDraft.bodyText, bundle: context.knowledgeBundle, model: activeProvider.model }, () => verifyDraft(parsed.emailDraft.bodyText), { cache: true, tool: 'model' });
@@ -400,7 +401,7 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
           review,
           approvedOffers: context.approvedOffers,
         });
-        const supportedKnowledge = review.claims.filter((c) => c.sourceIds.some((id) => id.startsWith('knowledge:'))).length;
+        const supportedKnowledge = review.claims.filter((c) => c.sourceIds.some((id) => id.startsWith('knowledge:') || id.startsWith('proof-block:'))).length;
         const unsupported = (review.factAudit?.checks ?? []).filter((c) => c.status !== 'supported' && c.status !== 'non_claim').length;
         return quality.score + supportedKnowledge * 12 + Math.min(15, playbookRelevance * 1.5) - unsupported * 25;
       };

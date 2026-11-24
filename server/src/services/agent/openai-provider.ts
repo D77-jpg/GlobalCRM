@@ -195,6 +195,14 @@ function outreachWritingRules(profile: ProjectPromptContext): string {
     : profile.approvedActions?.length
       ? [`项目许可的沟通动作：${profile.approvedActions.join('；')}。只用与当前客户匹配的一项，能力与商务条件仍须有已发布证据。`]
       : [];
+  const enabledProofBlocks = (profile.approvedProofBlocks ?? []).filter((b) => b.enabled && b.text.trim().length > 0);
+  const proofBlockLines = enabledProofBlocks.length
+    ? [
+      '【已预审标准英文卖点块（强烈优先原句复用，系统可零误差直接核验通过）】',
+      ...enabledProofBlocks.slice(0, 12).map((b) => `- [${b.slot}] ${b.label}: ${b.text.trim()}`),
+      '请按 4 槽位写信：称呼 → 第1段（客户官网真实细节或行业品类观察，不写问号）→ 第2段（直接原句选用 1 条 identity + 1 条 proof 预审卖点块，不要擅自添加未证实的数字/价格/MOQ/交期/认证/免费承诺）→ 第3段（选用 1 条 cta 预审问句或写 1 个低压力问句，全文必须且只能包含 1 个问号 ?）。',
+    ]
+    : ['全文必须且只能包含 1 个问号（?），且只能放在第 3 段结尾，开场和中间段落不要写问句。'];
   return [
     `你代表的是${profile.identity}。${profile.offerSummary} 围绕${profile.outreachFocus}写信，避开${profile.avoidTopics}。`,
     '英文正文以 80–120 词和三个短段为目标，称呼和系统签名另计。信息少时可以更短。已知姓名用名字，只有公司名用 Dear [Company] team，避免编造人名。',
@@ -202,6 +210,7 @@ function outreachWritingRules(profile: ProjectPromptContext): string {
     '第二段讲清我们是谁和一项买家读完就能理解的帮助，用已发布知识中的一条证明。按联系人明确职位调整表达，品牌方侧重产品体验，采购侧重规格、补货和一致性。不要从官网信息推断采购意向，也不要把能力扩写成客户专属承诺。',
     '第三段只问一个低门槛问题，客户几秒能答。可提出项目已授权的下一步。首封正文省略未经证实的报价、交期、MOQ、认证、产能和免费承诺。签名由 CRM 追加。',
     ...offerLines,
+    ...proofBlockLines,
     '主题围绕同一个方向，3–7 个词。有可信产品名可以用，没有就用实际讨论主题。避免 Re:/Fwd:、先导性群发客套话和重复表述。Playbook 只提供表达方向，证据来自客户资料和本项目确认的知识。',
   ].join('\n') + playbookGuidance(profile);
 }

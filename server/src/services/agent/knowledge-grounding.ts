@@ -196,6 +196,8 @@ export interface GroundedEmailOptions {
  previousOutreach?:{step:number;subject:string;bodyText:string}[];
   /** Internal strategy trace; never used as factual evidence. */
   playbook?:import('../project-profile').OutreachPlaybookContext;
+  /** Admin-approved project proof blocks that can be cited verbatim on outreach fast-path. */
+  approvedProofBlocks?:import('../../models/Project').ProjectApprovedProofBlock[];
 }
 // Conservative whole-message rendering is the bounded fallback, not a chain of regex deletions.
 // The original model message is retained only by the independent semantic verifier below.

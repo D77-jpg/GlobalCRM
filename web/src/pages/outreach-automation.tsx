@@ -38,6 +38,7 @@ import type {
   OutreachAutomationQueueRow,
   OutreachAutomationStartResult,
   OutreachDraftStage,
+  ProjectApprovedProofBlock,
   UserDto,
 } from '@/types';
 
@@ -128,6 +129,10 @@ interface EnrollmentDiagnosticsDto {
     failureStage?: string;
     failureStageLabel?: string;
     failureDetail?: string;
+    fastPath?: boolean;
+    fallbackApplied?: boolean;
+    fallbackNote?: string;
+    tierSummary?: { red: number; yellow: number; green: number; proofBlocksUsed: string[] };
     checksTotal: number;
     checksSupported: number;
     checksNonClaim: number;
@@ -313,6 +318,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const [diagLoading, setDiagLoading] = React.useState(false);
   const [diagData, setDiagData] = React.useState<EnrollmentDiagnosticsDto | null>(null);
   const [diagRowId, setDiagRowId] = React.useState('');
+  const [queueFilter, setQueueFilter] = React.useState<'all' | 'exceptions'>('all');
   const [error, setError] = React.useState('');
   const dirtyRef = React.useRef(false);
   const ownerTouchedRef = React.useRef(false);
@@ -916,21 +922,52 @@ export function OutreachAutomationPage(): React.JSX.Element {
                   </CardTitle>
                   <CardDescription className="text-xs leading-5">每 5 秒刷新；只显示当前账号负责的客户。</CardDescription>
                 </div>
-                <Button type="button" variant="outline" size="sm" disabled={busy || !overview.config.enabled || overview.stats.eligible === 0} onClick={() => void enrollMore()}>
-                  <Users className="h-4 w-4" aria-hidden />
-                  加入符合条件客户
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex rounded-md border p-0.5 text-xs">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={queueFilter === 'all' ? 'secondary' : 'ghost'}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setQueueFilter('all')}
+                    >
+                      全部（{overview.queue.length}）
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={queueFilter === 'exceptions' ? 'secondary' : 'ghost'}
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setQueueFilter('exceptions')}
+                    >
+                      异常待审（{overview.queue.filter((r) => Boolean(r.draftNeedsReverify || r.draftStage === 'draft_audit_failed' || r.draftStage === 'task_failed' || r.status === 'failed')).length}）
+                    </Button>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" disabled={busy || !overview.config.enabled || overview.stats.eligible === 0} onClick={() => void enrollMore()}>
+                    <Users className="h-4 w-4" aria-hidden />
+                    加入符合条件客户
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="p-0">
-                {overview.queue.length === 0 ? (
-                  <div className="px-4 py-10 text-center">
-                    <Bot className="mx-auto h-7 w-7 text-muted-foreground/60" aria-hidden />
-                    <p className="mt-2 text-sm font-medium">还没有自动开发客户</p>
-                    <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                      {canStart ? '点击右上角「开始自动开发」，系统会从符合条件的客户开始准备并发送下一封。' : '先配置并验证个人发件邮箱，再开始自动开发。'}
-                    </p>
-                  </div>
-                ) : (
+                {(() => {
+                  const visibleQueue = queueFilter === 'exceptions'
+                    ? overview.queue.filter((r) => Boolean(r.draftNeedsReverify || r.draftStage === 'draft_audit_failed' || r.draftStage === 'task_failed' || r.status === 'failed'))
+                    : overview.queue;
+                  if (visibleQueue.length === 0) {
+                    return (
+                      <div className="px-4 py-10 text-center">
+                        <Bot className="mx-auto h-7 w-7 text-muted-foreground/60" aria-hidden />
+                        <p className="mt-2 text-sm font-medium">{queueFilter === 'exceptions' ? '当前没有异常待审客户' : '还没有自动开发客户'}</p>
+                        <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+                          {queueFilter === 'exceptions'
+                            ? '所有已生成的草稿均已通过分级核验，无需人工介入。'
+                            : canStart ? '点击右上角「开始自动开发」，系统会从符合条件的客户开始准备并发送下一封。' : '先配置并验证个人发件邮箱，再开始自动开发。'}
+                        </p>
+                      </div>
+                    );
+                  }
+                  return (
                   <div className="overflow-x-auto">
                     <Table aria-label="自动开发队列">
                       <TableHeader>
@@ -943,7 +980,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {overview.queue.map((row) => {
+                        {visibleQueue.map((row) => {
                           const status = phaseBadge(row, overview.windowOpen);
                           const verificationBlocked = row.status === 'blocked' && Boolean(row.lastError && /核验|依据审核|依据已变化|模拟校验|缺少依据|partial|unverif/i.test(row.lastError));
                           const complianceBlocked = row.status === 'blocked' && !verificationBlocked;
@@ -1023,11 +1060,13 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       </TableBody>
                     </Table>
                   </div>
-                )}
+                  );
+                })()}
               </CardContent>
             </Card>
           </div>
 
+          {isAdmin ? <ApprovedProofBlocksCard key={`proofs-${activeProjectId}`} onSaved={() => void load(true)} /> : null}
           <OutreachResultsPanel key={`${activeProjectId}-${ownerId}`} endpoint={scoped('/outreach-automation/results')} isAdmin={isAdmin} />
           {isAdmin ? <WritingReleaseCard key={`release-${activeProjectId}`} /> : null}
           {isAdmin ? <OutreachExperimentsCard key={`exp-${activeProjectId}`} /> : null}
@@ -1134,6 +1173,12 @@ export function OutreachAutomationPage(): React.JSX.Element {
                               ? '正文核验通过 · 其他发送检查未通过'
                               : '草稿已保存且核验通过'}
                         </Badge>
+                        {diagData.latestDraft.fastPath ? (
+                          <Badge variant="developed">预审卖点零等待直通</Badge>
+                        ) : null}
+                        {diagData.latestDraft.fallbackApplied ? (
+                          <Badge variant="outline">槽位安全降级</Badge>
+                        ) : null}
                         {diagData.latestDraft.failureStageLabel ? (
                           <Badge variant="outline">阶段：{diagData.latestDraft.failureStageLabel}</Badge>
                         ) : null}
@@ -1148,6 +1193,17 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       <p className="text-muted-foreground">
                         逐项核验：总计 {diagData.latestDraft.checksTotal} 项 · 支持 {diagData.latestDraft.checksSupported} · 非事实 {diagData.latestDraft.checksNonClaim} · 未通过 {diagData.latestDraft.checksFailed} · 更新于 {formatDateTime(diagData.latestDraft.updatedAt)}
                       </p>
+                      {diagData.latestDraft.tierSummary ? (
+                        <p className="text-muted-foreground">
+                          红/黄/绿分层：红线 {diagData.latestDraft.tierSummary.red} · 黄线客户实体 {diagData.latestDraft.tierSummary.yellow} · 绿线卖点/非事实 {diagData.latestDraft.tierSummary.green}
+                          {diagData.latestDraft.tierSummary.proofBlocksUsed.length > 0 ? ` · 命中预审块 ${diagData.latestDraft.tierSummary.proofBlocksUsed.length} 条` : ''}
+                        </p>
+                      ) : null}
+                      {diagData.latestDraft.fallbackNote ? (
+                        <p className="rounded bg-sky-50/70 px-2 py-1 text-sky-900 dark:bg-sky-400/10 dark:text-sky-200">
+                          降级说明：{diagData.latestDraft.fallbackNote}
+                        </p>
+                      ) : null}
                       {diagData.latestDraft.failureDetail ? (
                         <p className="rounded bg-amber-50/70 px-2 py-1 text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
                           核验分层说明：{diagData.latestDraft.failureDetail}
@@ -1738,6 +1794,181 @@ function OutreachExperimentsCard() {
           </div>
         ) : null}
       </CardContent>
+    </Card>
+  );
+}
+
+const PROOF_SLOT_LABELS: Record<ProjectApprovedProofBlock['slot'], string> = {
+  identity: '公司定位（identity）',
+  proof: '核心卖点（proof）',
+  cta: '低压力提问（cta）',
+};
+
+function ApprovedProofBlocksCard({ onSaved }: { onSaved: () => void }) {
+  const [blocks, setBlocks] = React.useState<ProjectApprovedProofBlock[]>([]);
+  const [suggested, setSuggested] = React.useState<ProjectApprovedProofBlock[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+
+  const loadBlocks = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiGet<{ blocks: ProjectApprovedProofBlock[]; suggested: ProjectApprovedProofBlock[] }>('/outreach-automation/proof-blocks');
+      setBlocks(res.blocks);
+      setSuggested(res.suggested);
+      setDirty(false);
+    } catch {
+      // ignore initial load error
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { void loadBlocks(); }, [loadBlocks]);
+
+  const applySuggested = () => {
+    if (!suggested.length) {
+      toast.info('当前项目已发布知识库中未提取到可用的英文无承诺卖点句，可手动添加。');
+      return;
+    }
+    const existingKeys = new Set(blocks.map((b) => b.text.trim().toLowerCase()));
+    const fresh = suggested.filter((s) => !existingKeys.has(s.text.trim().toLowerCase()));
+    if (!fresh.length) {
+      toast.info('知识库候选卖点块均已在列表中。');
+      return;
+    }
+    setBlocks((prev) => [...prev, ...fresh].slice(0, 30));
+    setExpanded(true);
+    setDirty(true);
+    toast.success(`已导入 ${fresh.length} 条知识库候选卖点块，核对后点「保存预审卖点块」生效`);
+  };
+
+  const addEmpty = () => {
+    setBlocks((prev) => [
+      ...prev,
+      {
+        id: `custom_${Date.now().toString(36)}`,
+        slot: 'proof',
+        label: '自定义英文卖点',
+        text: '',
+        enabled: true,
+      },
+    ]);
+    setExpanded(true);
+    setDirty(true);
+  };
+
+  const updateAt = (index: number, patch: Partial<ProjectApprovedProofBlock>) => {
+    setBlocks((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
+    setDirty(true);
+  };
+
+  const removeAt = (index: number) => {
+    setBlocks((prev) => prev.filter((_, idx) => idx !== index));
+    setDirty(true);
+  };
+
+  const saveBlocks = async () => {
+    setSaving(true);
+    try {
+      const cleaned = blocks.filter((b) => b.label.trim() && b.text.trim());
+      const res = await apiPut<{ blocks: ProjectApprovedProofBlock[] }>('/outreach-automation/proof-blocks', { blocks: cleaned });
+      setBlocks(res.blocks);
+      setDirty(false);
+      toast.success(`已保存 ${res.blocks.filter((b) => b.enabled).length} 条启用的项目预审卖点块`, {
+        description: '新生成开发信将优先原句锚定这些卖点块，核验可直接零等待直通，减少 50%+ AI 请求和 502 风险。',
+      });
+      onSaved();
+    } catch (caught) {
+      toast.error('保存预审卖点块失败', { description: toErrorMessage(caught, '请检查每条卖点块的标题和英文正文') });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const enabledCount = blocks.filter((b) => b.enabled && b.text.trim()).length;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
+        <div className="space-y-1">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+            项目预审英文卖点块（Approved Proof Blocks）
+            <Badge variant={enabledCount > 0 ? 'developed' : 'outline'}>已启用 {enabledCount} 条</Badge>
+          </CardTitle>
+          <CardDescription className="text-xs leading-5">
+            行业标准 4 槽位写稿 + 红黄绿分级核验：开发信原句引用下方预审卖点块时可走零 LLM 快速核验直通，大幅提升通过率并降低上游 502/超时；红线商业承诺（价格/MOQ/交期/认证/免费）仍 100% 严格拦截。
+          </CardDescription>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={loading || saving} onClick={applySuggested}>
+            从知识库自动提取（{suggested.length}）
+          </Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={saving} onClick={addEmpty}>
+            新增一条
+          </Button>
+          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? '收起' : `展开管理（${blocks.length}）`}
+          </Button>
+          {dirty ? (
+            <Button type="button" size="sm" className="h-7 px-2.5 text-xs" disabled={saving} onClick={() => void saveBlocks()}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+              保存预审卖点块
+            </Button>
+          ) : null}
+        </div>
+      </CardHeader>
+      {expanded ? (
+        <CardContent className="space-y-2.5 text-xs">
+          {blocks.length === 0 ? (
+            <p className="rounded-md border border-dashed p-4 text-center text-muted-foreground">
+              暂无项目预审卖点块。点右上角「从知识库自动提取」即可从当前项目已发布英文知识库一键生成候选定位句、卖点句和低压力提问。
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {blocks.map((block, idx) => (
+                <div key={`${block.id}-${idx}`} className="grid gap-2 rounded-md border bg-muted/20 p-2.5 md:grid-cols-[10rem_11rem_minmax(0,1fr)_auto]">
+                  <Select value={block.slot} onValueChange={(v: ProjectApprovedProofBlock['slot']) => updateAt(idx, { slot: v })}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(['identity', 'proof', 'cta'] as const).map((slot) => (
+                        <SelectItem key={slot} value={slot}>{PROOF_SLOT_LABELS[slot]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={block.label}
+                    onChange={(e) => updateAt(idx, { label: e.target.value })}
+                    placeholder="中文标签（如：工厂定位）"
+                    className="h-8 text-xs"
+                  />
+                  <Input
+                    value={block.text}
+                    onChange={(e) => updateAt(idx, { text: e.target.value })}
+                    placeholder="已审核的标准英文句子（不含未确认价格/MOQ/交期/免费承诺）"
+                    className="h-8 text-xs"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Switch checked={block.enabled} onCheckedChange={(checked) => updateAt(idx, { enabled: checked })} aria-label="启用该卖点块" />
+                    <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs text-destructive" onClick={() => removeAt(idx)}>
+                      删除
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-end pt-1">
+                <Button type="button" size="sm" disabled={!dirty || saving} onClick={() => void saveBlocks()}>
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />}
+                  保存预审卖点块
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      ) : null}
     </Card>
   );
 }
