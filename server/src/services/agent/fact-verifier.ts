@@ -10,6 +10,17 @@ import {renderSignatureText,signatureName,stripSignatureText} from '../letter-si
 import type {ProjectPromptContext} from '../project-profile';
 import {agentSafetyIdentifier,reserveAgentQuota,settleAgentQuota} from './runtime-guard';
 import {chargeTaskBudget} from './task-budget';
+import {
+ isGeneralCategoryInsight,
+ isRedTierClaim,
+ matchApprovedProofBlocks,
+ matchDeterministicCustomerOpener,
+ normalizeOutreachQuestionCount,
+ recoverNonCriticalQuoteAnchor,
+ syntheticProofBlockSources,
+ trySlotLevelFallback,
+} from './outreach-tiered-audit';
+import type {ProjectApprovedProofBlock} from '../../models/Project';
 export interface CustomerCheckContext {id:string;profile:CustomerFactProfile;websites?:import('./knowledge-types').CustomerWebsiteSnapshot[]}
 export interface EvidenceQuote {sourceId:string;quote:string;start:number;end:number}
 export interface SemanticCheck {id:string;status:'supported'|'unsupported'|'contradicted'|'unverifiable'|'non_claim';quotes:EvidenceQuote[];reason:string}
@@ -186,17 +197,10 @@ function ensureSalutation(body:string,options:GroundedEmailOptions):string{
  return expected+'\n\n'+normalized;
 }
 // Generic category observations are the one non-sourced element the plugin
-// intentionally allows in the first paragraph. Keep the exemption narrow:
-// no numbers, no supplier voice, no recipient-specific claim and no policy term.
-const generalCategoryInsight=(s:string)=>{
- const text=s.trim();
- return !/\d/.test(text.normalize('NFKC'))
-  && !COMMITMENT_WORDS.test(text)
-  && !/^(?:i|noticed|came across|liked|loved|saw)\b/i.test(text)
-  && !/\b(?:you|your|we|our|us)\b|你们|您|贵司|我们|我方/i.test(text)
-  && (/unbox|packag|gift|presentation|first impression|arriv/i.test(text)
-    || /^(?:when|if)\b[^.!?]{6,230}\b(?:can|may|could)\b[^.!?]{3,150}[.!?]?$/i.test(text));
-};
+// intentionally allows in the first paragraph. Industry-agnostic (works across
+// Genesis, IRONHUE, VELATURO, and any B2B vertical) while keeping the exemption
+// narrow: no numbers, no supplier voice, no recipient-specific claim and no policy term.
+const generalCategoryInsight=(s:string)=>isGeneralCategoryInsight(s);
 // Only closed, data-seeking forms are exempt. Open-ended questions can hide
 // arbitrary promises ("Could you please reply, we can hold stock for you?").
 // 承诺型词汇：出现这些词就不算「纯询问」，必须走逐段核验。
@@ -321,7 +325,8 @@ export function providerFactVerifier(provider:AgentProvider,actor:AuthUser,taskI
    for(const check of checks)for(let i=0;i<check.quotes.length;i++){const q=check.quotes[i];const source=input.evidence.find(e=>e.sourceId===q.sourceId)?.text;if(source===undefined)continue;
     const text=texts.get(check.id)??'';
     const customerAttributed=q.sourceId.startsWith('website:')&&!supplierVoice(text)&&!policyCritical(text)&&customerSiteAttribution(text,[q]);
-    check.quotes[i]=resolveEvidenceQuote(q,source,{allowDuplicate:!critical(text)||customerAttributed})??q;
+    const exact=resolveEvidenceQuote(q,source,{allowDuplicate:!critical(text)||customerAttributed});
+    check.quotes[i]=exact??(check.status==='supported'&&!isRedTierClaim(text)?recoverNonCriticalQuoteAnchor(q,source,text):undefined)??q;
    }
    return checks;},
   async rewrite(input){return call(factRewritePrompt(profile,sequence?.outreachStep??1,sequence?.previousOutreach),input,false);},
@@ -404,21 +409,119 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
    factAudit:{contract:'s4.1',mode:hasRealChecks?'semantic':'unavailable',attempts,checks:keptChecks,facts:collectConditionalEvidence(bundle),...(meta??{})}};
   return {bodyText,review};
  };
+ let candidate=stripSignatureText(body,[options.seller?.senderName,options.seller?.companyName,options.seller?.senderEmail,options.seller?.website],options.signature);
+ if(options.outreachStep!==undefined)candidate=normalizeOutreachQuestionCount(candidate,options.outreachStep);
+ const enabledProofBlocks=(options.approvedProofBlocks??[]).filter(b=>b.enabled&&b.text.trim().length>0);
+ const evaluatePreChecks=(text:string)=>{
+  const parts=segments(text);
+  const preMap=new Map<string,ClaimCheck>();
+  const usedBlocks:ProjectApprovedProofBlock[]=[];
+  const tierCounts={red:0,yellow:0,green:0};
+  if(options.outreachStep===undefined)return {parts,preMap,pendingParts:parts,usedBlocks,tierCounts};
+  for(const part of parts){
+   if(isRedTierClaim(part.text)){tierCounts.red++;continue;}
+   if(options.previousOutreach?.length&&/^(?:just\s+)?following up on (?:my|our) (?:(?:previous|last) )?(?:note|email|message)\b/i.test(part.text)&&!COMMITMENT_WORDS.test(part.text)){
+    tierCounts.green++;preMap.set(part.id,{...part,status:'non_claim',sourceIds:[],reason:'同一线程的跟进承接语'});continue;
+   }
+   if((options.outreachStep??1)>=3&&/^(?:i (?:do not|don'?t) want to keep filling your inbox|thank you for your time|(?:if|should)\b[\s\S]{0,180}\b(?:comes?|come) up\b)/i.test(part.text)&&!COMMITMENT_WORDS.test(part.text)){
+    tierCounts.green++;preMap.set(part.id,{...part,status:'non_claim',sourceIds:[],reason:'低压力结束信中的礼貌收尾，不含事实承诺'});continue;
+   }
+   if(generalCategoryInsight(part.text)){
+    tierCounts.green++;preMap.set(part.id,{...part,status:'non_claim',sourceIds:[],reason:'不含具体承诺的品类观察'});continue;
+   }
+   if(courtesy(part.text)||request(part.text)||lowPressureQuestion(part.text)){
+    tierCounts.green++;preMap.set(part.id,{...part,status:'non_claim',sourceIds:[],reason:'礼貌语或不含交易承诺的询问'});continue;
+   }
+   const proofHit=matchApprovedProofBlocks(part.text,enabledProofBlocks,bundle);
+   if(proofHit){
+    tierCounts.green++;
+    for(const b of proofHit.matched)if(!usedBlocks.some(u=>u.id===b.id))usedBlocks.push(b);
+    preMap.set(part.id,{...part,status:'supported',sourceIds:proofHit.sourceIds,quotes:proofHit.quotes,reason:'命中项目已预审标准卖点块'});continue;
+   }
+   const openerHit=matchDeterministicCustomerOpener(part.text,customer);
+   if(openerHit){
+    tierCounts.yellow++;
+    preMap.set(part.id,{...part,status:'supported',sourceIds:[openerHit.sourceId],quotes:[openerHit],reason:'客户官网/档案实体精确命中（黄线确定性核验）'});continue;
+   }
+  }
+  const pendingParts=parts.filter(p=>!preMap.has(p.id));
+  return {parts,preMap,pendingParts,usedBlocks,tierCounts};
+ };
+
+ // Pre-Approved Fast-Path for outreach sequences:
+ // When every paragraph is deterministically verified via Approved Proof Blocks,
+ // Yellow-Tier customer entity matching, and Green-Tier non-claims (ZERO Red-Tier claims),
+ // complete verification in 0ms without burning LLM verifier calls or risking 502/timeout.
+ if(options.outreachStep!==undefined&&candidate.trim()&&candidate.length<=20000){
+  const fast=evaluatePreChecks(candidate);
+  const fastChecks=fast.parts.map(p=>fast.preMap.get(p.id)).filter((c):c is ClaimCheck=>Boolean(c));
+  const hasSupplierClaim=fastChecks.some(c=>c.status==='supported'&&c.sourceIds.some(id=>id.startsWith('knowledge:')||id.startsWith('proof-block:')));
+  if(fast.parts.length>0&&fast.parts.length<=64&&fast.pendingParts.length===0&&baseline.review.questions.length===0&&(options.outreachStep!==1||hasSupplierClaim)){
+   if(actor){const current=await knowledgeFreshness(baseline.review,actor);if(current.failed||current.changed.length)return fallback('核验期间依据发生变化或权限检查失败，请重新生成','unavailable',{failureCategory:'evidence_unavailable',failureCode:'INDEX_STALE',failureStage:'precheck',failureDetail:'核验期间知识库依据已变化或当前无权读取'});}
+   const extraSources=syntheticProofBlockSources(fast.usedBlocks,baseline.review.sources);
+   const bodyText=[ensureSalutation(candidate,options),signature].filter(Boolean).join('\n\n');
+   const review:KnowledgeReview={
+    ...baseline.review,
+    sources:[...baseline.review.sources,...extraSources],
+    bodyHash:draftHash(bodyText),
+    claims:fastChecks.filter(c=>c.status==='supported').map(c=>({text:c.text,sourceIds:c.sourceIds})),
+    issues:baseline.review.issues.filter(i=>i.code!=='claim_rewritten'),
+    factAudit:{
+     contract:'s4.1',
+     mode:'deterministic',
+     attempts:0,
+     checks:fastChecks,
+     facts:collectConditionalEvidence(bundle),
+     fastPath:true,
+     tierSummary:{...fast.tierCounts,proofBlocksUsed:fast.usedBlocks.map(b=>b.id)},
+    },
+   };
+   return {bodyText,review};
+  }
+ }
+
  if(!verifier)return retainUnverified('语义核验服务未启用；正文保留模型原稿并标注未核验，发送前请逐项核对依据',{failureCategory:'verifier_disabled',failureCode:'VERIFIER_DISABLED',failureStage:'precheck',failureDetail:'当前未启用可用的在线语义核验模型'});
- const evidence=evidenceForCheck(bundle,customer);if(!evidence.length)return fallback('没有足够的有效依据，不能核实生成稿','unavailable',{failureCategory:'evidence_unavailable',failureCode:'NO_AUTHORIZED_EVIDENCE',failureStage:'precheck',failureDetail:'当前客户与知识库没有足够的有效依据可供核验'});
-  let candidate=stripSignatureText(body,[options.seller?.senderName,options.seller?.companyName,options.seller?.senderEmail,options.seller?.website],options.signature);
+ const evidence=evidenceForCheck(bundle,customer);
+ for(const block of enabledProofBlocks){
+  const sid=block.sourceKnowledgeId&&bundle.sources.some(s=>s.knowledgeId===block.sourceKnowledgeId)
+   ?bundle.sources.find(s=>s.knowledgeId===block.sourceKnowledgeId)!.sourceId
+   :`proof-block:${block.id}`;
+  if(!evidence.some(e=>e.sourceId===sid&&e.text.includes(block.text.trim()))){
+   evidence.push({sourceId:sid,text:block.text.trim()});
+  }
+ }
+ if(!evidence.length)return fallback('没有足够的有效依据，不能核实生成稿','unavailable',{failureCategory:'evidence_unavailable',failureCode:'NO_AUTHORIZED_EVIDENCE',failureStage:'precheck',failureDetail:'当前客户与知识库没有足够的有效依据可供核验'});
+ let lastUsedBlocks:ProjectApprovedProofBlock[]=[];
+ let lastTierCounts={red:0,yellow:0,green:0};
  try{
   for(let round=0;round<2;round++){
    currentStage=round===0?'round0_check':'round1_check';
-   const parts=segments(candidate);if(!parts.length||parts.length>64||candidate.length>20000)return fallback('草稿超出逐项核验范围，请拆分审核','unavailable',{failureCategory:'output_parse_failed',failureCode:'FACT_AUDIT_INPUT_LIMIT',failureStage:currentStage,failureDetail:'草稿分段数超过 64 或长度超过 20000 字符'});
-   attempts++;
-   let transcript:SemanticCheck[];
-   try{transcript=await verifier.check({segments:parts,evidence});}
-   catch(firstError){
-    if(!isRetryableCheckError(firstError))throw firstError;
-    transcript=await verifier.check({segments:parts,evidence});
+   if(options.outreachStep!==undefined)candidate=normalizeOutreachQuestionCount(candidate,options.outreachStep);
+   const pre=evaluatePreChecks(candidate);
+   const parts=pre.parts;
+   lastUsedBlocks=pre.usedBlocks;
+   lastTierCounts=pre.tierCounts;
+   if(!parts.length||parts.length>64||candidate.length>20000)return fallback('草稿超出逐项核验范围，请拆分审核','unavailable',{failureCategory:'output_parse_failed',failureCode:'FACT_AUDIT_INPUT_LIMIT',failureStage:currentStage,failureDetail:'草稿分段数超过 64 或长度超过 20000 字符'});
+   const toVerify=pre.pendingParts;
+   let transcript:SemanticCheck[]=[];
+   if(toVerify.length>0){
+    attempts++;
+    try{transcript=await verifier.check({segments:toVerify,evidence});}
+    catch(firstError){
+     if(!isRetryableCheckError(firstError))throw firstError;
+     transcript=await verifier.check({segments:toVerify,evidence});
+    }
    }
-   checks=checkSemanticResults(candidate,bundle,transcript,customer,options.previousOutreach,options.outreachStep??1);
+   if(pre.preMap.size>0){
+    const semanticChecked=toVerify.length>0
+     ?checkSemanticResults(toVerify.map(p=>p.text).join('\n'),bundle,transcript.map((item,idx)=>{const pos=toVerify.findIndex(p=>p.id===item.id);return {...item,id:pos>=0?`s${pos}`:`s${idx}`};}),customer,options.previousOutreach,options.outreachStep??1)
+     :[];
+    const semanticById=new Map<string,ClaimCheck>();
+    toVerify.forEach((p,idx)=>{if(semanticChecked[idx])semanticById.set(p.id,{...semanticChecked[idx]!,id:p.id,block:p.block});});
+    checks=parts.map(p=>pre.preMap.get(p.id)??semanticById.get(p.id)??{...p,status:'unverifiable' as const,sourceIds:[],reason:'核验未覆盖该段'});
+   }else{
+    checks=checkSemanticResults(candidate,bundle,transcript,customer,options.previousOutreach,options.outreachStep??1);
+   }
     // A paragraph can mix a verified sentence with an unsupported one. Recheck
     // its sentences in ONE batched verifier call on the final round only (never
     // loop serially per paragraph on Round 0 when a whole-message rewrite is
@@ -460,7 +563,24 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
    checks=checks.map(c=>{const asking=/(?:could you|please (?:confirm|provide|share)|what|how many|请(?:确认|提供)|多少)[^\n]{0,240}[?？.]?/i.test(c.text);const known=options.knownRequirements;return asking&&((known?.quantity!==undefined&&/quantity|how many|数量/i.test(c.text))||(known?.destination&&/destination|ship to|目的地|收货地/i.test(c.text)))?{...c,status:'unsupported' as const,reason:'客户已提供该项需求，请勿重复询问；只集中询问仍缺失的信息'}:c;});
    if(checks.every(c=>c.status==='supported'||c.status==='non_claim')){
     if(actor){const current=await knowledgeFreshness(baseline.review,actor);if(current.failed||current.changed.length)return fallback('核验期间依据发生变化或权限检查失败，请重新生成','unavailable',{failureCategory:'evidence_unavailable',failureCode:'INDEX_STALE',failureStage:currentStage,failureDetail:'核验期间知识库依据已变化或当前无权读取'});}
-    const bodyText=[ensureSalutation(candidate,options),signature].filter(Boolean).join('\n\n');const review:KnowledgeReview={...baseline.review,bodyHash:draftHash(bodyText),claims:checks.filter(c=>c.status==='supported').map(c=>({text:c.text,sourceIds:c.sourceIds})),issues:baseline.review.issues.filter(i=>i.code!=='claim_rewritten'),factAudit:{contract:'s4.1',mode:'semantic',attempts,checks,facts:collectConditionalEvidence(bundle)}};
+    const extraSources=syntheticProofBlockSources(lastUsedBlocks,baseline.review.sources);
+    const bodyText=[ensureSalutation(candidate,options),signature].filter(Boolean).join('\n\n');
+    const review:KnowledgeReview={
+     ...baseline.review,
+     sources:[...baseline.review.sources,...extraSources],
+     bodyHash:draftHash(bodyText),
+     claims:checks.filter(c=>c.status==='supported').map(c=>({text:c.text,sourceIds:c.sourceIds})),
+     issues:baseline.review.issues.filter(i=>i.code!=='claim_rewritten'),
+     factAudit:{
+      contract:'s4.1',
+      mode:attempts===0?'deterministic':'semantic',
+      attempts,
+      checks,
+      facts:collectConditionalEvidence(bundle),
+      ...(attempts===0?{fastPath:true}:{}),
+      ...(options.outreachStep!==undefined?{tierSummary:{...lastTierCounts,proofBlocksUsed:lastUsedBlocks.map(b=>b.id)}}:{}),
+     },
+    };
     // Question coverage is based on actual checked claims, never just the existence of retrieved sources.
     review.questions=review.questions.map(q=>({...q,status:checks.some(c=>c.status==='supported'&&c.quotes?.some(quote=>collectConditionalEvidence(bundle).some(f=>f.id===quote.sourceId&&f.topic===q.topic)))?q.status:'unanswered'}));
     // A factually safe message can still omit a customer's question. Render the
@@ -469,6 +589,38 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
     return {bodyText,review};
    }
    if(round===0&&verifier.rewrite){currentStage='round0_rewrite';candidate=await verifier.rewrite({body:candidate,allowed:evidence,issues:checks.filter(c=>c.status!=='supported'&&c.status!=='non_claim')});}else break;
+  }
+  // Slot-Level Graceful Fallback for outreach sequences:
+  // If only non-red-tier, non-contradicted paragraphs failed (e.g. paraphrased opener/fluff),
+  // cleanly drop/replace ONLY the failed slot so the verified email can still send autonomously.
+  // Any Red-Tier commercial/numeric failure or contradiction stays blocked in Exception Queue.
+  if(options.outreachStep!==undefined&&baseline.review.questions.length===0){
+   const slotFallback=trySlotLevelFallback({checks,outreachStep:options.outreachStep,approvedProofBlocks:enabledProofBlocks,bundle});
+   if(slotFallback){
+    if(actor){const current=await knowledgeFreshness(baseline.review,actor);if(current.failed||current.changed.length)return fallback('核验期间依据发生变化或权限检查失败，请重新生成','unavailable',{failureCategory:'evidence_unavailable',failureCode:'INDEX_STALE',failureStage:currentStage,failureDetail:'核验期间知识库依据已变化或当前无权读取'});}
+    const allUsedBlocks=[...lastUsedBlocks,...slotFallback.usedBlocks.filter(b=>!lastUsedBlocks.some(u=>u.id===b.id))];
+    const extraSources=syntheticProofBlockSources(allUsedBlocks,baseline.review.sources);
+    const bodyText=[ensureSalutation(slotFallback.bodyWithoutSalutation,options),signature].filter(Boolean).join('\n\n');
+    const review:KnowledgeReview={
+     ...baseline.review,
+     sources:[...baseline.review.sources,...extraSources],
+     bodyHash:draftHash(bodyText),
+     completeness:'complete',
+     claims:slotFallback.checks.filter(c=>c.status==='supported').map(c=>({text:c.text,sourceIds:c.sourceIds})),
+     issues:baseline.review.issues.filter(i=>i.code!=='claim_rewritten'),
+     factAudit:{
+      contract:'s4.1',
+      mode:'semantic',
+      attempts,
+      checks:slotFallback.checks,
+      facts:collectConditionalEvidence(bundle),
+      fallbackApplied:true,
+      fallbackNote:slotFallback.note,
+      tierSummary:{...lastTierCounts,proofBlocksUsed:allUsedBlocks.map(b=>b.id)},
+     },
+    };
+    return {bodyText,review};
+   }
   }
   const failedChecks=checks.filter(c=>c.status!=='supported'&&c.status!=='non_claim');
   const meta=classifyFailedChecks(failedChecks,currentStage);

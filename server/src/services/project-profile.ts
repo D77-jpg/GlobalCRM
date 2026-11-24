@@ -9,7 +9,7 @@
  */
 import type { LetterSignature } from './letter-signature';
 import { IRONHUE_LOGO_PATH } from '../constants/ironhue-logo';
-import type { ProjectApprovedOffer, ProjectBrandProfile, ProjectIndustryRule } from '../models/Project';
+import type { ProjectApprovedOffer, ProjectApprovedProofBlock, ProjectBrandProfile, ProjectIndustryRule } from '../models/Project';
 
 export interface ProjectLike {
   code?: string;
@@ -46,6 +46,7 @@ export interface ProjectSalesProfile {
   subjectFocus: string;
   approvedActions?: string[];
   approvedOffers?: ProjectApprovedOffer[];
+  approvedProofBlocks?: ProjectApprovedProofBlock[];
   industryRules?: ProjectIndustryRule[];
   activeWritingVersion?: string;
   writingPausedReason?: string;
@@ -236,6 +237,7 @@ function mergedProfile(base: ProjectSalesProfile, project: ProjectLike): Project
     subjectFocus: text(custom.subjectFocus, base.subjectFocus),
     approvedActions: custom.approvedActions,
     approvedOffers: custom.approvedOffers,
+    approvedProofBlocks: custom.approvedProofBlocks,
     industryRules: custom.industryRules,
     activeWritingVersion: custom.activeWritingVersion,
     writingPausedReason: custom.writingPausedReason,

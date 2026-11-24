@@ -38,6 +38,15 @@ export const writingRuleSchema = z.object({
   source: z.string().trim().max(120).optional(),
 }).strict();
 
+export const approvedProofBlockSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  slot: z.enum(['identity', 'proof', 'cta']).default('proof'),
+  label: z.string().trim().min(1).max(120),
+  text: z.string().trim().min(5).max(500),
+  sourceKnowledgeId: z.string().trim().max(64).optional(),
+  enabled: z.boolean().default(true),
+}).strict();
+
 export const brandProfileSchema = z.object({
   brandKey: z.enum(['genesis', 'ironhue', 'velaturo', 'general']).optional(),
   pricingMode: z.enum(['catalog_tiered', 'costing_approved']).optional(),
@@ -45,6 +54,7 @@ export const brandProfileSchema = z.object({
   teamWritingRules: z.array(writingRuleSchema).max(100).optional(),
   approvedActions: z.array(z.string().trim().min(1).max(400)).max(20).optional(),
   approvedOffers: z.array(approvedOfferSchema).max(30).optional(),
+  approvedProofBlocks: z.array(approvedProofBlockSchema).max(30).optional(),
   industryRules: z.array(industryRuleSchema).max(100).optional(),
   activeWritingVersion: z.string().trim().max(60).optional(),
   writingPausedReason: z.string().trim().max(300).optional(),

@@ -11,6 +11,7 @@ import {
   drainQueuedOutreachTasks,
   getOutreachAutomationOverview,
   getOutreachEnrollmentDiagnostics,
+  getProjectProofBlocks,
   migrateLegacyOutreachModes,
   pauseOutreachAutomation,
   recoverCircuitFailedEnrollments,
@@ -18,6 +19,7 @@ import {
   resumeOutreachAutomation,
   reverifyUnverifiedOutreachDrafts,
   saveOutreachAutomationConfig,
+  saveProjectProofBlocks,
   getOutreachResults,
   startOutreachAutomation,
 } from '../services/outreach-automation.service';
@@ -131,6 +133,25 @@ router.post('/drain-queued-tasks', asyncHandler(async (req, res) => {
 
 router.post('/recover-circuit-failed', asyncHandler(async (req, res) => {
   sendSuccess(res, await recoverCircuitFailedEnrollments(req.user!, targetUserId(req)));
+}));
+
+const proofBlockItemSchema = z.object({
+  id: z.string().trim().min(1).max(60),
+  slot: z.enum(['identity', 'proof', 'cta']),
+  label: z.string().trim().min(1).max(120),
+  text: z.string().trim().min(5).max(500),
+  sourceKnowledgeId: z.string().trim().max(64).optional(),
+  enabled: z.boolean(),
+}).strict();
+
+router.get('/proof-blocks', asyncHandler(async (req, res) => {
+  sendSuccess(res, await getProjectProofBlocks(req.user!));
+}));
+
+router.put('/proof-blocks', requireRole('admin'), validate({
+  body: z.object({ blocks: z.array(proofBlockItemSchema).max(30) }).strict(),
+}), asyncHandler(async (req, res) => {
+  sendSuccess(res, await saveProjectProofBlocks(req.user!, req.body.blocks));
 }));
 
 for (const action of ['pause', 'resume'] as const) {
