@@ -25,8 +25,31 @@ export interface KnowledgeBundle {
   projectId: string; status: 'index_not_ready'|'index_stale'|'ready'|'no_match'|'retrieval_failed'|'expired'|'conflict';
   sources: KnowledgeSource[]; issues: KnowledgeIssue[]; topics: PolicyTopic[];
 }
+export type FactAuditFailureCategory =
+  | 'model_call_failed'
+  | 'output_parse_failed'
+  | 'quote_mismatch'
+  | 'unsupported_claims'
+  | 'verifier_disabled'
+  | 'evidence_unavailable';
+export type FactAuditStage =
+  | 'precheck'
+  | 'round0_check'
+  | 'round0_rewrite'
+  | 'round1_check'
+  | 'sentence_check';
 export interface KnowledgeReview {
-  factAudit?:{contract:'s4.1';mode:'semantic'|'deterministic'|'unavailable';attempts:number;checks:ClaimCheck[];facts:ConditionalEvidence[]};
+  factAudit?:{
+    contract:'s4.1';
+    mode:'semantic'|'deterministic'|'unavailable';
+    attempts:number;
+    checks:ClaimCheck[];
+    facts:ConditionalEvidence[];
+    failureCategory?:FactAuditFailureCategory;
+    failureCode?:string;
+    failureStage?:FactAuditStage;
+    failureDetail?:string;
+  };
   version: 1; projectId: string; taskType: string; generatedAt: string;
   status: KnowledgeBundle['status']; completeness: 'complete'|'partial';
   sources: KnowledgeSource[]; claims: {text:string;sourceIds:string[];topic?:PolicyTopic}[];

@@ -1751,6 +1751,11 @@ export interface OutreachAutomationRecentRow {
 export interface OutreachAutomationOverview {
   config: OutreachAutomationConfig;
   windowOpen: boolean;
+  circuit?: {
+    open: boolean;
+    openCount: number;
+    cooldownRemainingMs: number;
+  };
   mailbox: OutreachAutomationMailbox | null;
   stats: {
     eligible: number;
@@ -1760,6 +1765,7 @@ export interface OutreachAutomationOverview {
     completed: number;
     blocked: number;
     failed: number;
+    circuitFailed?: number;
     unverifiedDrafts?: number;
     queuedTasks?: number;
     runningTasks?: number;

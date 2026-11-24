@@ -36,6 +36,7 @@ import { customerSearchArgs, searchAgentCustomers } from './customer-search';
 import { agentSafetyIdentifier, reserveAgentQuota, settleAgentQuota } from './runtime-guard';
 import { runWithTenant } from '../../models/tenant-context';
 import { previousOutreachDrafts } from './outreach-history';
+import { modelCircuitState } from './model-transport';
 
 const scope = (actor: AuthUser) => ({projectId: requireProjectId(actor), userId: new Types.ObjectId(actor.id)});
 const validId = (id: string) => { if (!/^[a-f\d]{24}$/i.test(id)) throw ApiError.notFound('任务不存在或无权访问'); return id; };
@@ -311,7 +312,18 @@ export async function processAgentTask(id?: string, providerOverride?: AgentProv
   if((error as Error).message!=='TASK_INTERRUPTED') {
    const failure=agentFailure(error);
    taskLogger.warn('Task step failed',{taskId:task.id,step:task.currentStep,code:failure.code,cause:error instanceof Error?error.name:'UnknownError'});
-   await AgentTask.updateOne(fence,{$set:{status:'failed',error:failure},$inc:{version:1},$push:{events:{$each:[{at:new Date(),message:failure.message,step:task.currentStep}],$slice:-100}}});
+   // Circuit-open / local capacity rejections never hit upstream: keep background tasks queued
+   // without burning retry attempts so they resume smoothly once the cooldown probe succeeds.
+   if(!id && (failure.code==='OPENAI_CIRCUIT_OPEN' || failure.code==='OPENAI_CAPACITY')) {
+    await AgentTask.updateOne(fence,{
+     $set:{status:'queued',error:failure},
+     $unset:{leaseToken:1,leaseUntil:1},
+     $inc:{version:1,attempts:task.attempts>0?-1:0},
+     $push:{events:{$each:[{at:new Date(),message:'AI 通道熔断或并发保护中（未发往上游，不消耗重试次数），等待冷却探测恢复后自动继续。',step:task.currentStep}],$slice:-100}},
+    });
+   } else {
+    await AgentTask.updateOne(fence,{$set:{status:'failed',error:failure},$inc:{version:1},$push:{events:{$each:[{at:new Date(),message:failure.message,step:task.currentStep}],$slice:-100}}});
+   }
   }
  } finally { clearTimeout(deadline);clearInterval(heartbeat); await AgentTask.updateOne({_id:task._id,leaseToken:token,status:{$ne:'running'}},{$unset:{leaseToken:1,leaseUntil:1}}); }
  };
@@ -322,7 +334,7 @@ let worker: ReturnType<typeof setInterval>|undefined;
 let busy=false;
 export function startAgentTaskWorker() {
  if(worker || process.env.NODE_ENV==='test' || process.env.NODE_TEST_CONTEXT) return;
- worker=setInterval(()=>{ if(busy || mongoose.connection.readyState!==1)return; busy=true; void observeAgentEvents().then(()=>materializeAgentBatches()).then(()=>processAgentTask()).catch(()=>undefined).finally(()=>{busy=false;}); },2000);
+ worker=setInterval(()=>{ if(busy || mongoose.connection.readyState!==1 || modelCircuitState().open)return; busy=true; void observeAgentEvents().then(()=>materializeAgentBatches()).then(()=>processAgentTask()).catch(()=>undefined).finally(()=>{busy=false;}); },2000);
  worker.unref();
 }
 

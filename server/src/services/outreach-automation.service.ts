@@ -16,9 +16,11 @@ import { createLogger } from '../config/logger';
 import { getCurrentMailSender } from './mail-account.service';
 import { queueOutreachStep } from './agent/outreach-sequence.service';
 import { hasProtectedCustomerMail } from './agent/mail-thread-analysis.service';
-import { draftHash } from './agent/knowledge-grounding';
+import { draftHash, knowledgeFreshness } from './agent/knowledge-grounding';
 import { automatedReviewIssue } from './agent/knowledge-send-gate';
 import { workflowLabels } from './agent/evidence-workflow';
+import { modelCircuitState } from './agent/model-transport';
+import type { FactAuditFailureCategory, FactAuditStage } from './agent/knowledge-types';
 import { assertAutomaticDraftCanSend, resendLetter } from './letter.service';
 import {
   cancelPendingOutreachLetters,
@@ -44,6 +46,120 @@ const TASK_STEP_LABELS: Record<string, string> = {
   verify_draft: '核对草稿归属',
   ...workflowLabels,
 };
+
+export const CIRCUIT_REJECT_CODES = new Set(['OPENAI_CIRCUIT_OPEN', 'OPENAI_CAPACITY']);
+
+export function isCircuitRejectError(error?: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code && CIRCUIT_REJECT_CODES.has(String(error.code))) return true;
+  return /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i.test(String(error.message ?? ''));
+}
+
+export function isCircuitFailedEnrollmentReason(lastError?: string | null): boolean {
+  if (!lastError) return false;
+  if (/状态异常|占位符|SMTP|发件箱/.test(lastError)) return false;
+  return /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i.test(lastError);
+}
+
+const FACT_AUDIT_FAILURE_CATEGORY_LABELS: Record<FactAuditFailureCategory, string> = {
+  model_call_failed: '模型调用失败',
+  output_parse_failed: '输出格式解析失败',
+  quote_mismatch: '引用偏移未匹配',
+  unsupported_claims: '正文主张缺少依据',
+  verifier_disabled: '核验服务未启用',
+  evidence_unavailable: '知识依据不可用',
+};
+
+const FACT_AUDIT_STAGE_LABELS: Record<FactAuditStage, string> = {
+  precheck: '前置检查',
+  round0_check: '首轮逐项核验',
+  round0_rewrite: '无依据主张重写',
+  round1_check: '重写后二轮核验',
+  sentence_check: '句级拆分核验',
+};
+
+function inferDraftAuditFailure(review?: {
+  status?: string;
+  issues?: { code?: string; message?: string }[];
+  factAudit?: {
+    mode?: string;
+    checks?: { status?: string; reason?: string }[];
+    failureCategory?: FactAuditFailureCategory;
+    failureCode?: string;
+    failureStage?: FactAuditStage;
+    failureDetail?: string;
+  };
+} | null): {
+  failureCategory?: FactAuditFailureCategory;
+  failureCategoryLabel?: string;
+  failureCode?: string;
+  failureStage?: FactAuditStage;
+  failureStageLabel?: string;
+  failureDetail?: string;
+} {
+  if (!review) return {};
+  const fa = review.factAudit;
+  if (fa?.failureCategory) {
+    return {
+      failureCategory: fa.failureCategory,
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS[fa.failureCategory],
+      ...(fa.failureCode ? { failureCode: fa.failureCode } : {}),
+      ...(fa.failureStage ? { failureStage: fa.failureStage, failureStageLabel: FACT_AUDIT_STAGE_LABELS[fa.failureStage] } : {}),
+      ...(fa.failureDetail ? { failureDetail: fa.failureDetail } : {}),
+    };
+  }
+  const issues = review.issues ?? [];
+  const checks = fa?.checks ?? [];
+  const failedChecks = checks.filter((c) => c.status !== 'supported' && c.status !== 'non_claim');
+  const semanticMsg = issues.find((i) => i.code === 'semantic_unverified')?.message ?? '';
+  if (['retrieval_failed', 'index_stale', 'index_not_ready', 'conflict'].includes(String(review.status ?? ''))) {
+    return {
+      failureCategory: 'evidence_unavailable',
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS.evidence_unavailable,
+      failureCode: String(review.status).toUpperCase(),
+      failureDetail: semanticMsg || '知识依据状态异常',
+    };
+  }
+  if (failedChecks.length > 0 && failedChecks.every((c) => /引用里没有能对上|引用片段未能全部精确匹配/.test(String(c.reason ?? '')))) {
+    return {
+      failureCategory: 'quote_mismatch',
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS.quote_mismatch,
+      failureCode: 'QUOTE_OFFSET_MISMATCH',
+      failureDetail: `${failedChecks.length} 处核验引用片段未能精确匹配本次授权证据`,
+    };
+  }
+  if (/语义核验服务未启用/.test(semanticMsg)) {
+    return {
+      failureCategory: 'verifier_disabled',
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS.verifier_disabled,
+      failureCode: 'VERIFIER_DISABLED',
+      failureDetail: semanticMsg,
+    };
+  }
+  if (/JSON|格式|schema|输入.*上限/i.test(semanticMsg)) {
+    return {
+      failureCategory: 'output_parse_failed',
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS.output_parse_failed,
+      failureDetail: semanticMsg,
+    };
+  }
+  if (/经一次重写仍有无法支持的主张/.test(semanticMsg) || failedChecks.some((c) => c.status === 'unsupported' || c.status === 'contradicted')) {
+    return {
+      failureCategory: 'unsupported_claims',
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS.unsupported_claims,
+      failureCode: 'UNSUPPORTED_AFTER_REWRITE',
+      failureDetail: semanticMsg || '正文存在缺少依据或与证据冲突的主张',
+    };
+  }
+  if (/暂时失败|超时|熔断|502|503|504/.test(semanticMsg) || fa?.mode === 'unavailable') {
+    return {
+      failureCategory: 'model_call_failed',
+      failureCategoryLabel: FACT_AUDIT_FAILURE_CATEGORY_LABELS.model_call_failed,
+      failureDetail: semanticMsg || '历史草稿未记录具体失败分层，需重新核验后定位',
+    };
+  }
+  return {};
+}
 
 export function humanizeTaskError(error?: { code?: string; message?: string } | null): string {
   if (!error) return '任务执行失败';
@@ -191,6 +307,11 @@ export interface OutreachAutomationRecentRow {
 export interface OutreachAutomationOverview {
   config: OutreachAutomationConfigDto;
   windowOpen: boolean;
+  circuit: {
+    open: boolean;
+    openCount: number;
+    cooldownRemainingMs: number;
+  };
   mailbox: {
     email: string;
     displayName: string;
@@ -217,6 +338,7 @@ export interface OutreachAutomationOverview {
     completed: number;
     blocked: number;
     failed: number;
+    circuitFailed: number;
     unverifiedDrafts: number;
     queuedTasks: number;
     runningTasks: number;
@@ -631,6 +753,13 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   const sentToday = Number(sentTodayBucket?.sent ?? 0);
   const cfgDto = configDto(config);
   const windowOpen = isWithinSendWindow(cfgDto, now);
+  const circuit = modelCircuitState();
+
+  const circuitFailedCount = await OutreachAutomationEnrollment.countDocuments({
+    ...projectFilter,
+    status: 'failed',
+    lastError: { $regex: /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i },
+  });
 
   let unverifiedDrafts = 0;
   const queueRows: OutreachAutomationQueueRow[] = rows.map((row) => {
@@ -738,6 +867,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   return {
     config: cfgDto,
     windowOpen,
+    circuit,
     mailbox: mailbox.account ? {
       email: mailbox.account.email,
       displayName: mailbox.account.displayName,
@@ -756,6 +886,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       completed: counts.completed ?? 0,
       blocked: counts.blocked ?? 0,
       failed: counts.failed ?? 0,
+      circuitFailed: circuitFailedCount,
       unverifiedDrafts,
       queuedTasks: taskTotals.queued ?? 0,
       runningTasks: taskTotals.running ?? 0,
@@ -1269,6 +1400,122 @@ export async function drainQueuedOutreachTasks(
   return { cancelled: result.modifiedCount, overview };
 }
 
+/**
+ * 仅恢复因 AI 通道熔断/并发保护（未实际发往上游）而误耗尽重试机会、被标记为 failed 的客户。
+ * 严格不动：历史发信失败（草稿 status=failed）、合规停止（blocked）、已完成（completed）、
+ * 以及真正发往上游连续失败满 3 次（如超时/502）的客户。
+ * 恢复后错峰排程，受单账号并发上限（3）保护，不会瞬间打爆上游。
+ */
+export async function recoverCircuitFailedEnrollments(
+  actor: AuthUser,
+  targetUserId?: string,
+): Promise<{
+  scanned: number;
+  recovered: number;
+  skipped: number;
+  overview: OutreachAutomationOverview;
+}> {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const now = new Date();
+
+  const failedRows = await OutreachAutomationEnrollment.find({
+    ...scope(actor, target.id),
+    campaignId: config._id,
+    status: 'failed',
+  }).sort({ updatedAt: 1 }).limit(500);
+
+  let recovered = 0;
+  let skipped = 0;
+
+  for (const row of failedRows) {
+    const customer = await Customer.findOne({
+      _id: row.customerId,
+      projectId: config.projectId,
+      ownerId: config.userId,
+    }).select('_id status email outreachStep outreachAbandonedAt outreachRepliedAt outreachLastAt').lean();
+    if (!customer || !customer.email || !AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number]) || customer.outreachAbandonedAt || customer.outreachRepliedAt) {
+      skipped += 1;
+      continue;
+    }
+    const step = Math.max(Number(customer.outreachStep ?? 0), await sentProgress(config.projectId, customer._id));
+    if (step >= MAX_AUTO_STEPS) {
+      skipped += 1;
+      continue;
+    }
+    const nextStep = step + 1;
+    // Never touch rows whose current-step letter failed SMTP delivery or has draft status anomaly.
+    const existingLetter = await findDraft(config.projectId, customer._id, nextStep);
+    if (existingLetter && existingLetter.status === 'failed') {
+      skipped += 1;
+      continue;
+    }
+    const recentFailedTasks = await AgentTask.find({
+      projectId: config.projectId,
+      userId: config.userId,
+      customerId: customer._id,
+      outreachStep: nextStep,
+      status: 'failed',
+    }).sort({ updatedAt: -1 }).limit(12).select('_id error').lean();
+
+    const upstreamFailedCount = recentFailedTasks.filter((t) => !isCircuitRejectError(t.error)).length;
+    const hasCircuitTask = recentFailedTasks.some((t) => isCircuitRejectError(t.error));
+    const circuitReason = isCircuitFailedEnrollmentReason(row.lastError);
+
+    if ((!circuitReason && !hasCircuitTask) || upstreamFailedCount >= 3) {
+      skipped += 1;
+      continue;
+    }
+
+    const circuitTaskIds = recentFailedTasks.filter((t) => isCircuitRejectError(t.error)).map((t) => t._id);
+    if (circuitTaskIds.length > 0) {
+      await AgentTask.updateMany(
+        { _id: { $in: circuitTaskIds }, status: 'failed' },
+        {
+          $set: { status: 'cancelled' },
+          $unset: { leaseToken: 1, leaseUntil: 1 },
+          $inc: { version: 1 },
+          $push: {
+            events: {
+              $each: [{ at: now, message: '清理因 AI 通道熔断/并发保护（未发往上游）导致的失败任务记录。' }],
+              $slice: -100,
+            },
+          },
+        },
+      );
+    }
+
+    const staggeredAt = new Date(now.getTime() + recovered * 15_000);
+    await markEnrollment(row._id, {
+      status: config.enabled ? 'active' : 'paused',
+      currentStep: step,
+      nextRunAt: staggeredAt,
+      lastError: null,
+      attempts: 0,
+    });
+    recovered += 1;
+  }
+
+  const overview = await getOutreachAutomationOverview(actor, target.id);
+  return {
+    scanned: failedRows.length,
+    recovered,
+    skipped,
+    overview,
+  };
+}
+
+export type OutreachSendReadinessStatus =
+  | 'ready_to_send'
+  | 'waiting_buyer_window'
+  | 'blocked_by_send_gate'
+  | 'blocked_by_audit'
+  | 'task_in_progress'
+  | 'task_failed'
+  | 'completed'
+  | 'stopped'
+  | 'no_draft';
+
 export interface OutreachEnrollmentDiagnostics {
   enrollmentId: string;
   customerId: string;
@@ -1279,6 +1526,19 @@ export interface OutreachEnrollmentDiagnostics {
   currentStep: number;
   nextStep: number;
   lastError?: string;
+  sendReadiness: {
+    status: OutreachSendReadinessStatus;
+    label: string;
+    detail: string;
+    auditPassed: boolean;
+    sendGatePassed: boolean;
+    sendGateIssues: string[];
+    bodyHashValid?: boolean;
+    knowledgeFresh?: boolean;
+    staleSources?: { sourceId: string; title: string; reason: string }[];
+    waitingForWindow: boolean;
+    waitingForSchedule: boolean;
+  };
   timezone: {
     effectiveTimezone: string;
     source: 'explicit' | 'country' | 'fallback';
@@ -1295,6 +1555,7 @@ export interface OutreachEnrollmentDiagnostics {
     currentStep?: string;
     currentStepLabel?: string;
     attempts: number;
+    failureClass: 'circuit_rejected' | 'upstream_error' | 'none';
     errorCode?: string;
     errorMessage?: string;
     totalDurationMs: number;
@@ -1311,6 +1572,8 @@ export interface OutreachEnrollmentDiagnostics {
       checksCount?: number;
       issuesCount?: number;
       completeness?: string;
+      failureCategory?: string;
+      failureCode?: string;
     }[];
     recentEvents: { at: string; step?: string; message: string }[];
   } | null;
@@ -1325,15 +1588,27 @@ export interface OutreachEnrollmentDiagnostics {
     sendGateIssue?: string;
     completeness?: string;
     factAuditMode?: string;
+    failureCategory?: FactAuditFailureCategory;
+    failureCategoryLabel?: string;
+    failureCode?: string;
+    failureStage?: FactAuditStage;
+    failureStageLabel?: string;
+    failureDetail?: string;
     checksTotal: number;
     checksSupported: number;
     checksNonClaim: number;
     checksFailed: number;
+    failedChecks: {
+      id: string;
+      status: string;
+      reason: string;
+      excerpt: string;
+    }[];
     issues: { code: string; message: string }[];
   } | null;
 }
 
-/** 按单条客户串联最新 AI 任务各步骤耗时/错误码、草稿保存与逐项核验结果、以及买家时区排程。 */
+/** 按单条客户串联最新 AI 任务各步骤耗时/错误码、草稿保存与逐项核验分层结果、发送检查及买家时区排程。 */
 export async function getOutreachEnrollmentDiagnostics(
   actor: AuthUser,
   enrollmentId: string,
@@ -1394,14 +1669,16 @@ export async function getOutreachEnrollmentDiagnostics(
     timezone: buyerSchedule.timezone,
     workdays: buyerSchedule.workdays,
   };
+  const windowOpen = isWithinSendWindow(recipientWindow, now);
   const nextRunAt = new Date(enrollment.nextRunAt);
-  const effectiveAt = nextSendWindow(recipientWindow, nextRunAt.getTime() > now.getTime() ? nextRunAt : now);
+  const waitingForSchedule = nextRunAt.getTime() > now.getTime();
+  const effectiveAt = nextSendWindow(recipientWindow, waitingForSchedule ? nextRunAt : now);
 
   const taskSteps = (latestTask?.workflowRecords ?? []).map((record) => {
     const payload = (record.payload ?? undefined) as {
       review?: {
         completeness?: string;
-        factAudit?: { mode?: string; checks?: unknown[] };
+        factAudit?: { mode?: string; checks?: unknown[]; failureCategory?: string; failureCode?: string };
         issues?: unknown[];
       };
     } | undefined;
@@ -1417,19 +1694,204 @@ export async function getOutreachEnrollmentDiagnostics(
         checksCount: payload.review.factAudit?.checks?.length ?? 0,
         issuesCount: payload.review.issues?.length ?? 0,
         completeness: payload.review.completeness,
+        ...(payload.review.factAudit?.failureCategory ? { failureCategory: payload.review.factAudit.failureCategory } : {}),
+        ...(payload.review.factAudit?.failureCode ? { failureCode: payload.review.factAudit.failureCode } : {}),
       } : {}),
     };
   });
 
   const audit = latestDraft ? inspectOutreachDraftAudit(latestDraft) : { needsReverify: false };
   const checks = latestDraft?.knowledgeReview?.factAudit?.checks ?? [];
-  const sendGateIssue = latestDraft?.status === 'draft'
-    ? automatedReviewIssue(latestDraft.knowledgeReview, latestDraft.outreachStep, {
+  const failedChecks = checks
+    .filter((c) => c.status !== 'supported' && c.status !== 'non_claim')
+    .slice(0, 12)
+    .map((c) => ({
+      id: String(c.id),
+      status: String(c.status),
+      reason: String(c.reason || '未提供原因'),
+      excerpt: String(c.text || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+    }));
+  const failureInfo = latestDraft && audit.needsReverify
+    ? inferDraftAuditFailure(latestDraft.knowledgeReview)
+    : {};
+
+  const sendGateIssues: string[] = [];
+  let bodyHashValid: boolean | undefined;
+  let knowledgeFresh: boolean | undefined;
+  let staleSources: { sourceId: string; title: string; reason: string }[] | undefined;
+  let sendGateIssue: string | undefined;
+
+  if (latestDraft?.status === 'draft') {
+    if (latestDraft.review?.decision === 'rejected') {
+      sendGateIssues.push('草稿已被人工标记为不通过');
+    }
+    if (latestDraft.knowledgeReview?.bodyHash) {
+      bodyHashValid = draftHash(latestDraft.contentText) === latestDraft.knowledgeReview.bodyHash;
+      if (!bodyHashValid) sendGateIssues.push('草稿正文在核验后发生变化（bodyHash 不匹配），需重新核验');
+    } else {
+      bodyHashValid = false;
+      sendGateIssues.push('草稿缺少正文核验指纹（bodyHash）');
+    }
+    if (!latestDraft.subject?.trim() || !latestDraft.contentText?.trim() || /\{\{[^}]+\}\}/.test(latestDraft.contentText)) {
+      sendGateIssues.push('草稿主题或正文不完整，或仍含未替换的占位符');
+    }
+    const automatedIssue = automatedReviewIssue(latestDraft.knowledgeReview, latestDraft.outreachStep, {
       bodyText: latestDraft.contentText,
       subject: latestDraft.subject,
       approvedOffers: project?.brandProfile?.approvedOffers,
-    })
-    : undefined;
+    });
+    if (automatedIssue) {
+      sendGateIssue = automatedIssue;
+      if (!sendGateIssues.includes(automatedIssue)) sendGateIssues.push(automatedIssue);
+    }
+    if (latestDraft.knowledgeReview) {
+      try {
+        const targetActor = await getActorForConfig(config);
+        const freshness = await knowledgeFreshness(latestDraft.knowledgeReview, targetActor);
+        knowledgeFresh = !freshness.failed && freshness.changed.length === 0;
+        if (!knowledgeFresh) {
+          staleSources = freshness.changed.slice(0, 5);
+          sendGateIssues.push(
+            freshness.failed
+              ? '知识库依据新鲜度校验失败，请重新核验'
+              : `草稿引用的 ${freshness.changed.length} 条知识库依据已更新或过期，请重新核验`,
+          );
+        }
+      } catch {
+        knowledgeFresh = undefined;
+      }
+    }
+  }
+
+  const auditPassed = Boolean(latestDraft?.status === 'draft' && !audit.needsReverify);
+  const sendGatePassed = auditPassed && sendGateIssues.length === 0;
+  const taskInFlight = latestTask ? ['queued', 'running'].includes(String(latestTask.status)) : false;
+
+  let sendReadiness: OutreachEnrollmentDiagnostics['sendReadiness'];
+  if (enrollment.status === 'completed' || actualStep >= MAX_AUTO_STEPS) {
+    sendReadiness = {
+      status: 'completed',
+      label: '三封开发信已完成',
+      detail: '该客户已完成本轮全部自动开发步骤。',
+      auditPassed: true,
+      sendGatePassed: true,
+      sendGateIssues: [],
+      waitingForWindow: false,
+      waitingForSchedule: false,
+    };
+  } else if (enrollment.status === 'blocked' && !isVerificationBlockedReason(enrollment.lastError)) {
+    sendReadiness = {
+      status: 'stopped',
+      label: '已按业务规则停止',
+      detail: enrollment.lastError || '客户已回复、退订或不在可开发状态，继续保持停止。',
+      auditPassed,
+      sendGatePassed: false,
+      sendGateIssues,
+      ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
+      ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
+      ...(staleSources?.length ? { staleSources } : {}),
+      waitingForWindow: !windowOpen,
+      waitingForSchedule,
+    };
+  } else if (taskInFlight) {
+    sendReadiness = {
+      status: 'task_in_progress',
+      label: latestTask?.status === 'running' ? '正在生成并核验草稿' : '已提交排队等待生成草稿',
+      detail: '当前有进行中的 AI 草稿/核验任务，完成后将更新核验结论。',
+      auditPassed: false,
+      sendGatePassed: false,
+      sendGateIssues,
+      waitingForWindow: !windowOpen,
+      waitingForSchedule,
+    };
+  } else if (latestDraft?.status === 'draft') {
+    if (!auditPassed) {
+      sendReadiness = {
+        status: 'blocked_by_audit',
+        label: failureInfo.failureCategoryLabel ? `正文核验未通过（${failureInfo.failureCategoryLabel}）` : '正文核验未通过',
+        detail: failureInfo.failureDetail || audit.reason || '正文逐项核验尚未通过，正式发送已拦截。',
+        auditPassed: false,
+        sendGatePassed: false,
+        sendGateIssues,
+        ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
+        ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
+        ...(staleSources?.length ? { staleSources } : {}),
+        waitingForWindow: !windowOpen,
+        waitingForSchedule,
+      };
+    } else if (!sendGatePassed) {
+      sendReadiness = {
+        status: 'blocked_by_send_gate',
+        label: '正文核验通过，但其他发送检查未通过',
+        detail: sendGateIssues.join('；'),
+        auditPassed: true,
+        sendGatePassed: false,
+        sendGateIssues,
+        ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
+        ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
+        ...(staleSources?.length ? { staleSources } : {}),
+        waitingForWindow: !windowOpen,
+        waitingForSchedule,
+      };
+    } else if (!windowOpen || waitingForSchedule) {
+      sendReadiness = {
+        status: 'waiting_buyer_window',
+        label: !windowOpen ? '正文核验通过，等待买家当地发送时段' : '正文核验通过，等待下一次排程时间',
+        detail: !windowOpen
+          ? `全部发送检查已通过；当前不在买家当地（${buyerSchedule.timezone}）工作日 ${config.windowStart}-${config.windowEnd} 时段，预计 ${effectiveAt.toISOString()} 处理。`
+          : `全部发送检查已通过；尚未到达下一次排程处理时间（${effectiveAt.toISOString()}）。`,
+        auditPassed: true,
+        sendGatePassed: true,
+        sendGateIssues: [],
+        ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
+        ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
+        waitingForWindow: !windowOpen,
+        waitingForSchedule,
+      };
+    } else {
+      sendReadiness = {
+        status: 'ready_to_send',
+        label: '正文核验通过，已满足全部发送检查',
+        detail: config.enabled
+          ? '正文核验、质量、依据新鲜度与买家当地时段全部就绪，等待自动开发下一轮轮询发送。'
+          : '全部发送检查均已通过，但当前自动开发总开关处于暂停状态，恢复总开关后才会正式发送。',
+        auditPassed: true,
+        sendGatePassed: true,
+        sendGateIssues: [],
+        ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
+        ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
+        waitingForWindow: false,
+        waitingForSchedule: false,
+      };
+    }
+  } else if (latestTask?.status === 'failed') {
+    const isCircuit = isCircuitRejectError(latestTask.error);
+    sendReadiness = {
+      status: 'task_failed',
+      label: isCircuit ? 'AI 通道熔断/并发保护拦截（未发往上游）' : '草稿生成任务失败（上游或超时）',
+      detail: humanizeTaskError(latestTask.error),
+      auditPassed: false,
+      sendGatePassed: false,
+      sendGateIssues: [],
+      waitingForWindow: !windowOpen,
+      waitingForSchedule,
+    };
+  } else {
+    sendReadiness = {
+      status: 'no_draft',
+      label: '尚未生成第 ' + nextStep + ' 封草稿',
+      detail: '等待轮询创建草稿任务，或可点击「单条重新生成」立即验证。',
+      auditPassed: false,
+      sendGatePassed: false,
+      sendGateIssues: [],
+      waitingForWindow: !windowOpen,
+      waitingForSchedule,
+    };
+  }
+
+  const taskFailureClass: 'circuit_rejected' | 'upstream_error' | 'none' = latestTask?.status === 'failed'
+    ? (isCircuitRejectError(latestTask.error) ? 'circuit_rejected' : 'upstream_error')
+    : 'none';
 
   return {
     enrollmentId: String(enrollment._id),
@@ -1441,12 +1903,13 @@ export async function getOutreachEnrollmentDiagnostics(
     currentStep: actualStep,
     nextStep,
     ...(enrollment.lastError ? { lastError: enrollment.lastError } : {}),
+    sendReadiness,
     timezone: {
       effectiveTimezone: buyerSchedule.timezone,
       source: buyerSchedule.source,
       windowStart: config.windowStart,
       windowEnd: config.windowEnd,
-      windowOpen: isWithinSendWindow(recipientWindow, now),
+      windowOpen,
       nextSendAt: effectiveAt.toISOString(),
       useBuyerTimezone: Boolean(config.useBuyerTimezone),
       defaultTimezone: config.timezone,
@@ -1459,6 +1922,7 @@ export async function getOutreachEnrollmentDiagnostics(
         currentStepLabel: TASK_STEP_LABELS[String(latestTask.currentStep)] ?? String(latestTask.currentStep),
       } : {}),
       attempts: Number(latestTask.attempts ?? 0),
+      failureClass: taskFailureClass,
       ...(latestTask.error?.code ? { errorCode: String(latestTask.error.code) } : {}),
       ...(latestTask.error ? { errorMessage: humanizeTaskError(latestTask.error) } : {}),
       totalDurationMs: Number(latestTask.workflowActiveMs ?? 0)
@@ -1483,10 +1947,12 @@ export async function getOutreachEnrollmentDiagnostics(
       ...(sendGateIssue ? { sendGateIssue } : {}),
       ...(latestDraft.knowledgeReview?.completeness ? { completeness: latestDraft.knowledgeReview.completeness } : {}),
       ...(latestDraft.knowledgeReview?.factAudit?.mode ? { factAuditMode: latestDraft.knowledgeReview.factAudit.mode } : {}),
+      ...failureInfo,
       checksTotal: checks.length,
       checksSupported: checks.filter((c) => c.status === 'supported').length,
       checksNonClaim: checks.filter((c) => c.status === 'non_claim').length,
       checksFailed: checks.filter((c) => c.status !== 'supported' && c.status !== 'non_claim').length,
+      failedChecks,
       issues: (latestDraft.knowledgeReview?.issues ?? []).map((i) => ({ code: i.code, message: i.message })),
     } : null,
   };
@@ -1595,8 +2061,10 @@ async function processEnrollment(
       await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + 30_000) });
       return { sent: false };
     }
-    // Check recent failed tasks for this exact (customer, step) to prevent duplicate task storms
-    // when upstream AI hits 502/timeout/circuit-breaker; enforce exponential backoff and hard cap at 3 fails/24h.
+    // Check recent failed tasks for this exact (customer, step).
+    // CRITICAL: Distinguish local circuit-breaker/capacity rejections (never sent to upstream)
+    // from actual upstream attempts (timeout / 502 / workflow limit).
+    // Never let circuit rejections burn the 3-failure customer budget!
     const recentFailed = await AgentTask.find({
       projectId: config.projectId,
       userId: config.userId,
@@ -1604,24 +2072,49 @@ async function processEnrollment(
       outreachStep: nextStep,
       status: 'failed',
       createdAt: { $gte: new Date(now.getTime() - DAY_MS) },
-    }).sort({ updatedAt: -1 }).limit(4).select('error updatedAt currentStep').lean();
-    if (recentFailed.length > 0) {
-      const latestFail = recentFailed[0]!;
-      const reason = humanizeTaskError(latestFail.error);
-      if (recentFailed.length >= 3) {
+    }).sort({ updatedAt: -1 }).limit(12).select('error updatedAt currentStep').lean();
+    const upstreamFailed = recentFailed.filter((t) => !isCircuitRejectError(t.error));
+    const circuitFailed = recentFailed.filter((t) => isCircuitRejectError(t.error));
+
+    if (upstreamFailed.length > 0) {
+      const latestUpstreamFail = upstreamFailed[0]!;
+      const reason = humanizeTaskError(latestUpstreamFail.error);
+      if (upstreamFailed.length >= 3) {
         await markEnrollment(enrollment._id, {
           status: 'failed',
-          lastError: `AI 任务连续失败 ${recentFailed.length} 次（${reason}），已停止自动重建，请单条试跑排查`,
+          lastError: `AI 上游连续失败 ${upstreamFailed.length} 次（${reason}），已停止自动重建，请单条试跑排查`,
           nextRunAt: new Date(now.getTime() + DAY_MS),
         });
         return { sent: false };
       }
-      const backoffMs = TASK_BACKOFF_MS[Math.min(recentFailed.length - 1, TASK_BACKOFF_MS.length - 1)];
-      const retryAt = new Date(new Date(latestFail.updatedAt).getTime() + backoffMs);
+      const backoffMs = TASK_BACKOFF_MS[Math.min(upstreamFailed.length - 1, TASK_BACKOFF_MS.length - 1)];
+      const retryAt = new Date(new Date(latestUpstreamFail.updatedAt).getTime() + backoffMs);
       if (now.getTime() < retryAt.getTime()) {
         await markEnrollment(enrollment._id, {
-          lastError: `AI 任务失败（${reason}），等待自动退避重试`,
+          lastError: `AI 上游失败（${reason}），等待自动退避重试`,
           nextRunAt: retryAt,
+        });
+        return { sent: false };
+      }
+    }
+
+    // Do NOT create doomed AgentTasks while the AI circuit breaker is open/probing;
+    // defer cleanly until cooldown expires without burning customer retries.
+    const circuit = modelCircuitState();
+    if (circuit.open) {
+      await markEnrollment(enrollment._id, {
+        lastError: 'AI 通道熔断冷却中（未发往上游，不计入失败次数），探测恢复后自动继续',
+        nextRunAt: new Date(now.getTime() + Math.max(circuit.cooldownRemainingMs, 30_000)),
+      });
+      return { sent: false };
+    }
+    if (circuitFailed.length > 0) {
+      const latestCircuitFail = circuitFailed[0]!;
+      const circuitRetryAt = new Date(new Date(latestCircuitFail.updatedAt).getTime() + 30_000);
+      if (now.getTime() < circuitRetryAt.getTime()) {
+        await markEnrollment(enrollment._id, {
+          lastError: 'AI 通道刚触发熔断保护（未发往上游，不计入失败次数），等待冷却后自动恢复',
+          nextRunAt: circuitRetryAt,
         });
         return { sent: false };
       }
