@@ -1813,7 +1813,34 @@ test('Section 10: Grounding & Delivery Polish (Items 1-7: context gaps vs body a
   assert.equal(foundSelection.hasCapabilityEvidence, true);
   assert.equal(foundSelection.selectedSources[0]?.sourceId, 'knowledge:cap1:v1');
 
-  const forbiddenRules = buildOfferAuthorizationPromptRules([
+  // Default empty/non-sample approvedOffers: ordinary non-free sample inquiry is allowed,
+  // while free/shipping commitments stay strictly blocked.
+  assert.deepEqual(
+    verifyOfferAuthorization('Would you like to arrange a sample for evaluation?', []),
+    [],
+    'Ordinary non-free sample/swatch inquiry must not be blocked when project has not disabled samples',
+  );
+  assert.ok(
+    verifyOfferAuthorization('Happy to send a free sample with free shipping.', []).length > 0,
+    'Free sample / free shipping must still stay strictly blocked',
+  );
+  const explicitDisableSample = [{
+    id: 'sample-off',
+    label: 'Sample disabled',
+    actionText: 'Sample',
+    category: 'sample' as const,
+    requiresEvidence: false,
+    allowsFree: false,
+    allowsSample: true,
+    allowsShipping: false,
+    enabled: false,
+  }];
+  assert.ok(
+    verifyOfferAuthorization('Would you like to arrange a sample?', explicitDisableSample).length > 0,
+    'Explicitly disabled sample offer must stay blocked',
+  );
+
+  const defaultRules = buildOfferAuthorizationPromptRules([
     {
       id: 'spec',
       label: 'Spec sheet',
@@ -1826,13 +1853,16 @@ test('Section 10: Grounding & Delivery Polish (Items 1-7: context gaps vs body a
       enabled: true,
     },
   ]);
-  assert.equal(forbiddenRules.sampleAllowed, false);
-  assert.equal(forbiddenRules.freeAllowed, false);
-  assert.equal(forbiddenRules.shippingAllowed, false);
-  const rulesJoined = forbiddenRules.lines.join('\n');
-  assert.ok(rulesJoined.includes('寄样/色卡/打样'));
-  assert.ok(rulesJoined.includes('免费承诺'));
-  assert.ok(rulesJoined.includes('运费/快递/贸易术语承诺'));
+  assert.equal(defaultRules.sampleAllowed, true);
+  assert.equal(defaultRules.freeAllowed, false);
+  assert.equal(defaultRules.shippingAllowed, false);
+  const defaultJoined = defaultRules.lines.join('\n');
+  assert.ok(defaultJoined.includes('免费承诺'));
+  assert.ok(defaultJoined.includes('运费/快递/贸易术语承诺'));
+
+  const disabledSampleRules = buildOfferAuthorizationPromptRules(explicitDisableSample);
+  assert.equal(disabledSampleRules.sampleAllowed, false);
+  assert.ok(disabledSampleRules.lines.join('\n').includes('寄样/色卡/打样'));
 
   // --- Item 1 & 7 unit check: verifyGroundedEmail auto-splits 91-word paragraph & returns complete when only background missing gap exists ---
   const capText = 'We manufacture rubber bumper plates for gym brands with strict weight checks and steady production runs. Our factory supports custom logo molding and steady repeat supply for commercial equipment buyers across Europe.';
@@ -2194,5 +2224,188 @@ test('Section 10: Grounding & Delivery Polish (Items 1-7: context gaps vs body a
     assert.equal(typeof reverifyOut.remainingSendGateBlocked, 'number');
     assert.ok(Array.isArray(reverifyOut.remainingDetails));
     assert.equal((await OutreachAutomationEnrollment.findById(enrGapOnly._id).lean())?.status, 'paused', 'Never auto-resume paused queue');
+
+    // --- Section 11: send_gate_blocked stage split, Step-1 self-heal proof block injection, and batch autoFixOutreachSendGates ---
+    const { autoFixOutreachSendGates } = await import('../src/services/outreach-automation.service');
+
+    // Step-1 self-healing: draft missing a knowledge claim automatically injects enabled approvedProofBlock in 0 LLM calls
+    const step1SelfHeal = await verifyGroundedEmail(
+      'Hi Jordan,\n\nCommercial gym teams often look for consistent plate durability across high-traffic zones.\n\nWhich plate line are you reviewing next?',
+      {
+        projectId: projectAId,
+        status: 'ready',
+        sources: [kbSource],
+        facts: [],
+        issues: [],
+        topics: [],
+      },
+      {
+        projectId: projectAId,
+        taskType: 'first_outreach',
+        outreachStep: 1,
+        recipientName: 'Jordan',
+        approvedProofBlocks: [{
+          id: 'auto_cap_1',
+          slot: 'proof',
+          label: 'Factory capability',
+          text: capText,
+          sourceKnowledgeId: String(kbDoc._id),
+          enabled: true,
+        }],
+      },
+      {
+        model: 'test-verifier',
+        check: async ({ segments }) => segments.map((seg) => ({
+          id: seg.id,
+          status: 'non_claim' as const,
+          quotes: [],
+          reason: 'general',
+        })),
+        rewrite: async () => '',
+      },
+    );
+    assert.ok(step1SelfHeal.bodyText.includes(capText), 'Step-1 self-heal must inject approved proof block');
+    assert.equal(
+      automatedReviewIssue(step1SelfHeal.review, 1, { bodyText: step1SelfHeal.bodyText, subject: 'Commercial plates' }),
+      undefined,
+      'Self-healed Step-1 draft must pass Step-1 supplier evidence send gate',
+    );
+
+    // Create two send_gate_blocked rows (1 paragraph_too_long + 1 missing_supplier_evidence) and verify stage split + batch autoFixOutreachSendGates
+    const [custAutoSplit, custAutoStep1] = await Customer.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        ownerId: rep._id,
+        name: 'AutoSplit Fitness',
+        email: 'autosplit@example.test',
+        status: 'pending',
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        ownerId: rep._id,
+        name: 'AutoStep1 Fitness',
+        email: 'autostep1@example.test',
+        status: 'pending',
+      },
+    ]);
+    const [enrAutoSplit, enrAutoStep1] = await OutreachAutomationEnrollment.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custAutoSplit._id,
+        status: 'paused',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custAutoStep1._id,
+        status: 'paused',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+    ]);
+    const longSingleBlock = `${capText} Our production team also supports custom embossed weight logos, protective export palletizing, and repeatable color matching for multi-site commercial gym expansions across regional markets. Which plate line would you like to review first?`;
+    const longBodyText = `Hi AutoSplit team,\n\n${longSingleBlock}`;
+    await DevelopmentLetter.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: custAutoSplit._id,
+        userId: rep._id,
+        outreachStep: 1,
+        subject: 'Bumper plate supply',
+        content: `<p>${longBodyText.replace(/\n\n/g, '</p><p>')}</p>`,
+        contentText: longBodyText,
+        recipientEmail: 'autosplit@example.test',
+        status: 'draft',
+        needsReview: false,
+        knowledgeReview: {
+          version: 1,
+          projectId: projectAId,
+          taskType: 'first_outreach',
+          generatedAt: new Date().toISOString(),
+          status: 'ready',
+          completeness: 'complete',
+          sources: [kbSource],
+          claims: [{ text: longSingleBlock, sourceIds: [kbSource.sourceId] }],
+          questions: [],
+          issues: [],
+          context: {},
+          bodyHash: draftHash(longBodyText),
+          factAudit: {
+            contract: 's4.1',
+            mode: 'semantic',
+            attempts: 1,
+            facts: [],
+            checks: [
+              { id: 's0', text: 'Hi AutoSplit team,', status: 'non_claim', sourceIds: [], reason: 'greeting' },
+              { id: 's1', text: longSingleBlock, status: 'supported', sourceIds: [kbSource.sourceId], reason: 'supported' },
+            ],
+          },
+        },
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: custAutoStep1._id,
+        userId: rep._id,
+        outreachStep: 1,
+        subject: 'Quick hello',
+        content: '<p>Hi AutoStep1 team,</p><p>Which free-weight product line are you focusing on this quarter?</p>',
+        contentText: 'Hi AutoStep1 team,\n\nWhich free-weight product line are you focusing on this quarter?',
+        recipientEmail: 'autostep1@example.test',
+        status: 'draft',
+        needsReview: false,
+        knowledgeReview: {
+          version: 1,
+          projectId: projectAId,
+          taskType: 'first_outreach',
+          generatedAt: new Date().toISOString(),
+          status: 'ready',
+          completeness: 'complete',
+          sources: [kbSource],
+          claims: [],
+          questions: [],
+          issues: [],
+          context: {},
+          bodyHash: draftHash('Hi AutoStep1 team,\n\nWhich free-weight product line are you focusing on this quarter?'),
+          factAudit: {
+            contract: 's4.1',
+            mode: 'semantic',
+            attempts: 1,
+            facts: [],
+            checks: [
+              { id: 's0', text: 'Hi AutoStep1 team,', status: 'non_claim', sourceIds: [], reason: 'greeting' },
+              { id: 's1', text: 'Which free-weight product line are you focusing on this quarter?', status: 'non_claim', sourceIds: [], reason: 'question' },
+            ],
+          },
+        },
+      },
+    ]);
+
+    const preFixOv = await getOutreachAutomationOverview(actorA, rep.id);
+    const splitPreRow = preFixOv.queue.find((q) => q.id === enrAutoSplit.id);
+    const step1PreRow = preFixOv.queue.find((q) => q.id === enrAutoStep1.id);
+    assert.equal(splitPreRow?.draftStage, 'send_gate_blocked', 'Send-gate rows must NOT use draft_audit_failed');
+    assert.equal(step1PreRow?.draftStage, 'send_gate_blocked', 'Missing capability rows must use send_gate_blocked');
+
+    const autoFixRes = await autoFixOutreachSendGates(actorA, rep.id);
+    assert.equal(autoFixRes.scanned, 2);
+    assert.equal(autoFixRes.fixed, 1, 'Paragraph sprawl draft should be fixed in-place');
+    assert.equal(autoFixRes.requeued, 1, 'Missing Step-1 evidence draft should be requeued when project has published knowledge');
+    assert.equal(autoFixRes.skipped, 0);
+    assert.equal(
+      autoFixRes.overview.queue.find((q) => q.id === enrAutoSplit.id)?.draftStage,
+      'draft_saved_verified',
+    );
+    assert.equal(
+      (await OutreachAutomationEnrollment.findById(enrAutoSplit._id).lean())?.status,
+      'paused',
+      'Batch auto-fix must NEVER auto-resume paused queue',
+    );
   });
 });

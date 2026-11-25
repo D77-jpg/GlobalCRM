@@ -7,6 +7,7 @@ import { requireRole } from '../middleware/auth.middleware';
 import { requireProjectId } from '../utils/access';
 import {
   auditLegacyOutreachCampaigns,
+  autoFixOutreachSendGates,
   controlOutreachEnrollment,
   drainQueuedOutreachTasks,
   fixEnrollmentSendGate,
@@ -126,6 +127,10 @@ router.post('/reverify-unverified', validate({
 }), asyncHandler(async (req, res) => {
   const enrollmentIds = req.body && Array.isArray(req.body.enrollmentIds) ? req.body.enrollmentIds : undefined;
   sendSuccess(res, await reverifyUnverifiedOutreachDrafts(req.user!, { enrollmentIds }, targetUserId(req)));
+}));
+
+router.post('/auto-fix-send-gates', asyncHandler(async (req, res) => {
+  sendSuccess(res, await autoFixOutreachSendGates(req.user!, targetUserId(req)));
 }));
 
 router.post('/drain-queued-tasks', asyncHandler(async (req, res) => {
