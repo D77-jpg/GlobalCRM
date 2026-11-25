@@ -11,6 +11,10 @@
  * 目标是让销售打开客户详情就能快速判断：
  *   之前发生过什么 / 最近一次联系是什么时候（lastContactAt）/ 下一步要做什么（nextFollowUpAt + 状态）。
  */
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import env from '../config/env';
+import { getObject } from './storage.service';
 import {privateMailScope} from './agent/mail-access';
 import { Types } from 'mongoose';
 import { Customer, CustomerEvent, DevelopmentLetter, FollowUp, Quotation } from '../models';
@@ -43,7 +47,7 @@ export interface TimelineEvent {
   at: Date;
   /** type=letter 时的开发信摘要 */
   letter?: { id: string; subject: string; status: LetterStatus; channel: MailChannel };
-  mail?: { id: string; subject: string; from: string };
+  mail?: { id: string; subject: string; from: string; attachmentCount?: number };
   interaction?: { letterId: string; subject: string; count: number; lastAt?: Date; url?: string };
   /** type=followup 时的跟进记录摘要 */
   followUp?: {
@@ -73,6 +77,7 @@ export interface TimelineEvent {
       from: string;
       sentAt: Date;
       sourceLabel: string;
+      attachmentCount?: number;
     };
   };
   /** type=followup_scheduled 时变更后的下一次跟进时间（null 表示被清除） */
@@ -130,6 +135,7 @@ interface ReceivedMailRow {
   threadId?: string;
   inReplyTo?: string;
   messageId?: string;
+  attachments?: { _id?: Types.ObjectId; blocked?: string }[];
 }
 interface EventRow {
   _id: Types.ObjectId;
@@ -224,6 +230,14 @@ export async function recordCustomerChanges(
   }
 }
 
+export interface CustomerReplyAttachment {
+  id: string;
+  name: string;
+  mimeType?: string;
+  size?: number;
+  blocked?: string;
+}
+
 /** 聚合某客户的完整时间线（按时间倒序） */
 export interface CustomerReplyMail {
   id: string;
@@ -238,6 +252,7 @@ export interface CustomerReplyMail {
   messageId?: string;
   mailboxUserId?: string;
   read: boolean;
+  attachments: CustomerReplyAttachment[];
 }
 
 /**
@@ -291,6 +306,16 @@ export async function getCustomerReplyMails(
     .map((mail) => {
     const to = Array.isArray(mail.to) ? mail.to.map(String) : [];
     const readBy = Array.isArray(mail.readBy) ? mail.readBy.map(String) : [];
+    const rawAttachments = Array.isArray(mail.attachments)
+      ? (mail.attachments as Array<Record<string, unknown>>)
+      : [];
+    const attachments: CustomerReplyAttachment[] = rawAttachments.map((att) => ({
+      id: String(att._id ?? ''),
+      name: String(att.name || 'attachment'),
+      ...(att.mimeType ? { mimeType: String(att.mimeType) } : {}),
+      ...(typeof att.size === 'number' ? { size: att.size } : {}),
+      ...(att.blocked ? { blocked: String(att.blocked) } : {}),
+    })).filter((att) => Boolean(att.id));
     return {
       id: String(mail._id),
       subject: String(mail.subject || ''),
@@ -304,8 +329,65 @@ export async function getCustomerReplyMails(
       messageId: mail.messageId ? String(mail.messageId) : undefined,
       mailboxUserId: mail.mailboxUserId ? String(mail.mailboxUserId) : undefined,
       read: actor ? readBy.includes(actor.id) : false,
+      attachments,
     };
   });
+}
+
+/**
+ * 客户详情页回复邮件的附件下载 / 图片预览读取口。
+ * 权限范围与 getCustomerReplyMails 完全一致：业务员只读本人邮箱来信，
+ * 项目管理员/系统管理员可读取本项目下该客户的来信附件。
+ */
+export async function getCustomerReplyMailAttachment(
+  customerId: string,
+  mailId: string,
+  attachmentId: string,
+  actor?: AuthUser,
+): Promise<{ buffer: Buffer; name: string; mimeType: string }> {
+  if (!Types.ObjectId.isValid(customerId) || !Types.ObjectId.isValid(mailId) || !Types.ObjectId.isValid(attachmentId)) {
+    throw ApiError.badRequest('参数 ID 格式不正确');
+  }
+  const customerOid = new Types.ObjectId(customerId);
+  const customer = await Customer.findOne({ _id: customerOid, ...customerScope(actor) }).select('_id').lean();
+  if (!customer) {
+    throw ApiError.notFound('客户不存在或无权访问');
+  }
+
+  const mailScope = !actor
+    ? { _id: { $exists: false } }
+    : isProjectManager(actor)
+      ? {}
+      : privateMailScope(actor);
+  const doc = await MailMessage.findOne({
+    _id: new Types.ObjectId(mailId),
+    customerId: customerOid,
+    ...projectScope(actor),
+    ...mailScope,
+    deleted: { $ne: true },
+  }).select('+attachments.filename');
+  if (!doc) {
+    throw ApiError.notFound('回复邮件不存在或无权访问');
+  }
+  const att = doc.attachments.id(new Types.ObjectId(attachmentId));
+  if (!att?.filename || att.blocked || path.basename(att.filename) !== att.filename) {
+    throw ApiError.notFound('附件不存在或被安全策略拦截');
+  }
+  let buffer: Buffer;
+  try {
+    buffer = await getObject(`mail/${String(doc.projectId)}/${att.filename}`);
+  } catch {
+    try {
+      buffer = await fs.readFile(path.join(env.UPLOAD_DIR, 'mail', att.filename));
+    } catch {
+      throw ApiError.notFound('附件文件不存在');
+    }
+  }
+  return {
+    buffer,
+    name: att.name || 'attachment',
+    mimeType: att.mimeType || 'application/octet-stream',
+  };
 }
 
 export async function getCustomerTimeline(customerId: string, limit = 200, actor?: AuthUser): Promise<CustomerTimeline> {
@@ -345,7 +427,7 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
   })
     .sort({ sentAt: -1 })
     .limit(limit)
-    .select('_id subject from sentAt threadId inReplyTo messageId')
+    .select('_id subject from sentAt threadId inReplyTo messageId attachments._id attachments.blocked')
     .lean() as unknown as ReceivedMailRow[];
 
   // Mail sync occasionally stores the same inbound message under two ids.
@@ -464,6 +546,7 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
         from: string;
         sentAt: Date;
         sourceLabel: string;
+        attachmentCount?: number;
       } | undefined;
       if (event.toStatus === 'replied') {
         const eventMs = at.getTime();
@@ -472,12 +555,14 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
           return sentAt <= eventMs + 5 * 60 * 1000 && sentAt >= eventMs - 7 * 24 * 60 * 60 * 1000;
         });
         if (candidate) {
+          const attCount = Array.isArray(candidate.attachments) ? candidate.attachments.length : 0;
           replyMail = {
             id: String(candidate._id),
             subject: candidate.subject,
             from: candidate.from,
             sentAt: new Date(candidate.sentAt),
             sourceLabel: findSourceLabel(candidate),
+            ...(attCount > 0 ? { attachmentCount: attCount } : {}),
           };
           attachedReplyMailIds.add(String(candidate._id));
         }
@@ -515,11 +600,17 @@ export async function getCustomerTimeline(customerId: string, limit = 200, actor
 
   for (const mail of received) {
     if (attachedReplyMailIds.has(String(mail._id))) continue;
+    const attCount = Array.isArray(mail.attachments) ? mail.attachments.length : 0;
     items.push({
       id: `mail-${mail._id}`,
       type: 'mail_received',
       at: mail.sentAt,
-      mail: { id: String(mail._id), subject: mail.subject, from: mail.from },
+      mail: {
+        id: String(mail._id),
+        subject: mail.subject,
+        from: mail.from,
+        ...(attCount > 0 ? { attachmentCount: attCount } : {}),
+      },
     });
   }
   items.sort((a, b) => b.at.getTime() - a.at.getTime());

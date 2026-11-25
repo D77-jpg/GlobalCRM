@@ -6,7 +6,8 @@ import { AgentTask } from '../models/AgentTask';
 import { createFollowUp } from './followup.service';
 import { DevelopmentLetter, Customer, User, Project, OutreachAutomationConfig, OutreachAutomationEnrollment, type DevelopmentLetterDocument } from '../models';
 import env from '../config/env';
-import { sendMail, type SendMailPayload, type SendMailResult } from './mailer.service';
+import { sendMail, type SendMailAttachment, type SendMailPayload, type SendMailResult } from './mailer.service';
+import { embedInlineBrandLogos } from './letter-signature';
 import { createLogger } from '../config/logger';
 import { auditMailResult, reserveMailAttempt } from './mail-account.service';
 import {
@@ -196,7 +197,7 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
       const deliverySubject = job.outreachStep && job.outreachStep > 1
         ? (stripReplySubjectPrefix(job.subject) || job.subject)
         : job.subject;
-      const attachments: { filename: string; content: Buffer; contentType?: string }[] = [];
+      const attachments: SendMailAttachment[] = [];
       if (job.attachmentIds?.length) {
         let totalAttachmentBytes = 0;
         for (const attachmentId of job.attachmentIds.slice(0, 5)) {
@@ -210,11 +211,15 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
           }
         }
       }
+      const inlined = embedInlineBrandLogos(withUnsubscribe.html);
+      const deliveryAttachments = inlined.inlineAttachments.length
+        ? [...attachments, ...inlined.inlineAttachments]
+        : attachments;
       result = await deliver({ projectId: String(job.projectId), mailAccountId: accountId, senderUserId, from: job.senderAddress,
         to: job.recipientEmail, toName: job.recipientName, subject: deliverySubject,
-        html: withUnsubscribe.html, text: withUnsubscribe.text, messageId: job.messageId,
+        html: inlined.html, text: withUnsubscribe.text, messageId: job.messageId,
         inReplyTo: job.inReplyTo, references: job.references,
-        ...(attachments.length ? { attachments } : {}),
+        ...(deliveryAttachments.length ? { attachments: deliveryAttachments } : {}),
         ...(isInboundReply ? {} : { headers: unsubscribeHeaders(String(job.projectId), job.recipientEmail) }) });
     } catch (error) {
       result = error instanceof Error && error.name === 'ApiError'

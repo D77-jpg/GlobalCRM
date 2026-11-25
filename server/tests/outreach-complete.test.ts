@@ -1564,5 +1564,191 @@ test('P1-A/P1-B: circuit-breaker never burns customer retries, selective recover
     assert.equal((await OutreachAutomationEnrollment.findById(enrUpstreamFailed._id).lean())?.status, 'active');
     assert.equal((await OutreachAutomationEnrollment.findById(enrSmtpFailed._id).lean())?.status, 'failed', 'Must NEVER touch historic SMTP failure');
     assert.equal((await OutreachAutomationEnrollment.findById(enrBlocked._id).lean())?.status, 'blocked', 'Must NEVER touch replied/blocked customer');
+
+    // 6. Send-gate split stats, fix-send-gate (strip_offer / split_paragraphs / recheck),
+    //    pausedReadyToResume stale error archival, delivery_failed & ruleStopped separation
+    const {
+      fixEnrollmentSendGate,
+      reverifyUnverifiedOutreachDrafts,
+    } = await import('../src/services/outreach-automation.service');
+
+    // 6a) Paused row whose current draft already passes audit + send gate, but still has stale lastError
+    const custPausedReady = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'REBEL Fixture',
+      email: 'rebel@example.test',
+      status: 'pending',
+    });
+    const enrPausedReady = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custPausedReady._id,
+      status: 'paused',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 60_000),
+      lastError: '第 3 封字数超限（95/103 词）',
+      taskIds: [],
+    });
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custPausedReady._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Rubber bumper plates OEM supply',
+      content: `<p>${validBody}</p>`,
+      contentText: validBody,
+      recipientEmail: 'rebel@example.test',
+      status: 'draft',
+      needsReview: false,
+      knowledgeReview: makePassingReview(validBody),
+    });
+
+    // 6b) Send-gate blocked row: unauthorized sample offer
+    const custOfferGate = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Offer Gate Co',
+      email: 'offer-gate@example.test',
+      status: 'pending',
+    });
+    const enrOfferGate = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custOfferGate._id,
+      status: 'active',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 60_000),
+      lastError: '寄样/色卡提议未获授权',
+      taskIds: [],
+    });
+    const offerBody = [
+      'Dear Offer Gate team,',
+      'We manufacture rubber bumper plates for gym brands with strict weight checks and steady production runs. Our factory supports custom logo molding and steady repeat supply for commercial equipment buyers across Europe.',
+      'We can send free samples to your team for evaluation.',
+      'Which bumper plate line would you like to look at first?',
+    ].join('\n\n');
+    const offerReview = {
+      ...makePassingReview(offerBody),
+      factAudit: {
+        contract: 's4.1' as const,
+        mode: 'semantic' as const,
+        attempts: 1,
+        facts: [],
+        checks: [
+          { id: 's0', text: 'Dear Offer Gate team,', status: 'non_claim' as const, sourceIds: [], reason: 'greeting' },
+          { id: 's1', text: kbContent, status: 'supported' as const, sourceIds: [validKnowledgeSource.sourceId], reason: 'exact' },
+          { id: 's2', text: 'We can send free samples to your team for evaluation.', status: 'non_claim' as const, sourceIds: [], reason: 'offer' },
+          { id: 's3', text: 'Which bumper plate line would you like to look at first?', status: 'non_claim' as const, sourceIds: [], reason: 'question' },
+        ],
+      },
+    };
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custOfferGate._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Bumper plate inquiry',
+      content: `<p>${offerBody.replace(/\n\n/g, '</p><p>')}</p>`,
+      contentText: offerBody,
+      recipientEmail: 'offer-gate@example.test',
+      status: 'draft',
+      needsReview: false,
+      knowledgeReview: offerReview,
+    });
+
+    // 6c) Send-gate blocked row: single overly long paragraph (>68 words)
+    const custLongPara = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Long Para Co',
+      email: 'long-para@example.test',
+      status: 'pending',
+    });
+    const enrLongPara = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custLongPara._id,
+      status: 'active',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 60_000),
+      taskIds: [],
+    });
+    const longSinglePara = `${kbContent} Our workshop also handles custom plate colors, weight stamping, and export pallet packing for regional fitness chains across multiple countries with reliable lead times. Which bumper plate line would you like to look at first?`;
+    const longParaBody = `Dear Long Para team,\n\n${longSinglePara}`;
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custLongPara._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Custom bumper plates',
+      content: `<p>${longParaBody.replace(/\n\n/g, '</p><p>')}</p>`,
+      contentText: longParaBody,
+      recipientEmail: 'long-para@example.test',
+      status: 'draft',
+      needsReview: false,
+      knowledgeReview: {
+        ...makePassingReview(longParaBody),
+        factAudit: {
+          contract: 's4.1',
+          mode: 'semantic',
+          attempts: 1,
+          facts: [],
+          checks: [
+            { id: 's0', text: 'Dear Long Para team,', status: 'non_claim', sourceIds: [], reason: 'greeting' },
+            { id: 's1', text: longSinglePara, status: 'supported', sourceIds: [validKnowledgeSource.sourceId], reason: 'exact' },
+          ],
+        },
+      },
+    });
+
+    const splitOverview = await getOutreachAutomationOverview(actorA, rep.id);
+    const rebelRow = splitOverview.queue.find((q) => q.id === enrPausedReady.id);
+    assert.ok(rebelRow);
+    assert.equal(rebelRow!.pausedReadyToResume, true);
+    assert.equal(rebelRow!.lastError, undefined, 'Stale error should be cleared from active display');
+    assert.ok(rebelRow!.errorHistory?.some((h) => h.message.includes('95/103') && h.resolvedAt), 'Stale error must move to errorHistory');
+    assert.equal((await OutreachAutomationEnrollment.findById(enrPausedReady._id).lean())?.status, 'paused', 'Must NEVER auto-resume paused queue');
+
+    const offerRow = splitOverview.queue.find((q) => q.id === enrOfferGate.id);
+    assert.equal(offerRow?.sendGateDetail?.code, 'offer_unauthorized');
+    assert.equal(offerRow?.sendGateDetail?.canStripOffer, true);
+
+    const longParaRow = splitOverview.queue.find((q) => q.id === enrLongPara.id);
+    assert.equal(longParaRow?.sendGateDetail?.code, 'paragraph_too_long');
+    assert.equal(longParaRow?.sendGateDetail?.canSplitParagraphs, true);
+
+    const smtpRow = splitOverview.queue.find((q) => q.id === enrSmtpFailed.id);
+    assert.equal(smtpRow?.draftStage, 'delivery_failed');
+
+    const blockedRow = splitOverview.queue.find((q) => q.id === enrBlocked.id);
+    assert.equal(blockedRow?.isRuleStopped, true);
+
+    assert.equal(splitOverview.stats.unverifiedDrafts, 1, 'Only CA Co is unverified');
+    assert.equal(splitOverview.stats.rebuildableUnverifiedDrafts, 1);
+    assert.ok(splitOverview.stats.sendGateBlockedDrafts >= 2);
+    assert.equal(splitOverview.stats.pausedReadyCount, 1);
+    assert.equal(splitOverview.stats.deliveryFailedCount, 1);
+    assert.equal(splitOverview.stats.ruleStopped, 1);
+
+    // Execute fixEnrollmentSendGate('strip_offer') and ('split_paragraphs')
+    const stripRes = await fixEnrollmentSendGate(actorA, enrOfferGate.id, 'strip_offer', rep.id);
+    assert.equal(stripRes.fixed, true, stripRes.summary);
+    assert.ok(!stripRes.overview.queue.find((q) => q.id === enrOfferGate.id)?.sendGateDetail);
+
+    const splitRes = await fixEnrollmentSendGate(actorA, enrLongPara.id, 'split_paragraphs', rep.id);
+    assert.equal(splitRes.fixed, true, splitRes.summary);
+    assert.ok(!splitRes.overview.queue.find((q) => q.id === enrLongPara.id)?.sendGateDetail);
+
+    // Reverify only scans unverified drafts and reports skippedDetails / skippedReasons cleanly
+    const reverifyRes = await reverifyUnverifiedOutreachDrafts(actorA, {}, rep.id);
+    assert.equal(reverifyRes.scanned, 1);
+    assert.equal(reverifyRes.queued, 1);
+    assert.equal(reverifyRes.skipped, 0);
+    assert.ok(Array.isArray(reverifyRes.skippedDetails));
+    assert.ok(Array.isArray(reverifyRes.skippedReasons));
   });
 });

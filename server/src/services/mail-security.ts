@@ -59,10 +59,13 @@ export function attachmentAllowed(name: string, mime: string, data: Buffer, limi
   if (!data.length || data.length > limit || /[\\/\x00-\x1f\x7f]/.test(name) || name === '..') return false;
   const ext = path.extname(name).toLowerCase();
   if(ext==='.docx')return mime==='application/vnd.openxmlformats-officedocument.wordprocessingml.document'&&data.length>4&&data.subarray(0,4).equals(Buffer.from([80,75,3,4]));
+  if (ext === '.xlsx') return mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && data.length > 4 && data.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4]));
   if (ext === '.txt') return mime === 'text/plain' && !data.includes(0);
+  if (ext === '.csv') return (mime === 'text/csv' || mime === 'text/plain' || mime === 'application/csv' || mime === 'application/vnd.ms-excel') && !data.includes(0);
   if (ext === '.pdf') return mime === 'application/pdf' && data.subarray(0, 5).toString() === '%PDF-';
   if (ext === '.png') return mime === 'image/png' && data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   if (ext === '.jpg' || ext === '.jpeg') return mime === 'image/jpeg' && data[0] === 255 && data[1] === 216 && data[2] === 255;
+  if (ext === '.webp') return mime === 'image/webp' && data.length >= 12 && data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP';
   return false;
 }
 

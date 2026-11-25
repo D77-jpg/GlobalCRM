@@ -21,6 +21,14 @@ import { getMailAccountDeliveryConfig } from './mail-account.service';
 
 const logger = createLogger('mailer');
 
+export interface SendMailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+  cid?: string;
+  contentDisposition?: 'inline' | 'attachment';
+}
+
 export interface SendMailPayload {
   projectId?: string;
   mailAccountId?: string;
@@ -36,8 +44,8 @@ export interface SendMailPayload {
   references?: string[];
   /** RFC 2369 / RFC 8058 compliance headers, set server-side only. */
   headers?: Record<string, string>;
-  /** 可选随信发送的附件（已由服务端校验归属与大小） */
-  attachments?: { filename: string; content: Buffer; contentType?: string }[];
+  /** 可选随信发送的附件（已由服务端校验归属与大小，或服务端内嵌的品牌签名 CID 图片） */
+  attachments?: SendMailAttachment[];
 }
 
 export interface SendMailResult {

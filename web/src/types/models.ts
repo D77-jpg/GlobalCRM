@@ -819,7 +819,7 @@ export interface TimelineEvent {
   type: TimelineEventType;
   at: string | Date;
   /** type=letter */
-  mail?: { id: string; subject: string; from: string };
+  mail?: { id: string; subject: string; from: string; attachmentCount?: number };
   letter?: { id: string; subject: string; status: LetterStatus; channel: MailChannel };
   interaction?: { letterId: string; subject: string; count: number; lastAt?: string | Date; url?: string };
   /** type=followup */
@@ -849,6 +849,7 @@ export interface TimelineEvent {
       from: string;
       sentAt: string | Date;
       sourceLabel: string;
+      attachmentCount?: number;
     };
   };
   /** type=followup_scheduled：变更后的下一次跟进时间（null 表示被清除） */
@@ -1703,7 +1704,57 @@ export type OutreachDraftStage =
   | 'draft_saved_verified'
   | 'draft_audit_failed'
   | 'task_failed'
+  | 'delivery_failed'
   | 'none';
+
+export type OutreachSendGateCode =
+  | 'missing_supplier_evidence'
+  | 'offer_unauthorized'
+  | 'offer_condition_unmet'
+  | 'paragraph_too_long'
+  | 'word_count'
+  | 'cta_count'
+  | 'body_changed'
+  | 'stale_knowledge'
+  | 'other_send_gate';
+
+export interface OutreachSendGateDetail {
+  code: OutreachSendGateCode;
+  label: string;
+  detail: string;
+  guidance: string;
+  wordCount?: number;
+  paragraphCount?: number;
+  maxParagraphWords?: number;
+  canStripOffer?: boolean;
+  canSplitParagraphs?: boolean;
+  canRecheck?: boolean;
+}
+
+export interface OutreachDraftAuditDetail {
+  completeness?: string;
+  factAuditMode?: string;
+  failureCategory?: string;
+  failureCategoryLabel?: string;
+  failureCode?: string;
+  failureStage?: string;
+  failureStageLabel?: string;
+  failureDetail?: string;
+  summary: string;
+  checksTotal: number;
+  checksFailed: number;
+  failedChecks: { id: string; status: string; excerpt: string; reason: string }[];
+  rebuiltAndFailedAgain?: boolean;
+  previousError?: string;
+}
+
+export interface OutreachEnrollmentErrorHistoryItem {
+  at: string;
+  step?: number;
+  message: string;
+  resolvedAt?: string;
+  resolvedReason?: string;
+}
 
 export interface OutreachAutomationQueueRow {
   id: string;
@@ -1722,6 +1773,13 @@ export interface OutreachAutomationQueueRow {
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
+  draftAuditDetail?: OutreachDraftAuditDetail;
+  sendGateDetail?: OutreachSendGateDetail;
+  pausedReadyToResume?: boolean;
+  deliveryError?: string;
+  failedLetterId?: string;
+  isRuleStopped?: boolean;
+  errorHistory?: OutreachEnrollmentErrorHistoryItem[];
   draftUpdatedAt?: string;
   taskId?: string;
   taskStatus?: string;
@@ -1773,14 +1831,22 @@ export interface OutreachAutomationOverview {
     paused: number;
     completed: number;
     blocked: number;
+    ruleStopped?: number;
     failed: number;
     circuitFailed?: number;
     aiFailed?: number;
     unverifiedDrafts?: number;
+    rebuildableUnverifiedDrafts?: number;
+    sendGateBlockedDrafts?: number;
+    pausedReadyCount?: number;
+    deliveryFailedCount?: number;
     exceptionQueueCount?: number;
     approvedProofBlocksCount?: number;
     queuedTasks?: number;
     runningTasks?: number;
+    retryingTasks?: number;
+    activeFailedTasks?: number;
+    historicalFailedTasks?: number;
     failedTasks?: number;
     sentToday: number;
     remainingToday: number;

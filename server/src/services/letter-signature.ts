@@ -14,8 +14,10 @@
  *  3. 已经带签名（含 {SIGNATURE_MARKER}）的内容不重复追加。
  */
 import env from '../config/env';
-import { BRAND_LOGO_PATH } from '../constants/brand-logo';
+import { BRAND_LOGO_PATH, BRAND_LOGO_PNG_BASE64 } from '../constants/brand-logo';
+import { IRONHUE_LOGO_PATH, IRONHUE_LOGO_PNG_BASE64 } from '../constants/ironhue-logo';
 import { escapeHtml, htmlToPlainText } from '../utils/text';
+import type { SendMailAttachment } from './mailer.service';
 
 export interface LetterSignature {
   /** 固定职位行：同一项目的业务员对外统一使用 */
@@ -91,6 +93,60 @@ export function signatureLogoUrl(signature: LetterSignature = LETTER_SIGNATURE):
   if (!env.SIGNATURE_LOGO) return '';
   const path = signature.logoPath === null ? '' : signature.logoPath ?? BRAND_LOGO_PATH;
   return path ? `${env.publicBaseUrl}${path}` : '';
+}
+
+const INLINE_BRAND_LOGOS = [
+  {
+    path: BRAND_LOGO_PATH,
+    cid: 'genesis-logo@globalcrm.inline',
+    filename: 'genesis-logo.png',
+    contentType: 'image/png',
+    buffer: Buffer.from(BRAND_LOGO_PNG_BASE64, 'base64'),
+  },
+  {
+    path: IRONHUE_LOGO_PATH,
+    cid: 'ironhue-logo@globalcrm.inline',
+    filename: 'ironhue-logo.png',
+    contentType: 'image/png',
+    buffer: Buffer.from(IRONHUE_LOGO_PNG_BASE64, 'base64'),
+  },
+] as const;
+
+/**
+ * 外发邮件前把签名里的本站品牌 logo（/api/brand/*.png 或任意 host + /api/brand/*.png）
+ * 替换为 MIME CID 内联附件（src="cid:..."）。
+ *
+ * 这样收件人客户端（Foxmail / Outlook / Gmail / Apple Mail 等）无需回调 CRM 服务器
+ * 或放行外部图片，即可稳定展示签名 logo；而 CRM 内部预览仍保留原 HTTP URL。
+ */
+export function embedInlineBrandLogos(html: string): {
+  html: string;
+  inlineAttachments: SendMailAttachment[];
+} {
+  if (!html || !/<img\b/i.test(html)) return { html, inlineAttachments: [] };
+  const attached = new Map<string, SendMailAttachment>();
+  const rewritten = html.replace(/<img\b[^>]*>/gi, (tag) => {
+    const srcMatch = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag);
+    const src = (srcMatch?.[1] ?? srcMatch?.[2] ?? '').trim();
+    if (!src || src.startsWith('cid:')) return tag;
+    for (const logo of INLINE_BRAND_LOGOS) {
+      const matchesPath = src === logo.path
+        || (src.endsWith(logo.path) && /^https?:\/\/[^/\s]+/i.test(src));
+      if (!matchesPath) continue;
+      if (!attached.has(logo.cid)) {
+        attached.set(logo.cid, {
+          filename: logo.filename,
+          content: logo.buffer,
+          contentType: logo.contentType,
+          cid: logo.cid,
+          contentDisposition: 'inline',
+        });
+      }
+      return tag.replace(/\bsrc\s*=\s*(?:"[^"]*"|'[^']*')/i, `src="cid:${logo.cid}"`);
+    }
+    return tag;
+  });
+  return { html: rewritten, inlineAttachments: [...attached.values()] };
 }
 
 /**

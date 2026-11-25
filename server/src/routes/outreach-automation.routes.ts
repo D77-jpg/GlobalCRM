@@ -9,6 +9,7 @@ import {
   auditLegacyOutreachCampaigns,
   controlOutreachEnrollment,
   drainQueuedOutreachTasks,
+  fixEnrollmentSendGate,
   getOutreachAutomationOverview,
   getOutreachEnrollmentDiagnostics,
   getProjectProofBlocks,
@@ -169,6 +170,17 @@ for (const action of ['pause', 'resume'] as const) {
 router.post('/enrollments/:id/regenerate', validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
   sendSuccess(res, await regenerateOutreachEnrollmentDraft(req.user!, req.params.id, targetUserId(req)));
 }));
+
+router.post(
+  '/enrollments/:id/fix-send-gate',
+  validate({
+    params: z.object({ id: objectId }),
+    body: z.object({ action: z.enum(['recheck', 'strip_offer', 'split_paragraphs']) }).strict(),
+  }),
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, await fixEnrollmentSendGate(req.user!, req.params.id, req.body.action, targetUserId(req)));
+  }),
+);
 
 router.get('/enrollments/:id/diagnostics', validate({ params: z.object({ id: objectId }) }), asyncHandler(async (req, res) => {
   sendSuccess(res, await getOutreachEnrollmentDiagnostics(req.user!, req.params.id, targetUserId(req)));

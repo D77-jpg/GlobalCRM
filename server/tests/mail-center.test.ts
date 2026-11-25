@@ -242,7 +242,31 @@ test('23 Message-ID and In-Reply-To join outgoing/incoming thread', async () => 
 test('24 reply uses queue, original sender, Re: and reference headers', async () => { const result = await request('POST', `/mail/${incomingId}/reply`, salesToken, { subject: 'ignored', content: '<p>Thank you</p>', recipientEmail: 'wrong@example.com', requestKey: randomUUID() }, 201); const doc = await models.DevelopmentLetter.findById(result.letter.id); assert.equal(doc?.recipientEmail, email); assert.equal(doc?.subject, 'Re: V2.1 proposal'); assert.equal(doc?.attempts, 1); assert.equal(doc?.threadId, threadId); assert.ok(doc?.references.includes(`<received-${suffix}@fixture.test>`)); const next = await sync.importMail(mime(`second-${suffix}`, email, { reply: doc?.messageId }), 'fixture'); assert.equal(next.threadId, threadId); });
 test('25 subject fallback stays within same customer', async () => { const doc = await sync.importMail(mime(`fallback-${suffix}`, email), 'fixture'); assert.equal(doc.threadId, threadId); const other = await sync.importMail(mime(`forged-${suffix}`, `other.${suffix}@example.com`, { reply: sentMessageId }), 'fixture'); assert.notEqual(other.threadId, threadId); });
 test('26 read/unread is per user and can be toggled', async () => { await request('POST', `/mail/${incomingId}/read`, salesToken, { read: true }); assert.equal((await request('GET', `/mail/${incomingId}`, salesToken)).mail.read, true); assert.equal((await request('GET', `/mail/${incomingId}`, adminToken)).mail.read, false); await request('POST', `/mail/${incomingId}/read`, salesToken, { read: false }); assert.equal((await request('GET', `/mail/${incomingId}`, salesToken)).mail.read, false); });
-test('27 existing customer Timeline includes received, sent and reply events', async () => { const timeline = await request('GET', `/customers/${customerId}/timeline`, salesToken); assert.ok(timeline.items.some((e: { type: string; mail?: { id: string } }) => e.type === 'mail_received' && e.mail?.id === incomingId)); assert.ok(timeline.items.filter((e: { type: string }) => e.type === 'letter').length >= 3); });
+test('27 existing customer Timeline includes received, sent and reply events', async () => { const timeline = await request('GET', `/customers/${customerId}/timeline`, salesToken); assert.ok(timeline.items.some((e: { type: string; mail?: { id: string; attachmentCount?: number } }) => e.type === 'mail_received' && e.mail?.id === incomingId && (e.mail.attachmentCount ?? 0) === 2)); assert.ok(timeline.items.filter((e: { type: string }) => e.type === 'letter').length >= 3); });
+test('27b customer reply-mails exposes attachments and download route enforces owner scope', async () => {
+  const replies = await request('GET', `/customers/${customerId}/reply-mails`, salesToken);
+  const hit = replies.items.find((m: { id: string }) => m.id === incomingId);
+  assert.ok(hit, 'incoming mail should appear in reply-mails');
+  assert.equal(hit.attachments.length, 2);
+  const allowedAtt = hit.attachments.find((a: { name: string }) => a.name === 'quote.pdf');
+  const blockedAtt = hit.attachments.find((a: { name: string }) => a.name === 'malware.exe');
+  assert.ok(allowedAtt?.id && !allowedAtt.blocked);
+  assert.ok(blockedAtt?.blocked);
+
+  const attUrl = `/customers/${customerId}/reply-mails/${incomingId}/attachments/${allowedAtt.id}`;
+  await request('GET', attUrl, otherToken, undefined, 404);
+  await request('GET', attUrl, '', undefined, 401);
+  const okResp = await fetch(base + attUrl, { headers: { Authorization: `Bearer ${salesToken}` } });
+  assert.equal(okResp.status, 200);
+  assert.match(okResp.headers.get('content-disposition')!, /^attachment/);
+  assert.equal(await okResp.text(), '%PDF-1.4 fixture');
+  await request('GET', `/customers/${customerId}/reply-mails/${incomingId}/attachments/${blockedAtt.id}`, salesToken, undefined, 404);
+
+  // Also verify newly added safe formats (.xlsx, .csv, .webp)
+  assert.equal(security.attachmentAllowed('sheet.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', Buffer.from([80, 75, 3, 4, 1]), 100), true);
+  assert.equal(security.attachmentAllowed('data.csv', 'text/csv', Buffer.from('a,b\n1,2\n'), 100), true);
+  assert.equal(security.attachmentAllowed('photo.webp', 'image/webp', Buffer.from('RIFF\x00\x00\x00\x00WEBP'), 100), true);
+});
 test('28 cross-owner outbound, cancellation, reply and legacy customer filters return 404', async () => { await request('GET', `/mail/${sentId}?direction=outbound`, otherToken, undefined, 404); await request('POST', `/mail/${sentId}/cancel`, otherToken, {}, 404); await request('POST', `/mail/${incomingId}/reply`, otherToken, { subject: 'reply', content: '<p>x</p>' }, 404); await request('GET', `/letters?customerId=${customerId}`, otherToken, undefined, 404); });
 test('29 admin reads all owners and thread members remain scoped', async () => { assert.equal((await request('GET', `/mail/${incomingId}`)).customer.id, customerId); const original = await mailModels.MailMessage.findOne({ customerId: otherCustomerId }); await mailModels.MailMessage.updateOne({ _id: original!._id }, { $set: { threadId } }); const d = await request('GET', `/mail/${incomingId}`, salesToken); assert.ok(!d.thread.some((m: { id: string }) => m.id === String(original!._id))); });
 test('30 invalid schedule and malformed API bodies rejected', async () => { await request('POST', '/letters', salesToken, { customerId, subject: 'Bad', content: '<p>x</p>', scheduledAt: new Date(0).toISOString() }, 400); await request('POST', `/mail/${incomingId}/read`, salesToken, { read: 'false' }, 422); await request('GET', '/mail/not-an-id', salesToken, undefined, 422); });

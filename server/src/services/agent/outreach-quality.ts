@@ -70,9 +70,9 @@ const AI_BUZZWORD_PATTERN = /\b(?:considered|restrained|coherent|deliberate|elev
 
 const HEAVY_CTA_PATTERN = /\b(?:full specifications|annual (?:volume|forecast|demand)|target pric(?:e|ing)|detailed requirements|send us your (?:bom|drawings|specs|forecast)|(?:schedule|hop on|jump on|book) a (?:(?:15|20|30|45|60)[\s-]*min(?:ute)?\s+)?(?:zoom\s+|video\s+)?(?:call|meeting|demo))\b/i;
 
-const FREE_PATTERN = /(?<!\bfeel\s+)\bfree(?![\s-]+weights?)\b|\b(?:complimentary|at no (?:cost|charge)|zero cost)\b|免费/i;
-const SAMPLE_PATTERN = /\b(?:samples?|swatches?|color cards?|sample kit|physical sample)\b|寄样|色卡|样品|打样/i;
-const SHIPPING_PATTERN = /\b(?:shipping|freight|courier|express fee|postage|ddp|cif|fob)\b|运费|包邮|快递费/i;
+export const FREE_PATTERN = /(?<!\bfeel\s+)\bfree(?![\s-]+weights?)\b|\b(?:complimentary|at no (?:cost|charge)|zero cost)\b|免费/i;
+export const SAMPLE_PATTERN = /\b(?:samples?|swatches?|color cards?|sample kit|physical sample)\b|寄样|色卡|样品|打样/i;
+export const SHIPPING_PATTERN = /\b(?:shipping|freight|courier|express fee|postage|ddp|cif|fob)\b|运费|包邮|快递费/i;
 const DELIVERABLE_PATTERNS: { key: string; category: ProjectApprovedOffer['category']; regex: RegExp }[] = [
   { key: 'spec_sheet', category: 'spec_sheet', regex: /\b(?:spec(?:ification)?\s+sheet|comparison\s+(?:sheet|chart|table)|material\s+(?:guide|reference|chart)|size\s+chart|catalog(?:ue)?)\b|规格对比表|选材参考|参数表/i },
   { key: 'drawing', category: 'drawing', regex: /\b(?:structural\s+(?:drawing|sketch|dieline)|layout\s+sketch|3d\s+mockup|dieline)\b|结构示意|刀版图/i },
@@ -210,32 +210,41 @@ export function verifyOfferAuthorization(
   if (!mentionsFree && !mentionsSample && !mentionsShipping && !deliverables.length) return issues;
 
   if (mentionsFree) {
-    const allowed = enabledOffers.find((o) => o.allowsFree && (!o.requiresEvidence || hasKnowledgeEvidence));
+    const enabledFree = enabledOffers.filter((o) => o.allowsFree);
+    const allowed = enabledFree.find((o) => !o.requiresEvidence || hasKnowledgeEvidence);
     if (!allowed) {
       issues.push({
         code: 'unauthorized_offer',
         severity: 'block',
-        message: '正文包含免费承诺，但项目未授权对应免费小提议或缺少已发布依据',
+        message: enabledFree.length > 0
+          ? '免费承诺授权条件不满足：项目要求附带已发布知识依据，但当前草稿缺少依据'
+          : '免费承诺未获授权：正文包含免费小提议，但项目尚未启用免费授权',
       });
     }
   }
   if (mentionsSample) {
-    const allowed = enabledOffers.find((o) => (o.allowsSample || o.category === 'sample' || o.category === 'swatch') && (!o.requiresEvidence || hasKnowledgeEvidence));
+    const enabledSamples = enabledOffers.filter((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
+    const allowed = enabledSamples.find((o) => !o.requiresEvidence || hasKnowledgeEvidence);
     if (!allowed && (approvedOffers !== undefined || mentionsFree || mentionsShipping)) {
       issues.push({
         code: 'unauthorized_offer',
         severity: 'block',
-        message: '正文包含寄样/色卡提议，但项目未逐项授权或条件/依据未满足',
+        message: enabledSamples.length > 0
+          ? '寄样/色卡授权条件不满足：项目已启用寄样/色卡授权，但要求附带已发布知识依据（当前草稿缺少依据）'
+          : '寄样/色卡提议未获授权：正文包含寄样/色卡提议，但当前项目尚未开启并启用寄样/色卡授权',
       });
     }
   }
   if (mentionsShipping) {
-    const allowed = enabledOffers.find((o) => o.allowsShipping && (!o.requiresEvidence || hasKnowledgeEvidence));
+    const enabledShipping = enabledOffers.filter((o) => o.allowsShipping);
+    const allowed = enabledShipping.find((o) => !o.requiresEvidence || hasKnowledgeEvidence);
     if (!allowed) {
       issues.push({
         code: 'unauthorized_offer',
         severity: 'block',
-        message: '正文涉及运费/快递条件，但项目未授权运费承诺或缺少已发布依据',
+        message: enabledShipping.length > 0
+          ? '运费/快递承诺授权条件不满足：项目要求附带已发布知识依据，但当前草稿缺少依据'
+          : '运费/快递承诺未获授权：正文涉及运费/快递条件，但当前项目尚未启用运费授权',
       });
     }
   }
@@ -253,6 +262,116 @@ export function verifyOfferAuthorization(
     }
   }
   return issues;
+}
+
+const SALUTATION_HEAD_RE = /^(?:hi|hello|dear|good\s+(?:morning|afternoon|evening))\b/i;
+
+function splitOutreachSections(bodyWithoutSignature: string): { salutation?: string; paragraphs: string[] } {
+  const rawParas = bodyWithoutSignature
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!rawParas.length) return { paragraphs: [] };
+  const firstLines = rawParas[0]!.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (firstLines.length > 0 && SALUTATION_HEAD_RE.test(firstLines[0]!)) {
+    const salutation = firstLines[0]!;
+    const restOfFirst = firstLines.slice(1).join(' ').trim();
+    const paragraphs = [
+      ...(restOfFirst ? [restOfFirst] : []),
+      ...rawParas.slice(1).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean),
+    ];
+    return { salutation, paragraphs };
+  }
+  return {
+    paragraphs: rawParas.map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean),
+  };
+}
+
+function splitParagraphSentences(paragraph: string): string[] {
+  const matches = paragraph.match(/[^.!?。！？\n]+(?:[.!?。！？]+|$)/gu) ?? [];
+  return matches.map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Remove sentences proposing unauthorized/unmatched sample/swatch/free/shipping offers
+ * without altering any verified claims or signature blocks.
+ */
+export function stripUnauthorizedOfferSentences(bodyWithoutSignature: string): {
+  cleanedBody: string;
+  removedSentences: string[];
+} {
+  const { salutation, paragraphs } = splitOutreachSections(bodyWithoutSignature);
+  const removedSentences: string[] = [];
+  const nextParagraphs: string[] = [];
+
+  for (const para of paragraphs) {
+    const sentences = splitParagraphSentences(para);
+    const kept: string[] = [];
+    for (const sentence of sentences) {
+      if (SAMPLE_PATTERN.test(sentence) || FREE_PATTERN.test(sentence) || SHIPPING_PATTERN.test(sentence)) {
+        removedSentences.push(sentence);
+      } else {
+        kept.push(sentence);
+      }
+    }
+    if (kept.length > 0) nextParagraphs.push(kept.join(' '));
+  }
+
+  return {
+    cleanedBody: [salutation, ...nextParagraphs].filter(Boolean).join('\n\n').trim(),
+    removedSentences,
+  };
+}
+
+/**
+ * Split single-block / overly long paragraphs (>68 words or single >=65-word block)
+ * on sentence boundaries into mobile-friendly short paragraphs without changing any word.
+ */
+export function splitLongParagraphsText(bodyWithoutSignature: string): {
+  splitBody: string;
+  changed: boolean;
+} {
+  const { salutation, paragraphs } = splitOutreachSections(bodyWithoutSignature);
+  const singleLongBlock = paragraphs.length === 1 && countEnglishWords(paragraphs[0]!) >= 65;
+  const nextParagraphs: string[] = [];
+  let changed = false;
+
+  for (const para of paragraphs) {
+    const paraWords = countEnglishWords(para);
+    if (!singleLongBlock && paraWords <= 68) {
+      nextParagraphs.push(para);
+      continue;
+    }
+    const sentences = splitParagraphSentences(para);
+    if (sentences.length <= 1) {
+      nextParagraphs.push(para);
+      continue;
+    }
+    changed = true;
+    let bucket: string[] = [];
+    let bucketWords = 0;
+    for (let idx = 0; idx < sentences.length; idx++) {
+      const sentence = sentences[idx]!;
+      const words = countEnglishWords(sentence);
+      const isLast = idx === sentences.length - 1;
+      if (bucket.length > 0 && (bucketWords + words > 48 || bucketWords >= 32 || (singleLongBlock && nextParagraphs.length === 0 && bucket.length >= 1 && isLast === false && sentences.length >= 3))) {
+        nextParagraphs.push(bucket.join(' '));
+        bucket = [sentence];
+        bucketWords = words;
+      } else {
+        bucket.push(sentence);
+        bucketWords += words;
+      }
+    }
+    if (bucket.length > 0) nextParagraphs.push(bucket.join(' '));
+  }
+
+  return {
+    splitBody: [salutation, ...nextParagraphs].filter(Boolean).join('\n\n').trim(),
+    changed,
+  };
 }
 
 export function evaluateOutreachDraftQuality(params: {
