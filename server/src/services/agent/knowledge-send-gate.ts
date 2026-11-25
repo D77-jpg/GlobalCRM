@@ -17,6 +17,97 @@ const BLOCKING_REVIEW_CODES = new Set([
   'access_changed',
 ]);
 
+/**
+ * Background context gaps (e.g. unreadable customer website or missing unrequested
+ * quotation/policy info) are reminders, NOT body fact-audit failures when every
+ * sentence actually written in the email passed verification.
+ */
+export const BACKGROUND_CONTEXT_GAP_CODES = new Set([
+  'customer_research_gap',
+  'missing',
+  'evidence_budget',
+  'history_limit',
+  'claim_rewritten',
+]);
+
+export const BODY_AUDIT_FAILURE_CODES = new Set([
+  'draft_unverified',
+  'semantic_unverified',
+  'semantic_partial',
+  'index_stale',
+  'retrieval_failed',
+  'index_not_ready',
+  'conflict',
+  'access_changed',
+  'fact_budget',
+]);
+
+export function extractContextGapWarnings(
+  review?: Pick<KnowledgeReview, 'issues'> | null,
+): { code: string; message: string }[] {
+  return (review?.issues ?? [])
+    .filter((issue) => Boolean(issue.code && BACKGROUND_CONTEXT_GAP_CODES.has(issue.code) && issue.code !== 'claim_rewritten'))
+    .map((issue) => ({ code: issue.code, message: issue.message }));
+}
+
+/**
+ * Single source of truth shared by UI, batch rebuild, and automatic send gate:
+ * judges ONLY the facts and commitments actually written in the email body,
+ * separating background context gaps (`contextWarnings`) from real body audit failures.
+ */
+export function inspectBodyFactAudit(
+  review?: Pick<KnowledgeReview, 'status' | 'completeness' | 'issues' | 'questions' | 'factAudit'> | null,
+  options?: { needsReview?: boolean; approved?: boolean },
+): {
+  passed: boolean;
+  reason?: string;
+  contextWarnings: { code: string; message: string }[];
+} {
+  const contextWarnings = extractContextGapWarnings(review);
+  if (options?.approved) return { passed: true, contextWarnings };
+  if (!review) return { passed: false, reason: '草稿缺少依据审核', contextWarnings };
+  if (options?.needsReview) return { passed: false, reason: '草稿核验未通过', contextWarnings };
+  if (['retrieval_failed', 'index_stale', 'index_not_ready', 'conflict'].includes(String(review.status ?? ''))) {
+    return { passed: false, reason: '知识依据状态异常，需重新核验', contextWarnings };
+  }
+  const issues = review.issues ?? [];
+  if (
+    review.factAudit?.mode === 'unavailable'
+    || issues.some((issue) => issue.code === 'draft_unverified' || issue.code === 'semantic_unverified')
+  ) {
+    return { passed: false, reason: '正文尚未完成核验', contextWarnings };
+  }
+  const blockingAuditIssue = issues.find((issue) => issue.code && BODY_AUDIT_FAILURE_CODES.has(issue.code));
+  if (blockingAuditIssue) {
+    return {
+      passed: false,
+      reason: blockingAuditIssue.code === 'semantic_partial'
+        ? '正文仅为部分核验（partial），未达自动发送要求'
+        : blockingAuditIssue.message || '正文核验未通过',
+      contextWarnings,
+    };
+  }
+  const checks = review.factAudit?.checks ?? [];
+  if (checks.length === 0) {
+    return { passed: false, reason: '草稿缺少完整的逐项核验', contextWarnings };
+  }
+  if (checks.some((check) => check.status !== 'supported' && check.status !== 'non_claim')) {
+    return { passed: false, reason: '正文仍含缺少依据或冲突的内容', contextWarnings };
+  }
+  if ((review.questions ?? []).some((q) => q.status === 'unanswered')) {
+    return { passed: false, reason: '部分客户问题尚未回答，待核对', contextWarnings };
+  }
+  // Legacy partial marker is only a body failure if there is a non-background issue or
+  // no background context gap explaining why completeness was marked partial.
+  if (review.completeness === 'partial') {
+    const nonBackgroundIssue = issues.find((issue) => issue.code && !BACKGROUND_CONTEXT_GAP_CODES.has(issue.code));
+    if (nonBackgroundIssue || contextWarnings.length === 0) {
+      return { passed: false, reason: nonBackgroundIssue?.message || '正文仅为部分核验（partial），未达自动发送要求', contextWarnings };
+    }
+  }
+  return { passed: true, contextWarnings };
+}
+
 const HIGH_RISK_CLAIM = /\b(?:price|pricing|discount|sample|shipping|freight|payment|deposit|stock|exclusive|guarantee(?:d)?|certif(?:ied|icate)|legal|contract)\b|(?<!\bfeel\s+)\bfree(?![\s-]+weights?)\b|价格|报价|折扣|免费|样品|运费|付款|定金|库存|独家|保证|认证|合同|法律/i;
 
 export function knowledgeReviewRequiresApproval(review?:KnowledgeReview):boolean{
@@ -62,12 +153,8 @@ export function automatedReviewIssue(
  if (!review?.bodyHash || !review.factAudit?.checks?.length) return '草稿缺少完整的逐项核验';
  const blocker = knowledgeReviewHardBlocker(review);
  if (blocker) return blocker;
- if (review.factAudit.mode === 'unavailable' || review.issues.some(issue => issue.code === 'draft_unverified' || issue.code === 'semantic_unverified')) {
-  return '正文尚未完成核验';
- }
- if (review.factAudit.checks.some(check => check.status !== 'supported' && check.status !== 'non_claim')) {
-  return '正文仍含缺少依据或冲突的内容';
- }
+ const bodyAudit = inspectBodyFactAudit(review);
+ if (!bodyAudit.passed) return bodyAudit.reason || '正文核验未通过';
  if (step === 1 && !review.claims.some(claim => claim.sourceIds.some(id => review.sources.some(source => source.sourceId === id && source.kind === 'knowledge')))) {
   return '首封缺少已发布的我方能力依据';
  }

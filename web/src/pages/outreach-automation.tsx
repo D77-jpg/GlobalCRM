@@ -52,6 +52,10 @@ interface ReverifyBatchResult {
   skipped: number;
   skippedDetails?: { customerId: string; customerName: string; reason: string }[];
   skippedReasons?: { reason: string; count: number }[];
+  remainingUnverified?: number;
+  remainingSendGateBlocked?: number;
+  pausedReadyCount?: number;
+  remainingDetails?: { customerId: string; customerName: string; category: 'audit_failed' | 'send_gate'; reason: string }[];
 }
 
 function isExceptionQueueRow(row: OutreachAutomationQueueRow): boolean {
@@ -60,6 +64,7 @@ function isExceptionQueueRow(row: OutreachAutomationQueueRow): boolean {
     || row.draftStage === 'draft_audit_failed'
     || row.draftStage === 'task_failed'
     || row.draftStage === 'delivery_failed'
+    || row.draftStage === 'delivery_cancelled'
     || row.status === 'failed',
   );
 }
@@ -81,6 +86,8 @@ interface EnrollmentDiagnosticsDto {
       | 'ready_to_send'
       | 'paused_ready_to_resume'
       | 'waiting_buyer_window'
+      | 'waiting_delivery'
+      | 'delivery_cancelled'
       | 'blocked_by_send_gate'
       | 'blocked_by_audit'
       | 'delivery_failed'
@@ -170,6 +177,7 @@ interface EnrollmentDiagnosticsDto {
       reason: string;
       excerpt: string;
     }[];
+    contextWarnings?: { code: string; message: string }[];
     issues: { code: string; message: string }[];
   } | null;
 }
@@ -182,6 +190,8 @@ const DRAFT_STAGE_META: Record<
   waiting_model: { label: '等待模型', variant: 'warning' },
   draft_saved_verified: { label: '核验通过', variant: 'developed' },
   draft_audit_failed: { label: '核验不完整', variant: 'failed' },
+  waiting_delivery: { label: '等待投递', variant: 'outline' },
+  delivery_cancelled: { label: '已取消（未发送）', variant: 'warning' },
   task_failed: { label: 'AI 任务失败', variant: 'failed' },
   delivery_failed: { label: '投递失败（SMTP）', variant: 'failed' },
 };
@@ -246,6 +256,12 @@ function phaseBadge(
   if (row.draftStage === 'delivery_failed') {
     return { label: '投递失败（SMTP）', variant: 'failed' };
   }
+  if (row.draftStage === 'delivery_cancelled') {
+    return { label: '已取消（未发送）', variant: 'warning' };
+  }
+  if (row.draftStage === 'waiting_delivery') {
+    return { label: '等待投递', variant: 'outline' };
+  }
   if (row.pausedReadyToResume) {
     return { label: '队列暂停 · 待恢复', variant: 'warning' };
   }
@@ -275,6 +291,12 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
   }
   if (row.draftStage === 'delivery_failed') {
     return `第 ${row.nextStep} 封邮件投递失败（与草稿核验无关），请排查收件箱/退信后处理`;
+  }
+  if (row.draftStage === 'delivery_cancelled') {
+    return `第 ${row.nextStep} 封邮件已取消（未发送），不会再投递；如需重发可点「单条试跑」`;
+  }
+  if (row.draftStage === 'waiting_delivery') {
+    return `第 ${row.nextStep} 封已进入发送队列，等待邮件中心投递`;
   }
   if (row.draftStage === 'waiting_model') {
     return row.taskStepLabel ? `模型执行中：${row.taskStepLabel}` : '模型正在生成与核验草稿';
@@ -557,6 +579,10 @@ export function OutreachAutomationPage(): React.JSX.Element {
         skipped: res.skipped,
         skippedDetails: res.skippedDetails,
         skippedReasons: res.skippedReasons,
+        remainingUnverified: res.remainingUnverified,
+        remainingSendGateBlocked: res.remainingSendGateBlocked,
+        pausedReadyCount: res.pausedReadyCount,
+        remainingDetails: res.remainingDetails,
       });
       const skipSummary = res.skippedReasons?.length
         ? `；跳过原因：${res.skippedReasons.map((r) => `${r.reason}（${r.count}）`).join('，')}`
@@ -708,8 +734,10 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
   const rebuildableCount = overview?.stats.rebuildableUnverifiedDrafts ?? unverifiedCount;
   const sendGateBlockedCount = overview?.stats.sendGateBlockedDrafts ?? 0;
+  const contextWarningCount = overview?.stats.contextWarningDrafts ?? 0;
   const pausedReadyCount = overview?.stats.pausedReadyCount ?? 0;
   const deliveryFailedCount = overview?.stats.deliveryFailedCount ?? 0;
+  const deliveryCancelledCount = overview?.stats.deliveryCancelledCount ?? 0;
   const circuitFailedCount = overview?.stats.circuitFailed ?? 0;
   const aiFailedCount = overview?.stats.aiFailed ?? 0;
   const circuitOpen = Boolean(overview?.circuit?.open);
@@ -932,7 +960,13 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <div className="mt-2.5 flex flex-wrap items-start justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs">
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">
-                    本次批量重建结果：已扫描 {lastReverifyResult.scanned} 封 · 入队 <strong className="text-emerald-600 dark:text-emerald-400">{lastReverifyResult.queued}</strong> 封 · 跳过 <strong>{lastReverifyResult.skipped}</strong> 封
+                    本次批量重建结果：已扫描 {lastReverifyResult.scanned} 封 · 本次入队 <strong className="text-emerald-600 dark:text-emerald-400">{lastReverifyResult.queued}</strong> 封 · 跳过 <strong>{lastReverifyResult.skipped}</strong> 封
+                    {(lastReverifyResult.remainingUnverified ?? 0) > 0 || (lastReverifyResult.remainingSendGateBlocked ?? 0) > 0 ? (
+                      <>
+                        {' · '}当前仍有 <strong className="text-destructive">{lastReverifyResult.remainingUnverified ?? 0}</strong> 封正文核验未过
+                        {(lastReverifyResult.remainingSendGateBlocked ?? 0) > 0 ? <> / <strong className="text-amber-700 dark:text-amber-300">{lastReverifyResult.remainingSendGateBlocked}</strong> 封其他发送检查拦截</> : null}
+                      </>
+                    ) : null}
                   </p>
                   {lastReverifyResult.skippedReasons && lastReverifyResult.skippedReasons.length > 0 ? (
                     <p className="text-muted-foreground">
@@ -943,6 +977,17 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     <p className="text-[11px] text-muted-foreground">
                       跳过明细：{lastReverifyResult.skippedDetails.slice(0, 8).map((d) => `${d.customerName}：${d.reason}`).join('；')}
                       {lastReverifyResult.skippedDetails.length > 8 ? ` 等共 ${lastReverifyResult.skippedDetails.length} 条` : ''}
+                    </p>
+                  ) : null}
+                  {lastReverifyResult.remainingDetails && lastReverifyResult.remainingDetails.length > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      当前未过明细：{lastReverifyResult.remainingDetails.slice(0, 6).map((d) => `${d.customerName}（${d.category === 'send_gate' ? '发送检查' : '正文核验'}：${d.reason}）`).join('；')}
+                      {lastReverifyResult.remainingDetails.length > 6 ? ` 等共 ${lastReverifyResult.remainingDetails.length} 条` : ''}
+                    </p>
+                  ) : null}
+                  {(lastReverifyResult.pausedReadyCount ?? 0) > 0 ? (
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                      另有 {lastReverifyResult.pausedReadyCount} 位客户当前草稿检查已通过，队列仍暂停（待手动恢复，系统不会自动恢复发信）。
                     </p>
                   ) : null}
                 </div>
@@ -979,11 +1024,21 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 </Button>
               </div>
             ) : null}
-            {pausedReadyCount > 0 || deliveryFailedCount > 0 ? (
+            {pausedReadyCount > 0 || deliveryFailedCount > 0 || deliveryCancelledCount > 0 || contextWarningCount > 0 ? (
               <div className="mt-2.5 flex flex-wrap items-center gap-3 rounded-md border border-border/70 bg-muted/20 px-2.5 py-2 text-xs text-muted-foreground">
                 {pausedReadyCount > 0 ? (
                   <span>
                     · 已有 <strong className="text-foreground">{pausedReadyCount}</strong> 位客户当前草稿检查已通过，队列仍暂停，待手动恢复（不会自动恢复发送）
+                  </span>
+                ) : null}
+                {contextWarningCount > 0 ? (
+                  <span>
+                    · 另有 <strong className="text-foreground">{contextWarningCount}</strong> 封草稿正文核验已通过，仅附带背景资料缺口提醒（未写入正文，不拦截发送，不计入重建）
+                  </span>
+                ) : null}
+                {deliveryCancelledCount > 0 ? (
+                  <span>
+                    · 另有 <strong className="text-amber-700 dark:text-amber-300">{deliveryCancelledCount}</strong> 位客户当前步骤邮件已取消（未发送，不会再投递）
                   </span>
                 ) : null}
                 {deliveryFailedCount > 0 ? (
@@ -1270,6 +1325,17 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                       查看客户发信记录
                                     </Link>
                                   </div>
+                                ) : row.draftStage === 'delivery_cancelled' ? (
+                                  <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4 text-amber-800 dark:text-amber-200">
+                                    <p>第 {row.nextStep} 封邮件已取消（未发送）：{row.cancelledReason || '不会再继续投递'}</p>
+                                    <Link to={`/customers/${row.customerId}`} className="inline-block text-primary underline underline-offset-2">
+                                      查看客户发信记录
+                                    </Link>
+                                  </div>
+                                ) : row.draftStage === 'waiting_delivery' ? (
+                                  <p className="mt-1 max-w-[16rem] text-[11px] leading-4 text-sky-700 dark:text-sky-300">
+                                    第 {row.nextStep} 封已进入发送队列，等待邮件中心投递
+                                  </p>
                                 ) : row.draftStage === 'waiting_model' && row.taskStepLabel ? (
                                   <p className="mt-1 max-w-[15rem] text-[11px] leading-4 text-amber-700 dark:text-amber-300">
                                     当前步骤：{row.taskStepLabel}
@@ -1325,6 +1391,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 ) : row.lastError ? (
                                   <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${row.phase === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
                                     {row.lastError}
+                                  </p>
+                                ) : null}
+                                {row.contextWarnings && row.contextWarnings.length > 0 && !row.draftAuditDetail ? (
+                                  <p className="mt-1 max-w-[18rem] rounded bg-muted/40 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground">
+                                    背景资料提醒（未写入正文，不拦截发送）：{row.contextWarnings.map((w) => w.message).join('；')}
                                   </p>
                                 ) : null}
                               </TableCell>
@@ -1471,19 +1542,23 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <>
                 {diagData.sendReadiness ? (
                   <div className={`rounded-md border p-3 space-y-1.5 ${
-                    diagData.sendReadiness.status === 'ready_to_send' || diagData.sendReadiness.status === 'waiting_buyer_window' || diagData.sendReadiness.status === 'completed'
+                    diagData.sendReadiness.status === 'ready_to_send' || diagData.sendReadiness.status === 'waiting_buyer_window' || diagData.sendReadiness.status === 'waiting_delivery' || diagData.sendReadiness.status === 'completed'
                       ? 'border-emerald-300/70 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10'
-                      : diagData.sendReadiness.status === 'blocked_by_send_gate' || diagData.sendReadiness.status === 'blocked_by_audit' || diagData.sendReadiness.status === 'task_failed'
-                        ? 'border-destructive/40 bg-destructive/5'
-                        : 'bg-muted/20'
+                      : diagData.sendReadiness.status === 'delivery_cancelled'
+                        ? 'border-amber-300/70 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10'
+                        : diagData.sendReadiness.status === 'blocked_by_send_gate' || diagData.sendReadiness.status === 'blocked_by_audit' || diagData.sendReadiness.status === 'task_failed' || diagData.sendReadiness.status === 'delivery_failed'
+                          ? 'border-destructive/40 bg-destructive/5'
+                          : 'bg-muted/20'
                   }`}>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={
-                        diagData.sendReadiness.status === 'ready_to_send' || diagData.sendReadiness.status === 'waiting_buyer_window' || diagData.sendReadiness.status === 'completed'
+                        diagData.sendReadiness.status === 'ready_to_send' || diagData.sendReadiness.status === 'waiting_buyer_window' || diagData.sendReadiness.status === 'waiting_delivery' || diagData.sendReadiness.status === 'completed'
                           ? 'developed'
-                          : diagData.sendReadiness.status === 'blocked_by_send_gate' || diagData.sendReadiness.status === 'blocked_by_audit' || diagData.sendReadiness.status === 'task_failed'
-                            ? 'failed'
-                            : 'outline'
+                          : diagData.sendReadiness.status === 'delivery_cancelled'
+                            ? 'warning'
+                            : diagData.sendReadiness.status === 'blocked_by_send_gate' || diagData.sendReadiness.status === 'blocked_by_audit' || diagData.sendReadiness.status === 'task_failed' || diagData.sendReadiness.status === 'delivery_failed'
+                              ? 'failed'
+                              : 'outline'
                       }>
                         {diagData.sendReadiness.label}
                       </Badge>
@@ -1640,6 +1715,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       ) : null}
                       {diagData.latestDraft.sendGateIssue ? (
                         <p className="text-destructive">自动发送闸门原因：{diagData.latestDraft.sendGateIssue}</p>
+                      ) : null}
+                      {diagData.latestDraft.contextWarnings && diagData.latestDraft.contextWarnings.length > 0 ? (
+                        <div className="rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                          <p className="font-medium text-foreground">背景资料缺口提醒（未写入正文，不拦截发送）：</p>
+                          <ul className="mt-0.5 list-disc pl-4">
+                            {diagData.latestDraft.contextWarnings.map((w, idx) => (
+                              <li key={idx}>[{w.code}] {w.message}</li>
+                            ))}
+                          </ul>
+                        </div>
                       ) : null}
                       {diagData.latestDraft.issues.length > 0 ? (
                         <ul className="list-disc pl-4 text-amber-700 dark:text-amber-300">

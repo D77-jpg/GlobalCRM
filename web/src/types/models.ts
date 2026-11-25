@@ -1703,6 +1703,8 @@ export type OutreachDraftStage =
   | 'waiting_model'
   | 'draft_saved_verified'
   | 'draft_audit_failed'
+  | 'waiting_delivery'
+  | 'delivery_cancelled'
   | 'task_failed'
   | 'delivery_failed'
   | 'none';
@@ -1769,15 +1771,19 @@ export interface OutreachAutomationQueueRow {
   nextStep: number;
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
   draftStage?: OutreachDraftStage;
+  deliveryStatus?: 'waiting_delivery' | 'cancelled' | 'failed' | 'sent';
   draftReady: boolean;
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
   draftAuditDetail?: OutreachDraftAuditDetail;
   sendGateDetail?: OutreachSendGateDetail;
+  contextWarnings?: { code: string; message: string }[];
   pausedReadyToResume?: boolean;
   deliveryError?: string;
   failedLetterId?: string;
+  cancelledLetterId?: string;
+  cancelledReason?: string;
   isRuleStopped?: boolean;
   errorHistory?: OutreachEnrollmentErrorHistoryItem[];
   draftUpdatedAt?: string;
@@ -1838,8 +1844,10 @@ export interface OutreachAutomationOverview {
     unverifiedDrafts?: number;
     rebuildableUnverifiedDrafts?: number;
     sendGateBlockedDrafts?: number;
+    contextWarningDrafts?: number;
     pausedReadyCount?: number;
     deliveryFailedCount?: number;
+    deliveryCancelledCount?: number;
     exceptionQueueCount?: number;
     approvedProofBlocksCount?: number;
     queuedTasks?: number;

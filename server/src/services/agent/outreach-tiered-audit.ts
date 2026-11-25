@@ -367,6 +367,71 @@ export function normalizeOutreachQuestionCount(body: string, step?: number): str
   return normalized.join('\n\n');
 }
 
+export interface Step1CapabilitySelection {
+  hasCapabilityEvidence: boolean;
+  selectedSources: { sourceId: string; title: string; category: string; excerpt: string }[];
+  selectedProofBlocks: { id: string; slot: string; label: string; text: string }[];
+  missingCategoryHint?: string;
+}
+
+/**
+ * Select the most relevant published supplier capability evidence BEFORE drafting Step 1,
+ * so the writer anchors Paragraph 2 around an actual approved capability source instead of
+ * generating a generic draft that later fails `missing_supplier_evidence`.
+ */
+export function selectStep1CapabilityEvidence(params: {
+  bundle: KnowledgeBundle;
+  approvedProofBlocks?: ProjectApprovedProofBlock[];
+  customerHintText?: string;
+}): Step1CapabilitySelection {
+  const hintTokens = contentTokens(params.customerHintText ?? '');
+  const enabledBlocks = (params.approvedProofBlocks ?? []).filter((b) => b.enabled && b.text.trim().length > 0);
+  const scoredBlocks = enabledBlocks
+    .map((block) => {
+      const bTokens = contentTokens(`${block.label} ${block.text}`);
+      const overlap = hintTokens.filter((t) => bTokens.some((bt) => tokenStemMatch(t, bt))).length;
+      const slotWeight = block.slot === 'proof' ? 3 : block.slot === 'identity' ? 2 : 0;
+      return { block, score: overlap * 4 + slotWeight };
+    })
+    .filter((item) => item.block.slot !== 'cta')
+    .sort((a, b) => b.score - a.score);
+
+  const knowledgeSources = params.bundle.sources.filter(
+    (s) => s.kind === 'knowledge' && ['company', 'product', 'faq', 'reference'].includes(s.category) && s.content.trim().length > 0,
+  );
+  const scoredSources = knowledgeSources
+    .map((source) => {
+      const sTokens = contentTokens(`${source.title} ${source.products.join(' ')} ${source.content.slice(0, 600)}`);
+      const overlap = hintTokens.filter((t) => sTokens.some((st) => tokenStemMatch(t, st))).length;
+      const catWeight = source.category === 'product' ? 3 : source.category === 'company' ? 2 : 1;
+      return { source, score: overlap * 4 + catWeight };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const selectedProofBlocks = scoredBlocks.slice(0, 3).map(({ block }) => ({
+    id: block.id,
+    slot: block.slot,
+    label: block.label,
+    text: block.text.trim(),
+  }));
+  const selectedSources = scoredSources.slice(0, 2).map(({ source }) => ({
+    sourceId: source.sourceId,
+    title: source.title,
+    category: source.category,
+    excerpt: source.content.replace(/\s+/g, ' ').trim().slice(0, 360),
+  }));
+
+  const hasCapabilityEvidence = selectedProofBlocks.length > 0 || selectedSources.length > 0;
+  return {
+    hasCapabilityEvidence,
+    selectedSources,
+    selectedProofBlocks,
+    ...(!hasCapabilityEvidence ? {
+      missingCategoryHint: '当前项目缺少已发布的我方能力依据（建议在知识库发布「公司简介/工厂产能」「产品规格与工艺」「OEM/ODM 交付能力」至少 1 条，或在自动开发页启用 1 条英文预审卖点块）。',
+    } : {}),
+  };
+}
+
 /**
  * Extract suggested Approved Proof Blocks from a project's already-published
  * `AgentKnowledge` entries (company & product categories) for 1-click admin review.
