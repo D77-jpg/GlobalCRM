@@ -847,8 +847,13 @@ async function persistAndSend(options: {
     letter: toLetterDto(letter.toObject() as unknown as Record<string, unknown>),
     customer: (refreshed ?? customer).toJSON() as unknown as ICustomer & { id: string },
     channel: letter.channel, delivered: ['sent', 'opened'].includes(letter.status),
-    message: ['sent', 'opened'].includes(letter.status) ? (letter.channel === 'mock' ? '开发信已发送（MOCK 模式，未真实投递）' : '开发信已发送')
-      : letter.status === 'failed' ? (letter.error || '发送失败') : '发送任务已保存，可在邮件中心查看进度',
+    message: ['sent', 'opened'].includes(letter.status)
+      ? (letter.channel === 'mock' ? '开发信已发送（MOCK 模式，未真实投递）' : '开发信已发送')
+      : letter.status === 'cancelled'
+        ? (letter.error ? `邮件已取消（未发送）：${letter.error}` : '邮件已取消（未发送）')
+        : letter.status === 'failed'
+          ? (letter.error || '发送失败')
+          : '发送任务已保存，可在邮件中心查看进度',
   };
 
 }

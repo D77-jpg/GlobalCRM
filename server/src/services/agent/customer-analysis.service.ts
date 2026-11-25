@@ -7,6 +7,8 @@ import {prepareSalesEvidence,assertSalesEvidenceCurrent,salesMailKind,salesSubje
 import {workflowStage,type EvidenceWorkflow} from './evidence-workflow';
 import {verifyGroundedEmail,providerFactVerifier} from './fact-verifier';
 import {selectOutreachPlaybook} from './outreach-playbook';
+import {selectStep1CapabilityEvidence} from './outreach-tiered-audit';
+import {inspectBodyFactAudit} from './knowledge-send-gate';
 import {loadImportedPlaybook} from '../playbook-import.service';
 import {knowledgeForModel,knowledgeForAudit,knowledgeSourceForModel} from './knowledge-types';
 import type {KnowledgeBundle} from './knowledge-types';
@@ -261,17 +263,37 @@ async function buildAnalysisInput(customerId: string, actor: AuthUser, knowledge
       })),
     } : {}),
   };
+  const effectiveTaskKind = (inbound.length > 0 && !outreachStep && taskKind === 'first_outreach' && !goal.match(/首封|第一封|first (?:outreach|introduction)/i))
+    ? 'inquiry_reply'
+    : (taskKind ?? salesMailKind(goal, inbound.length > 0));
+  const selectedCapabilityEvidence = (outreachStep === 1 || (!outreachStep && effectiveTaskKind === 'first_outreach'))
+    ? selectStep1CapabilityEvidence({
+      bundle: knowledgeContext,
+      approvedProofBlocks: salesProfile.approvedProofBlocks,
+      customerHintText: [customer.interestedProducts, customer.productCategory, customer.industry, websiteHint, customsCategories, websiteText.slice(0, 1200)].filter(Boolean).join(' '),
+    })
+    : undefined;
+  const hasConcreteCustomerClue = Boolean(
+    websiteHint.trim()
+    || websiteText.trim().length >= 80
+    || customer.interestedProducts?.trim()
+    || customer.productCategory?.trim()
+    || customsCategories.trim(),
+  );
   return {
     input: {
       customerName: customer.name,
       customerEmail: customer.email,
       sourceCatalog,
       salesRequirements: prepared.requirements,
-      taskType: taskKind ?? salesMailKind(goal),
+      taskType: effectiveTaskKind,
       knowledgeContext: knowledgeForModel(knowledgeContext),
       projectProfile: playbook ? { ...profileContext, playbook } : profileContext,
       ...(outreachStep ? { outreachStep: (Math.min(3, Math.max(1, outreachStep)) as 1 | 2 | 3) } : {}),
       ...(previousOutreach?.length ? { previousOutreach } : {}),
+      ...(selectedCapabilityEvidence ? { selectedCapabilityEvidence } : {}),
+      sparseCustomerContext: !hasConcreteCustomerClue,
+      hasInboundConversation: inbound.length > 0,
     },
     sources,
     knowledgeBundle: knowledgeForAudit(knowledgeContext),
@@ -325,6 +347,9 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
     const research=options?.customerResearch??await ensureCustomerResearch(input.customerId,actor,{requestKey:input.idempotencyKey});
     const context = await buildAnalysisInput(input.customerId, actor,options?.knowledgeIds,options?.userRequest,options?.workflow,taskKind,options?.outreachStep,options?.previousOutreach,options?.forcedSegmentCode);
     context.input.userRequest=options?.userRequest;context.input.customerResearch=research;
+    if (research.state !== 'ready' && !context.input.sourceCatalog.some((s) => s.kind === 'website')) {
+      context.input.sparseCustomerContext = true;
+    }
     {
       const project = await Project.findById(requireProjectId(actor)).select('companyName website moq senderName');
       const sender = await getCurrentMailSender(String(requireProjectId(actor)), actor.id);
@@ -499,7 +524,12 @@ export async function createCustomerAnalysis(input: CreateAgentCustomerAnalysisB
         usedDeliverables: extractDeliverables(grounded.bodyText).map((d) => d.key),
       };
     }
-    if(research.state!=='ready'){grounded.review.issues.push({code:'customer_research_gap',message:research.message});grounded.review.completeness='partial';}
+    if (research.state !== 'ready') {
+      grounded.review.issues.push({ code: 'customer_research_gap', message: research.message });
+      if (!inspectBodyFactAudit(grounded.review).passed) {
+        grounded.review.completeness = 'partial';
+      }
+    }
     parsed.emailDraft.bodyText=grounded.bodyText;
     // A generated subject is not an unchecked channel for numeric commitments:
     // keep it only when it is short and free of numbers or currencies.

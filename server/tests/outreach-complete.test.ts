@@ -1752,3 +1752,447 @@ test('P1-A/P1-B: circuit-breaker never burns customer retries, selective recover
     assert.ok(Array.isArray(reverifyRes.skippedReasons));
   });
 });
+
+test('Section 10: Grounding & Delivery Polish (Items 1-7: context gaps vs body audit, rebuild summary, cancelled delivery sync, Step-1 evidence, offer auth, auto paragraph split)', async () => {
+  const { OutreachAutomationEnrollment } = await import('../src/models');
+  const {
+    getOutreachAutomationOverview,
+    getOutreachEnrollmentDiagnostics,
+    inspectOutreachDraftAudit,
+    reverifyUnverifiedOutreachDrafts,
+  } = await import('../src/services/outreach-automation.service');
+  const {
+    automatedReviewIssue,
+    inspectBodyFactAudit,
+  } = await import('../src/services/agent/knowledge-send-gate');
+  const { selectStep1CapabilityEvidence } = await import('../src/services/agent/outreach-tiered-audit');
+  const { buildOfferAuthorizationPromptRules } = await import('../src/services/agent/outreach-quality');
+  const { verifyGroundedEmail } = await import('../src/services/agent/fact-verifier');
+  const { draftHash } = await import('../src/services/agent/knowledge-grounding');
+  const { AgentKnowledge } = await import('../src/models/AgentKnowledge');
+
+  // --- Item 5 & 6 unit checks: Step-1 capability selector & offer authorization prompt rules ---
+  const emptySelection = selectStep1CapabilityEvidence({
+    bundle: {
+      projectId: projectAId,
+      status: 'ready',
+      sources: [],
+      issues: [],
+      topics: [],
+    },
+    approvedProofBlocks: [],
+    customerHintText: 'commercial bumper plates gym',
+  });
+  assert.equal(emptySelection.hasCapabilityEvidence, false);
+  assert.ok(emptySelection.missingCategoryHint && emptySelection.missingCategoryHint.includes('公司简介'));
+
+  const foundSelection = selectStep1CapabilityEvidence({
+    bundle: {
+      projectId: projectAId,
+      status: 'ready',
+      sources: [{
+        sourceId: 'knowledge:cap1:v1',
+        knowledgeId: 'cap1',
+        title: 'Rubber Bumper Plate Manufacturing',
+        version: 1,
+        kind: 'knowledge',
+        category: 'product',
+        content: 'We manufacture commercial rubber bumper plates with strict weight checks and custom logo molding.',
+        source: 'kb',
+        applicability: 'gyms',
+        products: ['bumper plates'],
+        validFrom: new Date(0).toISOString(),
+        terms: ['bumper', 'plates'] as never,
+      }],
+      issues: [],
+      topics: [],
+    },
+    approvedProofBlocks: [],
+    customerHintText: 'commercial bumper plates gym',
+  });
+  assert.equal(foundSelection.hasCapabilityEvidence, true);
+  assert.equal(foundSelection.selectedSources[0]?.sourceId, 'knowledge:cap1:v1');
+
+  const forbiddenRules = buildOfferAuthorizationPromptRules([
+    {
+      id: 'spec',
+      label: 'Spec sheet',
+      actionText: 'Share a 1-page spec sheet',
+      category: 'spec_sheet',
+      requiresEvidence: false,
+      allowsFree: false,
+      allowsSample: false,
+      allowsShipping: false,
+      enabled: true,
+    },
+  ]);
+  assert.equal(forbiddenRules.sampleAllowed, false);
+  assert.equal(forbiddenRules.freeAllowed, false);
+  assert.equal(forbiddenRules.shippingAllowed, false);
+  const rulesJoined = forbiddenRules.lines.join('\n');
+  assert.ok(rulesJoined.includes('寄样/色卡/打样'));
+  assert.ok(rulesJoined.includes('免费承诺'));
+  assert.ok(rulesJoined.includes('运费/快递/贸易术语承诺'));
+
+  // --- Item 1 & 7 unit check: verifyGroundedEmail auto-splits 91-word paragraph & returns complete when only background missing gap exists ---
+  const capText = 'We manufacture rubber bumper plates for gym brands with strict weight checks and steady production runs. Our factory supports custom logo molding and steady repeat supply for commercial equipment buyers across Europe.';
+  const longOneBlock = [
+    'Hi Alex,',
+    '',
+    `${capText} Our workshop also supports custom color coding, embossed weight markings, and export pallet packing for commercial fitness distributors scaling regional restocks without altering your existing rack dimensions. Which plate specification would you like to review first?`,
+  ].join('\n');
+  const sourceContent = `${capText} Our workshop also supports custom color coding, embossed weight markings, and export pallet packing for commercial fitness distributors scaling regional restocks without altering your existing rack dimensions.`;
+  const verifiedSplit = await verifyGroundedEmail(
+    longOneBlock,
+    {
+      projectId: projectAId,
+      status: 'ready',
+      sources: [{
+        sourceId: 'knowledge:split1:v1',
+        knowledgeId: 'split1',
+        title: 'Bumper Plate Capabilities',
+        version: 1,
+        kind: 'knowledge',
+        category: 'product',
+        content: sourceContent,
+        source: 'kb',
+        applicability: '',
+        products: ['bumper plates'],
+        validFrom: new Date(0).toISOString(),
+        terms: [],
+      }],
+      facts: [],
+      issues: [{ code: 'missing', message: '未找到适用报价单（本次正文未涉及报价）' }],
+      topics: [],
+    },
+    {
+      projectId: projectAId,
+      taskType: 'first_outreach',
+      outreachStep: 1,
+      recipientName: 'Alex Buyer',
+    },
+    {
+      model: 'test-verifier',
+      check: async ({ segments }) => segments.map((seg) => {
+        const trimmed = seg.text.trim();
+        if (/^Hi\b|\?$/.test(trimmed)) {
+          return { id: seg.id, status: 'non_claim' as const, quotes: [], reason: 'greeting_or_question' };
+        }
+        const idx = sourceContent.indexOf(trimmed);
+        const start = idx >= 0 ? idx : 0;
+        const quote = idx >= 0 ? trimmed : sourceContent.slice(0, Math.min(40, sourceContent.length));
+        return {
+          id: seg.id,
+          status: 'supported' as const,
+          quotes: [{ sourceId: 'knowledge:split1:v1', quote, start, end: start + quote.length }],
+          reason: 'verified',
+        };
+      }),
+      rewrite: async () => longOneBlock,
+    },
+  );
+  const splitParagraphs = verifiedSplit.bodyText.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  assert.ok(splitParagraphs.length >= 3, `Expected auto-split into >= 3 paragraphs, got ${splitParagraphs.length}`);
+  assert.equal(verifiedSplit.review.completeness, 'complete', 'All checks passed + only background missing gap -> completeness must be complete');
+  assert.equal(inspectBodyFactAudit(verifiedSplit.review).passed, true);
+  assert.equal(inspectBodyFactAudit(verifiedSplit.review).contextWarnings.length, 1);
+
+  // --- Integration tests for Items 1, 2, 3 in OutreachAutomation ---
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const rep = await User.create({
+      organizationId: orgA,
+      username: 'fictional_polish_rep',
+      passwordHash: 'not-a-real-bcrypt-hash',
+      displayName: 'Polish Rep',
+      role: 'user',
+      status: 'active',
+      projectIds: [new Types.ObjectId(projectAId)],
+    });
+    const campaign = await OutreachAutomationConfig.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      actorRole: 'user',
+      enabled: false,
+      pausedReason: '核验排查中',
+      rolloutMode: 'active',
+      dailyLimit: 20,
+      perDomainLimit: 3,
+      windowStart: '09:30',
+      windowEnd: '17:30',
+      timezone: 'Asia/Shanghai',
+    });
+    const kbDoc = await AgentKnowledge.create({
+      projectId: new Types.ObjectId(projectAId),
+      version: 1,
+      approvedVersion: 1,
+      revisions: [{
+        version: 1,
+        title: 'IRONHUE Bumper Capability',
+        category: 'product',
+        content: capText,
+        approved: true,
+        validFrom: new Date(0),
+        createdBy: rep._id,
+        createdAt: new Date(),
+      }],
+    });
+    const kbSource = {
+      sourceId: `knowledge:${String(kbDoc._id)}:v1`,
+      knowledgeId: String(kbDoc._id),
+      title: 'IRONHUE Bumper Capability',
+      version: 1,
+      kind: 'knowledge' as const,
+      category: 'product' as const,
+      content: capText,
+      source: 'fixture',
+      applicability: '',
+      products: ['bumper plates'],
+      validFrom: new Date(0).toISOString(),
+      terms: [],
+    };
+    const cleanBody = [
+      'Hi Sam,',
+      '',
+      capText,
+      '',
+      'Which bumper plate line would you like to review first?',
+    ].join('\n');
+
+    // Customer 1: Legacy partial completeness with ONLY background customer_research_gap (all checks passed!)
+    const custGapOnly = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Apollo Gym Fixture',
+      email: 'apollo@example.test',
+      status: 'pending',
+    });
+    const enrGapOnly = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custGapOnly._id,
+      status: 'paused',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 60_000),
+      lastError: '正文仅为部分核验（partial），未达自动发送要求',
+      taskIds: [],
+    });
+    const gapOnlyReview = {
+      version: 1 as const,
+      projectId: projectAId,
+      taskType: 'first_outreach',
+      generatedAt: new Date().toISOString(),
+      status: 'ready' as const,
+      completeness: 'partial' as const,
+      sources: [kbSource],
+      claims: [{ text: capText, sourceIds: [kbSource.sourceId] }],
+      questions: [],
+      issues: [{ code: 'customer_research_gap', message: '客户官网未能完整读取，正文未编造官网内容' }],
+      context: {},
+      bodyHash: draftHash(cleanBody),
+      factAudit: {
+        contract: 's4.1' as const,
+        mode: 'semantic' as const,
+        attempts: 1,
+        facts: [],
+        checks: [
+          { id: 's0', text: 'Hi Sam,', status: 'non_claim' as const, sourceIds: [], reason: 'greeting' },
+          { id: 's1', text: capText, status: 'supported' as const, sourceIds: [kbSource.sourceId], reason: 'exact' },
+          { id: 's2', text: 'Which bumper plate line would you like to review first?', status: 'non_claim' as const, sourceIds: [], reason: 'question' },
+        ],
+      },
+    };
+    const draftGapOnly = await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custGapOnly._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Commercial bumper plates',
+      content: `<p>${cleanBody.replace(/\n\n/g, '</p><p>')}</p>`,
+      contentText: cleanBody,
+      recipientEmail: 'apollo@example.test',
+      status: 'draft',
+      needsReview: false,
+      knowledgeReview: gapOnlyReview,
+    });
+    assert.equal(inspectOutreachDraftAudit(draftGapOnly).needsReverify, false);
+    assert.equal(inspectOutreachDraftAudit(draftGapOnly).contextWarnings.length, 1);
+    assert.equal(automatedReviewIssue(gapOnlyReview, 1, { bodyText: cleanBody, subject: 'Commercial bumper plates' }), undefined);
+
+    // Customer 2: Real body audit failure (unsupported price claim) -> MUST still block both audit & send gate
+    const custBadPrice = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Price Claim Fixture',
+      email: 'price-claim@example.test',
+      status: 'pending',
+    });
+    const enrBadPrice = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custBadPrice._id,
+      status: 'paused',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 60_000),
+      taskIds: [],
+    });
+    const badPriceBody = 'Hi Sam,\n\nWe can offer USD 1.20/kg with 7-day express delivery.\n\nInterested?';
+    const badPriceReview = {
+      version: 1 as const,
+      projectId: projectAId,
+      taskType: 'first_outreach',
+      generatedAt: new Date().toISOString(),
+      status: 'ready' as const,
+      completeness: 'partial' as const,
+      sources: [kbSource],
+      claims: [],
+      questions: [],
+      issues: [
+        { code: 'missing', message: '未找到报价单' },
+        { code: 'semantic_unverified', message: '正文存在无依据价格承诺' },
+      ],
+      context: {},
+      bodyHash: draftHash(badPriceBody),
+      factAudit: {
+        contract: 's4.1' as const,
+        mode: 'semantic' as const,
+        attempts: 2,
+        facts: [],
+        checks: [
+          { id: 's0', text: 'We can offer USD 1.20/kg with 7-day express delivery.', status: 'unsupported' as const, sourceIds: [], reason: '无报价依据' },
+        ],
+      },
+    };
+    const draftBadPrice = await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custBadPrice._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Pricing offer',
+      content: `<p>${badPriceBody}</p>`,
+      contentText: badPriceBody,
+      recipientEmail: 'price-claim@example.test',
+      status: 'draft',
+      needsReview: true,
+      knowledgeReview: badPriceReview,
+    });
+    assert.equal(inspectOutreachDraftAudit(draftBadPrice).needsReverify, true);
+    assert.ok(automatedReviewIssue(badPriceReview, 1, { bodyText: badPriceBody, subject: 'Pricing offer' }));
+
+    // Customer 3: Delta Fitness scenario — Step 3 cancelled with stale "发送任务已保存，可在邮件中心查看进度"
+    const custDelta = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Delta Fitness Fixture',
+      email: 'delta@example.test',
+      status: 'contacted',
+      outreachStep: 2,
+      letterCount: 2,
+    });
+    const enrDelta = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custDelta._id,
+      status: 'paused',
+      currentStep: 2,
+      nextRunAt: new Date(Date.now() + 60_000),
+      lastError: '发送任务已保存，可在邮件中心查看进度',
+      taskIds: [],
+    });
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custDelta._id,
+      userId: rep._id,
+      outreachStep: 3,
+      subject: 'Closing the loop',
+      content: '<p>Closing the loop.</p>',
+      contentText: 'Closing the loop.',
+      recipientEmail: 'delta@example.test',
+      status: 'cancelled',
+      error: '已在邮件中心手动取消发送',
+    });
+
+    // Customer 4: Queued delivery letter -> waiting_delivery
+    const custQueued = await Customer.create({
+      projectId: new Types.ObjectId(projectAId),
+      ownerId: rep._id,
+      name: 'Queued Delivery Fixture',
+      email: 'queued@example.test',
+      status: 'pending',
+    });
+    const enrQueued = await OutreachAutomationEnrollment.create({
+      projectId: new Types.ObjectId(projectAId),
+      campaignId: campaign._id,
+      userId: rep._id,
+      customerId: custQueued._id,
+      status: 'active',
+      currentStep: 0,
+      nextRunAt: new Date(Date.now() + 60_000),
+      taskIds: [],
+    });
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custQueued._id,
+      userId: rep._id,
+      outreachStep: 1,
+      subject: 'Queued outreach',
+      content: '<p>Queued outreach.</p>',
+      contentText: 'Queued outreach.',
+      recipientEmail: 'queued@example.test',
+      status: 'queued',
+    });
+
+    const ov = await getOutreachAutomationOverview(actorA, rep.id);
+    // Item 1 assertions
+    const gapRow = ov.queue.find((q) => q.id === enrGapOnly.id);
+    assert.ok(gapRow);
+    assert.equal(gapRow!.draftStage, 'draft_saved_verified', 'Context-gap-only draft must be verified, NOT red');
+    assert.equal(gapRow!.draftReady, true);
+    assert.equal(gapRow!.pausedReadyToResume, true, 'Paused queue must stay paused with待手动恢复');
+    assert.equal(gapRow!.contextWarnings?.length, 1);
+    assert.equal(ov.stats.contextWarningDrafts, 1);
+    assert.equal(ov.stats.unverifiedDrafts, 1, 'Only Price Claim draft is unverified');
+    assert.equal(ov.stats.rebuildableUnverifiedDrafts, 1, 'Context-gap-only draft must NOT be counted as rebuildable');
+
+    // Item 3 assertions (Delta Fitness cancelled & queued waiting_delivery)
+    const deltaRow = ov.queue.find((q) => q.id === enrDelta.id);
+    assert.ok(deltaRow);
+    assert.equal(deltaRow!.draftStage, 'delivery_cancelled');
+    assert.equal(deltaRow!.deliveryStatus, 'cancelled');
+    assert.ok(deltaRow!.cancelledReason?.includes('手动取消'));
+    assert.ok(!deltaRow!.lastError?.includes('发送任务已保存'), 'Must NOT keep stale waiting-to-send text');
+    assert.ok(deltaRow!.errorHistory?.some((h) => h.message === '发送任务已保存，可在邮件中心查看进度' && h.resolvedAt));
+    assert.equal(ov.stats.deliveryCancelledCount, 1);
+
+    const deltaDiag = await getOutreachEnrollmentDiagnostics(actorA, enrDelta.id, rep.id);
+    assert.equal(deltaDiag.sendReadiness.status, 'delivery_cancelled');
+
+    const queuedRow = ov.queue.find((q) => q.id === enrQueued.id);
+    assert.equal(queuedRow?.draftStage, 'waiting_delivery');
+    assert.equal(queuedRow?.deliveryStatus, 'waiting_delivery');
+    const queuedDiag = await getOutreachEnrollmentDiagnostics(actorA, enrQueued.id, rep.id);
+    assert.equal(queuedDiag.sendReadiness.status, 'waiting_delivery');
+
+    const gapDiag = await getOutreachEnrollmentDiagnostics(actorA, enrGapOnly.id, rep.id);
+    assert.equal(gapDiag.sendReadiness.status, 'paused_ready_to_resume');
+    assert.equal(gapDiag.latestDraft?.contextWarnings?.length, 1);
+
+    // Item 2 assertions: batch rebuild skips context-gap-only draft and reports remaining + pausedReadyCount
+    const reverifyOut = await reverifyUnverifiedOutreachDrafts(
+      actorA,
+      { enrollmentIds: [enrGapOnly.id, enrBadPrice.id] },
+      rep.id,
+    );
+    assert.equal(reverifyOut.scanned, 2);
+    assert.equal(reverifyOut.queued, 1);
+    assert.equal(reverifyOut.skipped, 1);
+    assert.ok(reverifyOut.skippedDetails[0]?.reason.includes('背景资料缺口提醒'));
+    assert.equal(reverifyOut.pausedReadyCount, 1);
+    assert.equal(typeof reverifyOut.remainingUnverified, 'number');
+    assert.equal(typeof reverifyOut.remainingSendGateBlocked, 'number');
+    assert.ok(Array.isArray(reverifyOut.remainingDetails));
+    assert.equal((await OutreachAutomationEnrollment.findById(enrGapOnly._id).lean())?.status, 'paused', 'Never auto-resume paused queue');
+  });
+});

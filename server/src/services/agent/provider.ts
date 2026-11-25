@@ -67,6 +67,17 @@ export interface CustomerAnalysisInput {
   outreachStep?: 1 | 2 | 3;
   /** 已生成的上一封（或前两封）；仅用于承接，不能当成新的我方事实。 */
   previousOutreach?: PreviousOutreachDraft[];
+  /** 首封写信前服务端预选好的已发布我方能力依据，优先围绕它展开第 2 段。 */
+  selectedCapabilityEvidence?: {
+    hasCapabilityEvidence: boolean;
+    selectedSources: { sourceId: string; title: string; category: string; excerpt: string }[];
+    selectedProofBlocks: { id: string; slot: string; label: string; text: string }[];
+    missingCategoryHint?: string;
+  };
+  /** 客户官网未读到或资料有限时为 true：直接说明来意，不要硬写个性化开场或编造采购意向。 */
+  sparseCustomerContext?: boolean;
+  /** 客户已有回复或询盘来信时为 true：直接承接对方话题沟通，不再套用陌生开发信。 */
+  hasInboundConversation?: boolean;
   projectProfile?: ProjectPromptContext;
   seller?: { companyName: string; website?: string; moq?: string; senderName: string; senderEmail?: string };
   customerName: string;

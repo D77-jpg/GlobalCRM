@@ -298,6 +298,37 @@ function splitParagraphSentences(paragraph: string): string[] {
  * Remove sentences proposing unauthorized/unmatched sample/swatch/free/shipping offers
  * without altering any verified claims or signature blocks.
  */
+export function buildOfferAuthorizationPromptRules(approvedOffers?: ProjectApprovedOffer[]): {
+  sampleAllowed: boolean;
+  freeAllowed: boolean;
+  shippingAllowed: boolean;
+  lines: string[];
+} {
+  const enabledOffers = (approvedOffers ?? []).filter((o) => o.enabled);
+  const sampleAllowed = enabledOffers.some((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
+  const freeAllowed = enabledOffers.some((o) => o.allowsFree);
+  const shippingAllowed = enabledOffers.some((o) => o.allowsShipping);
+  const lines: string[] = [];
+
+  if (enabledOffers.length > 0) {
+    lines.push(
+      `【项目已启用的逐项授权提议】${enabledOffers.map((o) => `${o.label}（${o.actionText}${o.conditions ? `；条件：${o.conditions}` : ''}${!o.allowsFree ? '；不得承诺免费' : ''}${!o.allowsShipping ? '；不得承诺运费/包邮' : ''}${o.requiresEvidence ? '；须有已发布依据' : ''}）`).join('｜')}。只能使用已授权且满足条件的一项。`,
+    );
+  }
+  const forbidden: string[] = [];
+  if (!sampleAllowed) forbidden.push('寄样/色卡/打样（严禁出现 sample、swatch、color card、寄样、色卡、样品、打样）');
+  if (!freeAllowed) forbidden.push('免费承诺（严禁出现 free、complimentary、at no cost、免费）');
+  if (!shippingAllowed) forbidden.push('运费/快递/贸易术语承诺（严禁出现 shipping、freight、courier、DDP、CIF、FOB、运费、包邮）');
+  if (forbidden.length > 0) {
+    lines.push(
+      `【授权禁区（写稿与改写前必须遵守）】当前项目未授权：${forbidden.join('；')}。请勿写入任何未授权提议；结尾请改为询问客户的产品方向、规格需求或对应采购负责人；没有已确认报价就不报任何数字。`,
+    );
+  } else {
+    lines.push('没有已确认报价就不报任何价格数字。');
+  }
+  return { sampleAllowed, freeAllowed, shippingAllowed, lines };
+}
+
 export function stripUnauthorizedOfferSentences(bodyWithoutSignature: string): {
   cleanedBody: string;
   removedSentences: string[];
