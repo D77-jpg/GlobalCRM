@@ -92,7 +92,7 @@ export async function cancelPendingOutreachLetters(
       ],
     },
     {
-      $set: { status: 'cancelled', error: reason },
+      $set: { status: 'cancelled', cancelOrigin: 'rule_stop', error: reason },
       $push: { history: { at: new Date(), status: 'cancelled', error: reason } },
     },
   );

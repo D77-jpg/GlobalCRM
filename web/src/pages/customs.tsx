@@ -160,14 +160,23 @@ export function CustomsPage(): React.JSX.Element {
     setImportBusy(true);
     try {
       const result = await apiPost<{ written: number; skipped: number; errors: Array<{ message: string }> }>('/customs/import', { sourceId, rows });
-      toast.success(`导入完成：写入 ${result.written} 条，跳过 ${result.skipped} 条`, {
-        description: result.errors.length ? `有 ${result.errors.length} 条失败，请检查格式` : undefined,
-      });
-      setImportOpen(false);
-      setImportText('');
+      const errSummary = result.errors.length
+        ? `失败 ${result.errors.length} 条：${result.errors.slice(0, 3).map((e) => e.message).join('；')}${result.errors.length > 3 ? '…' : ''}`
+        : undefined;
+      if (result.written === 0) {
+        toast.error(`未写入任何记录（跳过 ${result.skipped} 条，失败 ${result.errors.length} 条）`, { description: errSummary });
+      } else if (result.errors.length > 0) {
+        toast.warning(`导入完成：写入 ${result.written} 条，跳过 ${result.skipped} 条，失败 ${result.errors.length} 条`, { description: errSummary });
+      } else {
+        toast.success(`导入完成：写入 ${result.written} 条，跳过 ${result.skipped} 条`);
+      }
+      if (result.written > 0 || result.errors.length === 0) {
+        setImportOpen(false);
+        setImportText('');
+      }
       await load();
     } catch (reason) {
-      toast.error('导入失败', { description: toErrorMessage(reason) });
+      toast.error('导入海关数据失败', { description: toErrorMessage(reason) });
     } finally {
       setImportBusy(false);
     }
@@ -181,11 +190,13 @@ export function CustomsPage(): React.JSX.Element {
         `/customs/companies/${selected.company._id}/convert`,
         {},
       );
-      toast.success(result.created ? '已加入潜客池' : '这家公司已经在潜客池中');
+      toast.success(result.created ? '已加入「我的线索池」' : '这家公司已在客户线索池中', {
+        description: '可在客户线索池补齐联系邮箱后转为正式客户。',
+      });
       setSelected(null);
       navigate(ROUTES.prospecting);
     } catch (reason) {
-      toast.error('加入潜客池失败', { description: toErrorMessage(reason) });
+      toast.error('加入客户线索池失败', { description: toErrorMessage(reason) });
     } finally {
       setConvertBusy(false);
     }
@@ -195,7 +206,7 @@ export function CustomsPage(): React.JSX.Element {
     <div className="space-y-6">
       <PageHeader
         title="贸易情报"
-        description="按产品和市场发现进口商，查看公司采购画像，并把高匹配公司加入潜客池。"
+        description="按产品和市场发现进口商，查看公司采购画像，并把高匹配公司加入客户线索池。"
         actions={isAdmin ? <Button size="sm" variant="outline" onClick={() => void openImport()}>导入海关数据</Button> : undefined}
       />
 

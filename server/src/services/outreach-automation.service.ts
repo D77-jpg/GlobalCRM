@@ -29,6 +29,7 @@ import { workflowLabels } from './agent/evidence-workflow';
 import { modelCircuitState } from './agent/model-transport';
 import type { FactAuditFailureCategory, FactAuditStage } from './agent/knowledge-types';
 import { assertAutomaticDraftCanSend, renderLetter, resendLetter } from './letter.service';
+import { isEmailSuppressed } from './mail-compliance.service';
 import { splitSignatureText } from './letter-signature';
 import { resolveSignerName } from './signer.service';
 import {
@@ -188,15 +189,15 @@ function inferDraftAuditFailure(review?: {
 }
 
 export function humanizeTaskError(error?: { code?: string; message?: string } | null): string {
-  if (!error) return '任务执行失败';
+  if (!error) return '草稿暂未生成成功';
   const code = String(error.code ?? '');
-  if (code === 'OPENAI_TIMEOUT') return 'AI 请求超时（模型响应超过单次时限）';
-  if (code === 'OPENAI_CIRCUIT_OPEN') return 'AI 通道暂时熔断保护中（30 秒后自动探测恢复）';
-  if (code === 'OPENAI_CAPACITY') return 'AI 并发队列已满，稍后自动重试';
-  if (code === 'TASK_WORKFLOW_LIMIT') return '单次任务累计耗时或重试次数达上限';
-  if (/^OPENAI_HTTP_5\d\d$/.test(code)) return `AI 上游服务返回 ${code.replace('OPENAI_HTTP_', 'HTTP ')}（网关暂时不可用）`;
-  if (/^OPENAI_HTTP_429$/.test(code)) return 'AI 上游触发限流（HTTP 429）';
-  return error.message || code || '任务执行失败';
+  if (code === 'OPENAI_TIMEOUT') return 'AI 响应超时，系统稍后会自动重试';
+  if (code === 'OPENAI_CIRCUIT_OPEN') return 'AI 服务暂时繁忙，约 30 秒后自动恢复';
+  if (code === 'OPENAI_CAPACITY') return 'AI 排队较满，稍后自动重试';
+  if (code === 'TASK_WORKFLOW_LIMIT') return '生成耗时较长已暂停，可手动重新生成';
+  if (/^OPENAI_HTTP_5\d\d$/.test(code)) return 'AI 服务暂时不可用，稍后会自动重试';
+  if (/^OPENAI_HTTP_429$/.test(code)) return 'AI 请求频率较高，稍后会自动重试';
+  return error.message || '草稿暂未生成成功';
 }
 
 const SUPERSEDED_ARCHIVE_ERROR = '已发起重新生成并核验，原未核验草稿归档保留';
@@ -204,6 +205,106 @@ const STALE_SAVED_SEND_ERROR = '发送任务已保存，可在邮件中心查看
 const ACTIVE_LETTER_STATUSES = new Set(['draft', 'queued', 'scheduled', 'sending', 'retrying']);
 const WAITING_DELIVERY_STATUSES = new Set(['queued', 'scheduled', 'sending', 'retrying']);
 const STEP1_CAPABILITY_CATEGORIES = new Set(['company', 'product', 'faq', 'reference']);
+
+const SYSTEM_RESOLVED_REASONS = new Set([
+  '当前草稿已通过核验与发送检查',
+  '当前草稿已通过检查',
+  '重检当前草稿已通过发送检查',
+  '已拆分为短段落并重检通过',
+  '已删除未授权/不满足条件提议并重检通过',
+  '已拆分过长段落并检查通过',
+  '已移除未授权提议并检查通过',
+]);
+
+function isUncertainDeliveryLetter(letter?: { status?: string; needsReview?: boolean; error?: string } | null): boolean {
+  if (!letter || letter.status !== 'failed') return false;
+  if (letter.needsReview) return true;
+  return /投递结果未知|结果未知|不会自动重发|请核实/.test(String(letter.error ?? ''));
+}
+
+function isLegacySystemPauseReason(message?: string | null): boolean {
+  const text = String(message ?? '').trim();
+  if (!text) return false;
+  if (/人工标记为不通过|手动暂停|已手动暂停|用户暂停/.test(text)) return false;
+  return /核验|核对|依据|发送检查|自动发送|过长段落|字数|寄样|色卡|免费|运费|授权|bodyHash|partial|unverif|重新生成|模拟校验|SMTP|发送任务已保存|AI\s*(?:任务|上游|通道)|超时|熔断/i.test(text);
+}
+
+/**
+ * 严格判断一条已暂停记录是否确由系统拦停：
+ * - pauseOrigin === 'manual'：人工暂停，绝不自动恢复；
+ * - pauseOrigin === 'system'：明确由系统拦停；
+ * - 旧记录（未记录 pauseOrigin）：仅当当前 lastError 或同一步骤的 errorHistory 有明确系统拦停与通过痕迹时才认定；
+ *   查不清暂停原因的旧记录返回 'unknown'，绝不猜测恢复。
+ */
+export function resolveEnrollmentPauseOrigin(
+  row: {
+    status?: string;
+    pauseOrigin?: 'manual' | 'system';
+    pausedReason?: string;
+    lastError?: string;
+    errorHistory?: Array<{ step?: number; message?: string; resolvedReason?: string }>;
+  },
+  nextStep: number,
+): 'manual' | 'system' | 'unknown' {
+  if (row.pauseOrigin === 'manual') return 'manual';
+  if (row.pauseOrigin === 'system') return 'system';
+  if (row.pausedReason && /手动|人工/.test(row.pausedReason)) return 'manual';
+  if (isLegacySystemPauseReason(row.lastError)) return 'system';
+  const history = Array.isArray(row.errorHistory) ? row.errorHistory : [];
+  const hasSameStepSystemResolve = history.some((item) => (
+    (item.step === undefined || Number(item.step) === nextStep)
+    && isLegacySystemPauseReason(item.message)
+    && Boolean(item.resolvedReason && SYSTEM_RESOLVED_REASONS.has(item.resolvedReason))
+  ));
+  if (hasSameStepSystemResolve) return 'system';
+  return 'unknown';
+}
+
+function extractOfferHighlightExcerpts(bodyText: string): { text: string; reason: string; status: string }[] {
+  const sentences = bodyText
+    .split(/(?<=[.!?。！？])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return sentences
+    .filter((s) => FREE_PATTERN.test(s) || SHIPPING_PATTERN.test(s) || SAMPLE_PATTERN.test(s))
+    .slice(0, 3)
+    .map((s) => ({
+      text: s.slice(0, 180),
+      reason: FREE_PATTERN.test(s) || SHIPPING_PATTERN.test(s)
+        ? '包含免费或运费承诺，请确认项目授权或删除该句'
+        : '包含寄样/色卡提议，请确认项目授权或删除该句',
+      status: 'offer',
+    }));
+}
+
+function extractLongParagraphExcerpt(bodyText: string): { text: string; reason: string; status: string }[] {
+  const paragraphs = bodyText.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const longest = paragraphs
+    .map((p) => ({ text: p, words: countEnglishWords(p) }))
+    .sort((a, b) => b.words - a.words)[0];
+  if (!longest || longest.words <= 68) return [];
+  return [{
+    text: longest.text.slice(0, 180),
+    reason: `单段约 ${longest.words} 词较长，建议拆分为 2–3 个短段`,
+    status: 'layout',
+  }];
+}
+
+const WEEKDAY_ZH = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const;
+
+export function formatLocalWindowLabel(effectiveAt: Date, timezone: string, now = new Date()): string {
+  const targetDay = dayIn(timezone, effectiveAt);
+  const todayDay = dayIn(timezone, now);
+  const tomorrowDay = dayIn(timezone, new Date(now.getTime() + DAY_MS));
+  const { minutes, weekday } = localClock(timezone, effectiveAt);
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
+  const mm = String(minutes % 60).padStart(2, '0');
+  const timeText = `${hh}:${mm}`;
+  if (targetDay === todayDay) return `预计客户当地今天 ${timeText} 后发送`;
+  if (targetDay === tomorrowDay) return `预计客户当地明天 ${timeText} 后发送`;
+  const dayLabel = WEEKDAY_ZH[weekday] ?? targetDay;
+  return `预计客户当地${dayLabel} ${timeText} 后发送`;
+}
 
 function isSupersededArchiveCancellation(letter?: { status?: string; error?: string } | null): boolean {
   return Boolean(letter && letter.status === 'cancelled' && letter.error === SUPERSEDED_ARCHIVE_ERROR);
@@ -265,7 +366,7 @@ export function inspectOutreachDraftAudit(letter?: {
 export function isVerificationBlockedReason(reason?: string | null): boolean {
   if (!reason) return false;
   if (/已回复|退订|退信|拒绝|已删除|归属已变化|不在可开发状态/.test(reason)) return false;
-  return /核验|依据审核|依据已变化|模拟校验|缺少依据|partial|unverif/i.test(reason);
+  return /核验|核对|依据审核|依据已变化|模拟校验|缺少依据|缺少对应依据|与公司资料不一致|需要修改|需要人工确认|尚未确认依据|内容需要确认|partial|unverif/i.test(reason);
 }
 
 export type OutreachSendGateCode =
@@ -332,21 +433,26 @@ function classifySendGateDetail(
   if (/首封缺少已发布的我方能力依据/.test(issueMessage)) {
     return {
       code: 'missing_supplier_evidence',
-      label: '首封缺少已发布我方能力依据',
-      detail: issueMessage,
-      guidance: '首封需至少引用 1 条已发布的公司产能、资质认证、产品规格或 OEM/ODM 交付依据。请点「重新生成」（系统会自动引用已发布知识或标准卖点），如项目尚未发布此类资料请先在下方补充。',
+      label: '首封缺少公司能力介绍',
+      detail: '首封开发信至少需要包含 1 句已确认的公司产能、认证或产品优势介绍',
+      guidance: '请点「重新生成」，系统会自动带入公司标准卖点；如项目尚未录入，请先补充公司介绍资料。',
       canRecheck: true,
     };
   }
   if (/寄样\/色卡|免费承诺|运费\/快递|未授权|授权条件不满足|未获授权|已关闭/.test(issueMessage)) {
     const conditionUnmet = /条件不满足|requiresEvidence|缺少依据/.test(issueMessage);
+    const mentionsFree = /免费|包邮|运费|快递/.test(issueMessage);
     return {
       code: conditionUnmet ? 'offer_condition_unmet' : 'offer_unauthorized',
-      label: conditionUnmet ? '寄样/色卡授权条件不满足' : '免费/运费或停用提议未获授权',
-      detail: issueMessage,
-      guidance: conditionUnmet
-        ? '当前项目启用了对应授权但要求附带已发布知识依据。可直接点「删除提议后重检」移除该句，或补充依据后重新生成。'
-        : '正文包含未授权的免费/包邮/运费承诺或已停用的提议。可直接点「删除提议后重检」移除该句并立即重检。',
+      label: mentionsFree
+        ? '这封信提到了免费或运费承诺'
+        : conditionUnmet
+          ? '寄样/色卡提议缺少项目依据'
+          : '这封信提到了寄样或未开放的优惠提议',
+      detail: mentionsFree
+        ? '这封信提到了免费/包邮/运费承诺，请删掉这项提议后再检查'
+        : '这封信提到了寄样/色卡提议，请删掉这项提议或确认项目授权后再检查',
+      guidance: '可直接点「删除提议后再检查」移除相关句子，或点「查看并修改」手动调整。',
       canStripOffer: true,
       canRecheck: true,
     };
@@ -355,10 +461,10 @@ function classifySendGateDetail(
     return {
       code: 'paragraph_too_long',
       label: quality
-        ? `存在过长段落（单段 ${quality.maxParagraphWords} 词，共 ${quality.paragraphCount} 段）`
-        : '存在过长段落',
-      detail: issueMessage,
-      guidance: '可将正文按句拆分为 2–3 个短段落（不改变任何内容与承诺），可直接点「拆段并重检」或顶部一键自动修复。',
+        ? `单个段落偏长（单段 ${quality.maxParagraphWords} 词，共 ${quality.paragraphCount} 段）`
+        : '单个段落偏长',
+      detail: '单段文字过长不利于客户手机阅读，建议拆分为 2–3 个短段',
+      guidance: '可直接点「拆段后再检查」，系统会按句拆分且不改动任何内容。',
       wordCount: quality?.wordCount,
       paragraphCount: quality?.paragraphCount,
       maxParagraphWords: quality?.maxParagraphWords,
@@ -452,17 +558,17 @@ function buildDraftAuditDetail(
   if (failedChecks.length > 0) {
     const first = failedChecks[0]!;
     const statusText = first.status === 'contradicted'
-      ? '与依据冲突'
+      ? '与公司资料不一致'
       : first.status === 'unsupported'
-        ? '缺少依据（unsupported）'
-        : '无法核验（unverifiable）';
-    summary = `${completeness === 'partial' ? '仅部分核验（partial）· ' : ''}${rawFailed.length} 句未通过（${statusText}：“${first.excerpt}”${first.reason ? ` — ${first.reason}` : ''}）`;
+        ? '缺少对应依据'
+        : '需要人工确认';
+    summary = `有 ${rawFailed.length} 处内容需要修改（${statusText}：“${first.excerpt}”${first.reason ? ` — ${first.reason}` : ''}）`;
   } else if (failureInfo.failureDetail) {
-    summary = `${failureInfo.failureStageLabel ? `[${failureInfo.failureStageLabel}] ` : ''}${failureInfo.failureCategoryLabel ? `${failureInfo.failureCategoryLabel}：` : ''}${failureInfo.failureDetail}`;
+    summary = failureInfo.failureDetail;
   } else if (completeness === 'partial') {
-    summary = '核验只完成了一部分（completeness=partial），未形成完整逐项依据结论';
+    summary = '这封邮件有部分内容尚未确认依据，请检查后修改或重新生成';
   } else {
-    summary = auditReason || '正文尚未完成核验';
+    summary = auditReason || '这封邮件有内容需要确认，请检查后再发送';
   }
 
   const priorMessages = errorHistory.map((item) => item.message).filter(Boolean);
@@ -512,6 +618,7 @@ export type OutreachDraftStage =
   | 'send_gate_blocked'
   | 'waiting_delivery'
   | 'delivery_cancelled'
+  | 'delivery_uncertain'
   | 'task_failed'
   | 'delivery_failed'
   | 'none';
@@ -524,29 +631,35 @@ export interface OutreachAutomationQueueRow {
   email?: string;
   customerStatus: string;
   status: string;
+  /** 区分人工暂停、系统拦停或无法确认来源的旧暂停记录。 */
+  pauseOrigin?: 'manual' | 'system' | 'unknown';
   /** 实际已发送的开发信封数（以客户开发信记录为准）。 */
   currentStep: number;
   actualStep: number;
   nextStep: number;
   /** waiting=等待下一次；generating=准备草稿；ready=待发送；sending=发送中；due=到期待处理。 */
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
-  /** 明确区分草稿/核验/任务执行/等待投递/已取消/SMTP 投递失败阶段。 */
+  /** 明确区分草稿/核对/任务执行/等待投递/已取消/投递结果不确定/投递失败阶段。 */
   draftStage: OutreachDraftStage;
-  /** 实际邮件投递状态：等待投递 / 已取消 / 投递失败 / 已发送。 */
-  deliveryStatus?: 'waiting_delivery' | 'cancelled' | 'failed' | 'sent';
+  /** 实际邮件投递状态：等待投递 / 已取消 / 投递结果不确定 / 投递失败 / 已发送。 */
+  deliveryStatus?: 'waiting_delivery' | 'cancelled' | 'uncertain' | 'failed' | 'sent';
   draftReady: boolean;
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
   draftAuditDetail?: OutreachDraftAuditDetail;
   sendGateDetail?: OutreachSendGateDetail;
-  /** 背景资料缺口提醒（未写入正文，不拦截发送）。 */
+  /** 需要在编辑器中直接定位的高亮句子（如无依据句、未授权提议句、过长段落）。 */
+  flaggedExcerpts?: { text: string; reason: string; status?: string }[];
+  /** 背景资料提醒（未写入正文，不影响发送，不占待办）。 */
   contextWarnings?: { code: string; message: string }[];
   pausedReadyToResume?: boolean;
+  deliveryUncertain?: boolean;
   deliveryError?: string;
   failedLetterId?: string;
   cancelledLetterId?: string;
   cancelledReason?: string;
+  cancelOrigin?: string;
   isRuleStopped?: boolean;
   errorHistory?: { at: string; step?: number; message: string; resolvedAt?: string; resolvedReason?: string }[];
   draftUpdatedAt?: string;
@@ -562,6 +675,8 @@ export interface OutreachAutomationQueueRow {
   timezoneSource: 'explicit' | 'country' | 'fallback';
   recipientWindowOpen: boolean;
   nextRunAt: string;
+  /** 面向业务员的客户当地发送时间提示（如「预计客户当地明天 09:30 后发送」）。 */
+  nextSendLocalLabel?: string;
   lastError?: string;
   lastSentAt?: string;
 }
@@ -617,8 +732,11 @@ export interface OutreachAutomationOverview {
     sendGateBlockedDrafts: number;
     contextWarningDrafts: number;
     pausedReadyCount: number;
+    deliveryUncertainCount: number;
     deliveryFailedCount: number;
     deliveryCancelledCount: number;
+    /** 真正需要业务员现在处理的记录数（不含主动暂停、已取消未发送、背景资料提醒、历史失败）。 */
+    actionNeededCount: number;
     exceptionQueueCount: number;
     approvedProofBlocksCount: number;
     queuedTasks: number;
@@ -900,6 +1018,7 @@ async function ensureEnrollment(
             lastError: null,
             attempts: 0,
           },
+          $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1 },
         },
       );
     }
@@ -924,12 +1043,294 @@ async function ensureEnrollment(
   }
 }
 
-export async function getOutreachAutomationOverview(actor: AuthUser, targetUserId?: string): Promise<OutreachAutomationOverview> {
+/**
+ * 安全复查已有队列记录（适用于升级后旧记录与新任务）：
+ * 1) 系统拦停（pauseOrigin='system' 或旧记录有明确系统拦停证据）且当前草稿已通过全部检查：
+ *    只要自动开发处于开启状态、客户仍可联系（未回复/未退订/未进禁发名单）、无重复投递风险，
+ *    自动恢复到正常排程（active），遵守当地工作时间、间隔与额度；
+ *    人工暂停（pauseOrigin='manual'）或查不清暂停原因的旧记录绝不猜测恢复。
+ * 2) 已取消且确认未发送的邮件：
+ *    仅当确认属于系统临时中断（cancelOrigin='system_transient'）且仍符合跟进条件时，
+ *    自动重新准备草稿并排程；人工取消、客户已回复、权限变化或原因不明的记录保持原状态。
+ * 3) 投递结果不确定（needsReview=true / 投递结果未知）的记录：
+ *    绝不自动重发、绝不自动恢复，等待人工确认。
+ */
+export async function reconcileOutreachEnrollmentsForCampaign(
+  config: InstanceType<typeof OutreachAutomationConfig>,
+  targetActor: AuthUser,
+  now = new Date(),
+): Promise<{
+  scanned: number;
+  resumedPaused: number;
+  requeuedCancelled: number;
+  keptPausedManualOrUnknown: number;
+  keptCancelled: number;
+  keptUncertain: number;
+}> {
+  if (!config.enabled) {
+    return {
+      scanned: 0,
+      resumedPaused: 0,
+      requeuedCancelled: 0,
+      keptPausedManualOrUnknown: 0,
+      keptCancelled: 0,
+      keptUncertain: 0,
+    };
+  }
+
+  const candidateRows = await OutreachAutomationEnrollment.find({
+    projectId: config.projectId,
+    userId: config.userId,
+    campaignId: config._id,
+    status: { $in: ['paused', 'failed', 'active'] },
+  }).limit(MAX_QUEUE_ROWS);
+
+  if (candidateRows.length === 0) {
+    return {
+      scanned: 0,
+      resumedPaused: 0,
+      requeuedCancelled: 0,
+      keptPausedManualOrUnknown: 0,
+      keptCancelled: 0,
+      keptUncertain: 0,
+    };
+  }
+
+  const projectDoc = await Project.findById(config.projectId)
+    .select('code slug name companyName industry website mailFrom senderName brandProfile')
+    .lean();
+  const projectSignature = resolveProjectSalesProfile(projectDoc).signature;
+  const projectApprovedOffers = projectDoc?.brandProfile?.approvedOffers;
+
+  let resumedPaused = 0;
+  let requeuedCancelled = 0;
+  let keptPausedManualOrUnknown = 0;
+  let keptCancelled = 0;
+  let keptUncertain = 0;
+
+  for (const row of candidateRows) {
+    const customer = await Customer.findOne({
+      _id: row.customerId,
+      projectId: config.projectId,
+      ownerId: config.userId,
+    }).select('_id name status email outreachStep letterCount outreachAbandonedAt outreachRepliedAt outreachLastAt nextFollowUpAt timezone country address phone').lean();
+    if (!customer || !customer.email || !AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number]) || customer.outreachAbandonedAt || customer.outreachRepliedAt) {
+      continue;
+    }
+
+    const actualStep = Math.min(
+      MAX_AUTO_STEPS,
+      Math.max(
+        Number(customer.outreachStep ?? 0),
+        Math.min(MAX_AUTO_STEPS, Number(customer.letterCount ?? 0)),
+        Number(row.currentStep ?? 0),
+      ),
+    );
+    if (actualStep >= MAX_AUTO_STEPS) continue;
+    const nextStep = (actualStep + 1) as OutreachStep;
+
+    const stepLetters = await DevelopmentLetter.find({
+      projectId: config.projectId,
+      customerId: customer._id,
+      outreachStep: nextStep,
+      status: { $in: ['draft', 'queued', 'scheduled', 'sending', 'retrying', 'sent', 'opened', 'failed', 'cancelled'] },
+    }).sort({ createdAt: -1 }).limit(10).lean();
+
+    const nonSuperseded = stepLetters.filter((l) => !isSupersededArchiveCancellation(l));
+    // Duplicate-delivery guard: if ANY letter for this step is already sent/in-flight/uncertain, NEVER auto-resume or re-queue.
+    if (nonSuperseded.some((l) => isUncertainDeliveryLetter(l))) {
+      keptUncertain += 1;
+      continue;
+    }
+    if (nonSuperseded.some((l) => ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying'].includes(String(l.status)))) {
+      continue;
+    }
+
+    const latestLetter = nonSuperseded.find((l) => l.status === 'draft') ?? nonSuperseded[0];
+    if (!latestLetter) continue;
+
+    // Case A: System-paused enrollment whose current draft now passes ALL checks -> auto-return to normal scheduling
+    if (row.status === 'paused' && latestLetter.status === 'draft') {
+      const origin = resolveEnrollmentPauseOrigin(row, nextStep);
+      if (origin !== 'system') {
+        keptPausedManualOrUnknown += 1;
+        continue;
+      }
+      if (latestLetter.review?.decision === 'rejected') {
+        keptPausedManualOrUnknown += 1;
+        continue;
+      }
+      const audit = inspectOutreachDraftAudit(latestLetter);
+      if (audit.needsReverify) continue;
+      const sendGateIssue = automatedReviewIssue(latestLetter.knowledgeReview, nextStep, {
+        bodyText: latestLetter.contentText,
+        subject: latestLetter.subject,
+        approvedOffers: projectApprovedOffers,
+        signature: projectSignature,
+      });
+      if (sendGateIssue) continue;
+      if (!latestLetter.knowledgeReview?.bodyHash || latestLetter.knowledgeReview.bodyHash !== draftHash(latestLetter.contentText)) {
+        continue;
+      }
+      if (!latestLetter.subject?.trim() || !latestLetter.contentText?.trim() || /\{\{[^}]+\}\}/.test(latestLetter.contentText)) {
+        continue;
+      }
+      try {
+        const freshness = await knowledgeFreshness(latestLetter.knowledgeReview, targetActor);
+        if (freshness.failed || freshness.changed.length > 0) continue;
+      } catch {
+        continue;
+      }
+      // Re-verify contactability (inbound reply, protected mail, suppression) before auto-resuming
+      const replied = await hasInboundReplySince(config.projectId, customer._id, customer.outreachLastAt ?? customer.createdAt);
+      if (replied) continue;
+      if (await hasProtectedCustomerMail(String(customer._id), String(config.projectId))) continue;
+      if (await isEmailSuppressed(String(config.projectId), customer.email)) continue;
+      if (await hasActiveTask(config.projectId, customer._id, nextStep)) continue;
+
+      const buyerSchedule = config.useBuyerTimezone || customer.timezone
+        ? resolveBuyerTimezone({
+          timezone: customer.timezone,
+          country: customer.country,
+          address: customer.address,
+          phone: customer.phone,
+        }, config.timezone)
+        : { timezone: config.timezone, source: 'fallback' as const, workdays: [1, 2, 3, 4, 5] };
+      const recipientWindow = {
+        windowStart: config.windowStart,
+        windowEnd: config.windowEnd,
+        timezone: buyerSchedule.timezone,
+        workdays: buyerSchedule.workdays,
+      };
+      const followUpDue = nextStep > 1 && customer.nextFollowUpAt ? new Date(customer.nextFollowUpAt) : now;
+      const baseAt = followUpDue.getTime() > now.getTime() ? followUpDue : now;
+      const scheduledRunAt = nextSendWindow(recipientWindow, baseAt);
+
+      const updateDoc: Record<string, unknown> = {
+        $set: {
+          status: 'active',
+          currentStep: actualStep,
+          nextRunAt: scheduledRunAt,
+          attempts: 0,
+        },
+        $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1, lastError: 1 },
+      };
+      if (row.lastError) {
+        updateDoc.$push = {
+          errorHistory: {
+            $each: [{
+              at: new Date(row.updatedAt ?? now),
+              step: nextStep,
+              message: String(row.lastError),
+              resolvedAt: now,
+              resolvedReason: '当前草稿已通过检查',
+            }],
+            $slice: -20,
+          },
+        };
+      }
+      await OutreachAutomationEnrollment.updateOne(
+        { _id: row._id, status: 'paused' },
+        updateDoc,
+      );
+      resumedPaused += 1;
+      continue;
+    }
+
+    // Case B: Cancelled letter (confirmed NOT sent) due purely to system transient interruption -> safely re-prepare & schedule
+    if (latestLetter.status === 'cancelled') {
+      const cancelOrigin = latestLetter.cancelOrigin;
+      if (cancelOrigin !== 'system_transient') {
+        keptCancelled += 1;
+        continue;
+      }
+      if (row.status === 'paused' && resolveEnrollmentPauseOrigin(row, nextStep) !== 'system') {
+        keptCancelled += 1;
+        continue;
+      }
+      const replied = await hasInboundReplySince(config.projectId, customer._id, customer.outreachLastAt ?? customer.createdAt);
+      if (replied) {
+        keptCancelled += 1;
+        continue;
+      }
+      if (await hasProtectedCustomerMail(String(customer._id), String(config.projectId))) {
+        keptCancelled += 1;
+        continue;
+      }
+      if (await isEmailSuppressed(String(config.projectId), customer.email)) {
+        keptCancelled += 1;
+        continue;
+      }
+      if (await hasActiveTask(config.projectId, customer._id, nextStep)) continue;
+      // Archive the transient cancelled letter as superseded and queue fresh draft
+      await DevelopmentLetter.updateOne(
+        { _id: latestLetter._id, status: 'cancelled' },
+        { $set: { cancelOrigin: 'superseded', error: SUPERSEDED_ARCHIVE_ERROR } },
+      );
+      try {
+        const queued = await queueOutreachStep(targetActor, String(customer._id), nextStep);
+        await OutreachAutomationEnrollment.updateOne(
+          { _id: row._id },
+          {
+            $set: {
+              status: 'active',
+              currentStep: actualStep,
+              queuedStep: nextStep,
+              queuedAt: now,
+              nextRunAt: new Date(now.getTime() + 30_000),
+              attempts: 0,
+              ...(queued.taskId ? { taskIds: [...row.taskIds, new Types.ObjectId(queued.taskId)] } : {}),
+            },
+            $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1, lastError: 1 },
+          },
+        );
+        requeuedCancelled += 1;
+      } catch {
+        keptCancelled += 1;
+      }
+    }
+  }
+
+  return {
+    scanned: candidateRows.length,
+    resumedPaused,
+    requeuedCancelled,
+    keptPausedManualOrUnknown,
+    keptCancelled,
+    keptUncertain,
+  };
+}
+
+export async function reconcileOutreachCampaign(
+  actor: AuthUser,
+  targetUserId?: string,
+) {
   const target = await resolveTargetUser(actor, targetUserId);
   const config = await getConfig(actor, target.id);
+  const targetActor = await getActorForConfig(config);
+  const result = await reconcileOutreachEnrollmentsForCampaign(config, targetActor, new Date());
+  const overview = await getOutreachAutomationOverview(actor, target.id, { skipAutoReconcile: true });
+  return { ...result, overview };
+}
+
+export async function getOutreachAutomationOverview(
+  actor: AuthUser,
+  targetUserId?: string,
+  options?: { skipAutoReconcile?: boolean },
+): Promise<OutreachAutomationOverview> {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const now = new Date();
+  if (config.enabled && !options?.skipAutoReconcile) {
+    try {
+      const targetActor = await getActorForConfig(config);
+      await reconcileOutreachEnrollmentsForCampaign(config, targetActor, now);
+    } catch {
+      // Non-fatal: overview still renders even if reconciliation cannot run
+    }
+  }
   const mailbox = await getCurrentMailSender(String(requireProjectId(actor)), target.id);
   const projectFilter = { ...scope(actor, target.id), campaignId: config._id };
-  const now = new Date();
   const [rows, grouped, recentLetters, enrolledCustomerIds] = await Promise.all([
     OutreachAutomationEnrollment.find(projectFilter)
       .sort({ nextRunAt: 1, updatedAt: -1 })
@@ -982,7 +1383,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
         status: { $in: ['draft', 'queued', 'scheduled', 'sending', 'retrying', 'failed', 'cancelled'] },
       })
         .sort({ createdAt: -1 })
-        .select('_id customerId outreachStep status subject contentText error needsReview review knowledgeReview updatedAt createdAt')
+        .select('_id customerId outreachStep status subject contentText error cancelOrigin needsReview review knowledgeReview updatedAt createdAt')
         .lean()
       : Promise.resolve([]),
     queueCustomerIds.length
@@ -1071,11 +1472,13 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   let sendGateBlockedDrafts = 0;
   let contextWarningDrafts = 0;
   let pausedReadyCount = 0;
+  let deliveryUncertainCount = 0;
   let deliveryFailedCount = 0;
   let deliveryCancelledCount = 0;
   let activeFailedTasks = 0;
   let retryingTasks = 0;
   let ruleStoppedCount = 0;
+  let actionNeededCount = 0;
   let exceptionQueueCount = 0;
   const staleErrorOps: Array<{ updateOne: { filter: Record<string, unknown>; update: Record<string, unknown> } }> = [];
 
@@ -1114,18 +1517,24 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const taskInFlight = taskStatus === 'queued' || taskStatus === 'running';
     const isWaitingDelivery = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && WAITING_DELIVERY_STATUSES.has(nextLetterStatus ?? '') && !taskInFlight;
     const isDeliveryCancelled = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'cancelled' && !taskInFlight;
-    const isDeliveryFailed = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'failed' && !taskInFlight;
+    const isDeliveryUncertain = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && isUncertainDeliveryLetter(nextLetter) && !taskInFlight;
+    const isDeliveryFailed = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'failed' && !isDeliveryUncertain && !taskInFlight;
     const deliveryStatus: OutreachAutomationQueueRow['deliveryStatus'] = (row.status === 'completed' || actualStep >= MAX_AUTO_STEPS)
       ? 'sent'
       : isWaitingDelivery
         ? 'waiting_delivery'
         : isDeliveryCancelled
           ? 'cancelled'
-          : isDeliveryFailed
-            ? 'failed'
-            : undefined;
+          : isDeliveryUncertain
+            ? 'uncertain'
+            : isDeliveryFailed
+              ? 'failed'
+              : undefined;
     const cancelledReason = isDeliveryCancelled
-      ? String(nextLetter?.error || '该邮件已取消（未发送），不会再继续投递')
+      ? String(nextLetter?.error || '已取消，未发送')
+      : undefined;
+    const pauseOrigin = row.status === 'paused'
+      ? resolveEnrollmentPauseOrigin(row as Parameters<typeof resolveEnrollmentPauseOrigin>[0], nextStep)
       : undefined;
 
     const rawErrorHistory = Array.isArray((row as { errorHistory?: unknown[] }).errorHistory)
@@ -1308,6 +1717,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     if (!audit.needsReverify && audit.contextWarnings.length > 0 && nextLetterStatus === 'draft' && !taskInFlight) {
       contextWarningDrafts += 1;
     }
+    if (isDeliveryUncertain) deliveryUncertainCount += 1;
     if (isDeliveryFailed) deliveryFailedCount += 1;
     if (isDeliveryCancelled) deliveryCancelledCount += 1;
 
@@ -1336,6 +1746,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const recipientWindowOpen = isWithinSendWindow(recipientWindow, now);
     const nextRunAt = new Date(row.nextRunAt);
     const effectiveAt = nextSendWindow(recipientWindow, nextRunAt.getTime() > now.getTime() ? nextRunAt : now);
+    const nextSendLocalLabel = formatLocalWindowLabel(effectiveAt, buyerSchedule.timezone, now);
 
     let draftStage: OutreachDraftStage = 'none';
     if (row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS) {
@@ -1346,6 +1757,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       else if (nextLetterStatus === 'draft' && Boolean(rowSendGateIssue)) draftStage = 'send_gate_blocked';
       else if (isWaitingDelivery) draftStage = 'waiting_delivery';
       else if (isDeliveryCancelled) draftStage = 'delivery_cancelled';
+      else if (isDeliveryUncertain) draftStage = 'delivery_uncertain';
       else if (isDeliveryFailed) draftStage = 'delivery_failed';
       else if (!nextLetter && taskStatus === 'failed') draftStage = 'task_failed';
     }
@@ -1355,8 +1767,8 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     if (row.status === 'completed' || actualStep >= MAX_AUTO_STEPS) phase = 'completed';
     else if (taskInFlight) phase = 'generating';
     else if (isRuleStopped || row.status === 'blocked') phase = 'blocked';
-    else if (isDeliveryFailed) phase = 'failed';
-    else if (isDeliveryCancelled) phase = row.status === 'paused' ? 'paused' : 'failed';
+    else if (isDeliveryUncertain || isDeliveryFailed) phase = 'failed';
+    else if (isDeliveryCancelled) phase = 'paused';
     else if (isWaitingDelivery) phase = 'sending';
     else if (row.status === 'paused') phase = 'paused';
     else if (row.status === 'failed') phase = 'failed';
@@ -1368,21 +1780,42 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     else if (taskStatus && taskStatus !== 'failed') phase = 'generating';
     else phase = 'due';
 
-    const rowNeedsAttention = Boolean(
+    // 「需要你处理」只计算真正需要人工操作的记录：
+    // - 草稿内容需要修改（draft_audit_failed / send_gate_blocked）
+    // - 投递结果不确定（delivery_uncertain，需业务员确认是否已发出）
+    // - 投递失败（delivery_failed）或生成任务失败（task_failed / status=failed）
+    // 明确排除：业务员主动暂停、已取消未发送、背景资料提醒、正常按规则停止、等待当地工作时间。
+    const rowNeedsAction = Boolean(
       !isRuleStopped
       && row.status !== 'completed'
       && !taskInFlight
       && (
         draftStage === 'draft_audit_failed'
         || draftStage === 'send_gate_blocked'
-        || draftStage === 'task_failed'
+        || draftStage === 'delivery_uncertain'
         || draftStage === 'delivery_failed'
-        || draftStage === 'delivery_cancelled'
+        || draftStage === 'task_failed'
         || row.status === 'failed'
-        || (row.status === 'paused' && !pausedReadyToResume)
       ),
     );
-    if (rowNeedsAttention) exceptionQueueCount += 1;
+    if (rowNeedsAction) {
+      actionNeededCount += 1;
+      exceptionQueueCount += 1;
+    }
+
+    let flaggedExcerpts: { text: string; reason: string; status?: string }[] | undefined;
+    if (draftStage === 'draft_audit_failed' && draftAuditDetail?.failedChecks?.length) {
+      flaggedExcerpts = draftAuditDetail.failedChecks
+        .filter((c) => Boolean(c.excerpt))
+        .map((c) => ({ text: c.excerpt, reason: c.reason, status: c.status }));
+    } else if (draftStage === 'send_gate_blocked' && nextLetter?.contentText) {
+      const cleanBody = splitSignatureText(nextLetter.contentText, projectSignature).body;
+      if (sendGateDetail?.code === 'offer_unauthorized' || sendGateDetail?.code === 'offer_condition_unmet') {
+        flaggedExcerpts = extractOfferHighlightExcerpts(cleanBody);
+      } else if (sendGateDetail?.code === 'paragraph_too_long') {
+        flaggedExcerpts = extractLongParagraphExcerpt(cleanBody);
+      }
+    }
 
     const taskStep = latestTask?.currentStep ? String(latestTask.currentStep) : undefined;
     const taskErrorCode = latestTask?.status === 'failed' && latestTask.error?.code ? String(latestTask.error.code) : undefined;
@@ -1400,6 +1833,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       ...(customer?.email ? { email: customer.email } : {}),
       customerStatus: customer?.status ?? '',
       status: row.status,
+      ...(pauseOrigin ? { pauseOrigin } : {}),
       currentStep: actualStep,
       actualStep,
       nextStep,
@@ -1411,15 +1845,22 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       ...(draftBlockedFromAutoSend && !taskInFlight ? { draftNeedsReverify: true, draftAuditReason } : {}),
       ...(draftAuditDetail ? { draftAuditDetail } : {}),
       ...(sendGateDetail && !taskInFlight ? { sendGateDetail } : {}),
+      ...(flaggedExcerpts?.length ? { flaggedExcerpts } : {}),
       ...(audit.contextWarnings.length > 0 && nextLetterStatus === 'draft' && !taskInFlight ? { contextWarnings: audit.contextWarnings } : {}),
       ...(pausedReadyToResume ? { pausedReadyToResume: true } : {}),
+      ...(isDeliveryUncertain ? {
+        deliveryUncertain: true,
+        failedLetterId: String(nextLetter?._id),
+        deliveryError: String(nextLetter?.error || '发送期间中断，投递结果不确定；确认前系统不会自动重发'),
+      } : {}),
       ...(isDeliveryFailed ? {
         failedLetterId: String(nextLetter?._id),
-        deliveryError: String(nextLetter?.error || 'SMTP 投递失败'),
+        deliveryError: String(nextLetter?.error || '邮件投递失败'),
       } : {}),
       ...(isDeliveryCancelled ? {
         cancelledLetterId: String(nextLetter?._id),
         cancelledReason,
+        ...(nextLetter?.cancelOrigin ? { cancelOrigin: String(nextLetter.cancelOrigin) } : {}),
       } : {}),
       ...(isRuleStopped ? { isRuleStopped: true } : {}),
       ...(errorHistoryDto.length ? { errorHistory: errorHistoryDto.slice(-5) } : {}),
@@ -1434,6 +1875,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       timezoneSource: buyerSchedule.source,
       recipientWindowOpen,
       nextRunAt: effectiveAt.toISOString(),
+      nextSendLocalLabel,
       ...(effectiveLastError ? { lastError: effectiveLastError } : {}),
       ...(row.lastSentAt ? { lastSentAt: new Date(row.lastSentAt).toISOString() } : {}),
     };
@@ -1473,8 +1915,10 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       sendGateBlockedDrafts,
       contextWarningDrafts,
       pausedReadyCount,
+      deliveryUncertainCount,
       deliveryFailedCount,
       deliveryCancelledCount,
+      actionNeededCount,
       exceptionQueueCount,
       approvedProofBlocksCount,
       queuedTasks: taskTotals.queued ?? 0,
@@ -1718,13 +2162,14 @@ export async function pauseOutreachAutomation(
 ): Promise<OutreachAutomationOverview> {
   const target = await resolveTargetUser(actor, targetUserId);
   const config = await getConfig(actor, target.id);
+  const now = new Date();
   await OutreachAutomationConfig.updateOne(
     { _id: config._id },
     { $set: { enabled: false, pausedReason: reason }, $inc: { version: 1 } },
   );
   await OutreachAutomationEnrollment.updateMany(
     { campaignId: config._id, status: 'active' },
-    { $set: { status: 'paused', nextRunAt: new Date() } },
+    { $set: { status: 'paused', pauseOrigin: 'manual', pausedAt: now, pausedReason: reason, nextRunAt: now } },
   );
   return getOutreachAutomationOverview(actor, target.id);
 }
@@ -1739,7 +2184,10 @@ export async function resumeOutreachAutomation(actor: AuthUser, targetUserId?: s
   );
   await OutreachAutomationEnrollment.updateMany(
     { campaignId: config._id, status: 'paused' },
-    { $set: { status: 'active', nextRunAt: new Date(), lastError: null } },
+    {
+      $set: { status: 'active', nextRunAt: new Date(), lastError: null },
+      $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1 },
+    },
   );
   return getOutreachAutomationOverview(actor, target.id);
 }
@@ -1760,16 +2208,17 @@ export async function controlOutreachEnrollment(
   if (!enrollment) throw ApiError.notFound('自动开发队列项不存在');
   if (action === 'pause') {
     if (enrollment.status === 'active') {
+      const now = new Date();
       await OutreachAutomationEnrollment.updateOne(
         { _id: enrollment._id, status: 'active' },
-        { $set: { status: 'paused', nextRunAt: new Date() } },
+        { $set: { status: 'paused', pauseOrigin: 'manual', pausedAt: now, pausedReason: '业务员手动暂停', nextRunAt: now } },
       );
     }
   } else {
-    if (!config.enabled) throw ApiError.conflict('自动开发已暂停，请先恢复总开关（或点击「重新生成」先完成草稿核验）');
+    if (!config.enabled) throw ApiError.conflict('自动开发已暂停，请先开启自动开发总开关');
     const canRecoverBlocked = enrollment.status === 'blocked' && isVerificationBlockedReason(enrollment.lastError);
     if (!['paused', 'failed'].includes(enrollment.status) && !canRecoverBlocked) {
-      throw ApiError.conflict('当前队列项不能恢复');
+      throw ApiError.conflict('当前客户不在可继续跟进的状态');
     }
     // If the current next-step draft is unverified/partial, supersede it and queue a fresh verified draft
     // instead of looping back into the exact same verification block.
@@ -1778,7 +2227,10 @@ export async function controlOutreachEnrollment(
     if (!regen.queued) {
       await OutreachAutomationEnrollment.updateOne(
         { _id: enrollment._id },
-        { $set: { status: 'active', nextRunAt: new Date(), lastError: null, attempts: 0 } },
+        {
+          $set: { status: 'active', nextRunAt: new Date(), lastError: null, attempts: 0 },
+          $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1 },
+        },
       );
     }
   }
@@ -1872,7 +2324,8 @@ async function supersedeUnverifiedDraftAndRequeue(
       {
         $set: {
           status: 'cancelled',
-          error: '已发起重新生成并核验，原未核验草稿归档保留',
+          cancelOrigin: 'superseded',
+          error: SUPERSEDED_ARCHIVE_ERROR,
         },
         $push: { history: { at: now, status: 'cancelled' } },
       },
@@ -1912,24 +2365,32 @@ async function supersedeUnverifiedDraftAndRequeue(
   // CRITICAL SAFETY RULE: when config.enabled === false (paused), NEVER auto-enable or auto-send!
   // Keep enrollment paused so the operator can inspect the freshly verified drafts before resuming.
   if (config.enabled) {
-    await markEnrollment(enrollment._id, {
-      status: 'active',
-      currentStep: step,
-      queuedStep: nextStep,
-      queuedAt: now,
-      nextRunAt: new Date(now.getTime() + 30_000),
-      lastError: null,
-      attempts: 0,
-      taskIds: nextTaskIds,
-    });
+    await OutreachAutomationEnrollment.updateOne(
+      { _id: enrollment._id },
+      {
+        $set: {
+          status: 'active',
+          currentStep: step,
+          queuedStep: nextStep,
+          queuedAt: now,
+          nextRunAt: new Date(now.getTime() + 30_000),
+          lastError: null,
+          attempts: 0,
+          taskIds: nextTaskIds,
+        },
+        $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1 },
+      },
+    );
   } else {
     await markEnrollment(enrollment._id, {
       status: 'paused',
+      pauseOrigin: enrollment.pauseOrigin ?? 'system',
+      pausedAt: enrollment.pausedAt ?? now,
       currentStep: step,
       queuedStep: nextStep,
       queuedAt: now,
       nextRunAt: now,
-      lastError: '已提交重新生成并核验（正式发送仍保持暂停）',
+      lastError: '已提交重新生成（自动开发总开关仍处于暂停状态）',
       attempts: 0,
       taskIds: nextTaskIds,
     });
@@ -2670,6 +3131,7 @@ export type OutreachSendReadinessStatus =
   | 'waiting_buyer_window'
   | 'waiting_delivery'
   | 'delivery_cancelled'
+  | 'delivery_uncertain'
   | 'blocked_by_send_gate'
   | 'blocked_by_audit'
   | 'delivery_failed'
@@ -3015,8 +3477,19 @@ export async function getOutreachEnrollmentDiagnostics(
   } else if (latestDraft?.status === 'cancelled') {
     sendReadiness = {
       status: 'delivery_cancelled',
-      label: `第 ${nextStep} 封邮件已取消（未发送）`,
-      detail: String(latestDraft.error || '该邮件已取消，不会再继续投递；如需重发，请点击「单条试跑」重新生成并核验。'),
+      label: '已取消，未发送',
+      detail: String(latestDraft.error || '这封邮件已取消且确认未发送；如需继续跟进，可点击「重新安排」。'),
+      auditPassed: true,
+      sendGatePassed: false,
+      sendGateIssues: [],
+      waitingForWindow: !windowOpen,
+      waitingForSchedule,
+    };
+  } else if (isUncertainDeliveryLetter(latestDraft)) {
+    sendReadiness = {
+      status: 'delivery_uncertain',
+      label: '请确认这封邮件是否已发出 · 确认前不会重发',
+      detail: String(latestDraft?.error || '发送期间发生中断，系统无法确认收件人是否已收到。请先打开「查看发件记录」核对发件箱，确认前系统绝不会自动重发。'),
       auditPassed: true,
       sendGatePassed: false,
       sendGateIssues: [],
@@ -3026,8 +3499,8 @@ export async function getOutreachEnrollmentDiagnostics(
   } else if (latestDraft?.status === 'failed') {
     sendReadiness = {
       status: 'delivery_failed',
-      label: `第 ${nextStep} 封邮件投递失败（SMTP）`,
-      detail: String(latestDraft.error || '邮件投递失败（SMTP 拒绝或发送异常）；此项属于投递失败，不是草稿核验失败，请到开发信/邮件记录排查邮箱后处理。'),
+      label: `第 ${nextStep} 封邮件未能发出`,
+      detail: String(latestDraft.error || '邮件投递失败，客户未收到这封邮件；请检查收件人邮箱或发件记录后再决定是否重新安排。'),
       auditPassed: true,
       sendGatePassed: false,
       sendGateIssues: [],
@@ -3425,7 +3898,13 @@ async function processEnrollment(
     return { sent: false };
   }
   if (draft.review?.decision === 'rejected') {
-    await markEnrollment(enrollment._id, { status: 'paused', lastError: '草稿已被人工标记为不通过，自动发送已暂停' });
+    await markEnrollment(enrollment._id, {
+      status: 'paused',
+      pauseOrigin: 'manual',
+      pausedAt: now,
+      pausedReason: '草稿已被人工标记为不通过',
+      lastError: '草稿已被人工标记为不通过，自动发送已暂停',
+    });
     return { sent: false };
   }
   if (draft.needsReview) {
@@ -3437,7 +3916,13 @@ async function processEnrollment(
     return { sent: false };
   }
   if (draft.knowledgeReview.bodyHash && draftHash(draft.contentText) !== draft.knowledgeReview.bodyHash) {
-    await markEnrollment(enrollment._id, { status: 'paused', lastError: '草稿内容在生成后发生变化，自动发送已暂停' });
+    await markEnrollment(enrollment._id, {
+      status: 'paused',
+      pauseOrigin: 'system',
+      pausedAt: now,
+      pausedReason: '草稿内容在生成后发生变化',
+      lastError: '草稿内容在生成后发生变化，自动发送已暂停',
+    });
     return { sent: false };
   }
   if (!draft.subject?.trim() || !draft.contentText?.trim() || /\{\{[^}]+\}\}/.test(draft.contentText)) {
@@ -3585,6 +4070,9 @@ async function processEnrollment(
     const message = error instanceof Error ? error.message : '自动发送失败';
     await markEnrollment(enrollment._id, {
       status: 'paused',
+      pauseOrigin: 'system',
+      pausedAt: now,
+      pausedReason: message.slice(0, 300),
       lastError: message,
       nextRunAt: new Date(now.getTime() + 10 * 60_000),
     });
@@ -3614,7 +4102,7 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
         );
         await OutreachAutomationEnrollment.updateMany(
           { campaignId: config._id, status: 'active' },
-          { $set: { status: 'paused', nextRunAt: now } },
+          { $set: { status: 'paused', pauseOrigin: 'system', pausedAt: now, pausedReason: error instanceof Error ? error.message : '账号或项目不可用', nextRunAt: now } },
         );
         continue;
       }
@@ -3626,7 +4114,7 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
           $set: { enabled: false, pausedReason: risk }, $inc: { version: 1 },
         });
         await OutreachAutomationEnrollment.updateMany({ campaignId: config._id, status: 'active' }, {
-          $set: { status: 'paused', nextRunAt: now },
+          $set: { status: 'paused', pauseOrigin: 'system', pausedAt: now, pausedReason: risk, nextRunAt: now },
         });
         return;
       }
@@ -3644,10 +4132,13 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
         );
         await OutreachAutomationEnrollment.updateMany(
           { campaignId: config._id, status: 'active' },
-          { $set: { status: 'paused', nextRunAt: now } },
+          { $set: { status: 'paused', pauseOrigin: 'system', pausedAt: now, pausedReason: mailbox.reason || '个人发件邮箱不可用', nextRunAt: now } },
         );
         return;
       }
+
+      // Safe sweep for previously system-paused / transient-cancelled records so existing records recover cleanly
+      await reconcileOutreachEnrollmentsForCampaign(config, actor, now).catch(() => undefined);
 
       const allowSend = isWithinSendWindow(configDto(config), now);
       const today = await OutreachAutomationDay.findOne({

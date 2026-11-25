@@ -7,7 +7,6 @@ import {
   Clock,
   Download,
   FileText,
-  Hash,
   Image as ImageIcon,
   Loader2,
   Mail,
@@ -327,7 +326,8 @@ export function CustomerReplyMailButton({
     }
   }, [customerId]);
 
-  if (status !== 'replied' && !mailId) return null;
+  const hasLikelyReplies = ['replied', 'interested', 'quoting', 'negotiating', 'won'].includes(status);
+  if (!hasLikelyReplies && !mailId) return null;
 
   const visibleItems = mailId ? items.filter((mail) => mail.id === mailId) : items;
   const firstMail = visibleItems[0];
@@ -410,9 +410,6 @@ export function CustomerReplyMailButton({
                       </MetaRow>
                       <MetaRow icon={<Clock className="h-3.5 w-3.5" aria-hidden />} label="收到时间：">
                         {formatDateTime(mail.sentAt)}
-                      </MetaRow>
-                      <MetaRow icon={<Hash className="h-3.5 w-3.5" aria-hidden />} label="Message-ID：">
-                        <span className="break-all font-mono text-2xs">{mail.messageId || '—'}</span>
                       </MetaRow>
                     </dl>
 

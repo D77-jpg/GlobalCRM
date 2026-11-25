@@ -103,6 +103,18 @@ export function LettersPage(): React.JSX.Element {
   );
 
   const openLetterInDialog = React.useCallback(async (letter: DevelopmentLetter) => {
+    if (letter.needsReview) {
+      toast.warning('投递结果未知，暂不能重发', {
+        description: '请先在邮件中心核对发件记录并确认是否已发出。',
+      });
+      return;
+    }
+    if (['queued', 'scheduled', 'sending', 'retrying'].includes(letter.status)) {
+      toast.info('这封邮件正在排队或发送中', {
+        description: '如需修改，请先到邮件中心取消待发任务。',
+      });
+      return;
+    }
     setViewOpen(false);
     setPreparing(true);
     try {
@@ -114,7 +126,7 @@ export function LettersPage(): React.JSX.Element {
       setResendTarget(fullLetter);
       setSendOpen(true);
     } catch (caught) {
-      toast.error('无法准备邮件弹窗', {
+      toast.error('无法打开邮件编辑页', {
         description: toErrorMessage(caught, '客户或草稿信息加载失败，可能已被删除'),
       });
     } finally {
@@ -161,12 +173,24 @@ export function LettersPage(): React.JSX.Element {
 
   const confirmBulkDelete = React.useCallback(async () => {
     if (selectedIds.length === 0) return;
+    const requested = selectedIds.length;
     try {
       const result = await bulkDelete(selectedIds);
-      if (result) toast.success(`已删除 ${result.deleted} 条开发信记录`);
+      if (result) {
+        const skipped = Math.max(0, requested - result.deleted);
+        if (result.deleted === 0) {
+          toast.warning('未删除任何记录', { description: '所选记录均处于发送中或投递结果待确认，已自动跳过。' });
+        } else if (skipped > 0) {
+          toast.warning(`已删除 ${result.deleted} 条，跳过 ${skipped} 条`, {
+            description: '跳过的记录处于发送中或投递结果待确认，暂不允许删除。',
+          });
+        } else {
+          toast.success(`已删除 ${result.deleted} 条开发信记录`);
+        }
+      }
       setBulkDeleteOpen(false);
     } catch (caught) {
-      toast.error('批量删除失败', { description: caught instanceof Error ? caught.message : String(caught) });
+      toast.error('批量删除失败', { description: toErrorMessage(caught, '请稍后重试') });
     }
   }, [selectedIds, bulkDelete]);
 
@@ -254,7 +278,7 @@ export function LettersPage(): React.JSX.Element {
           </SelectContent>
         </Select>
 
-        {preparing ? <span className="text-xs text-muted-foreground">正在准备重新发送…</span> : null}
+        {preparing ? <span className="text-xs text-muted-foreground">正在打开邮件编辑页…</span> : null}
       </WorkspaceToolbar>
 
       {/* ---------------------------- 表格 ---------------------------- */}

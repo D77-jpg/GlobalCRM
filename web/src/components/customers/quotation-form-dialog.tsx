@@ -185,10 +185,16 @@ export function QuotationFormDialog({
         const payload = toPayload(values);
         if (quotation) {
           await updateQuotation(customerId, quotation.id, payload);
-          toast.success('报价单已更新');
+          toast.success(
+            payload.status === 'sent' ? '报价单已更新（未自动发邮件给客户）' : '报价单已更新',
+            { description: payload.status === 'sent' ? '如需发送给客户，请下载 PDF 或在邮件中附上报价。' : undefined },
+          );
         } else {
           await createQuotation(customerId, payload);
-          toast.success('报价单已创建');
+          toast.success(
+            payload.status === 'sent' ? '报价单已创建（未自动发邮件给客户）' : '报价单已创建',
+            { description: payload.status === 'sent' ? '如需发送给客户，请下载 PDF 或在邮件中附上报价。' : undefined },
+          );
         }
         onSaved?.();
         onOpenChange(false);

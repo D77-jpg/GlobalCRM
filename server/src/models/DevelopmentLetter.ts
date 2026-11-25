@@ -113,6 +113,8 @@ export interface IDevelopmentLetter {
     }[];
   };
   history: { at: Date; status: string; error?: string }[];
+  /** 取消来源：manual=人工取消 / system_transient=系统临时中断 / rule_stop=客户回复退订等规则停止 / permission=权限变更 / superseded=重建归档 */
+  cancelOrigin?: 'manual' | 'system_transient' | 'rule_stop' | 'permission' | 'superseded';
   /** 发送失败原因 */
   error?: string;
   /** 发送人 */
@@ -242,6 +244,10 @@ const DevelopmentLetterSchema = new Schema<IDevelopmentLetter>(
       },
     },
     history: { type: [{ at: Date, status: String, error: String }], default: [] },
+    cancelOrigin: {
+      type: String,
+      enum: ['manual', 'system_transient', 'rule_stop', 'permission', 'superseded'],
+    },
     error: { type: String, trim: true, maxlength: 2000 },
     sentBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },

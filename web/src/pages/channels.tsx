@@ -300,9 +300,11 @@ export function ChannelsPage(): React.JSX.Element {
         await navigator.clipboard.writeText(text).catch(() => undefined);
       }
       if (res.apiError) {
-        toast.error(`API 发送失败：${res.apiError}`);
+        toast.error('WhatsApp 发送未成功，消息内容已保存', {
+          description: '你可以先复制内容手动发出，或联系管理员检查 WhatsApp 连接配置。',
+        });
       } else if (res.apiDelivered) {
-        toast.success('已通过 WhatsApp Cloud API 发出并同步至客户时间线');
+        toast.success('已通过 WhatsApp 发出并同步至客户时间线');
       } else if (composerDirection === 'outbound') {
         toast.success(opts.copyAfter ? '已复制英文回复并记录到会话与客户时间线' : '已记录回复到会话');
       } else {
@@ -367,10 +369,12 @@ export function ChannelsPage(): React.JSX.Element {
         conversationsTouched: number;
       }>('/channels/alibaba/sync-from-mail', { limit: 200 });
       if (res.imported > 0) {
-        toast.success(`已同步 ${res.imported} 条阿里询盘（归入 ${res.conversationsTouched} 个会话）`);
+        toast.success(`已同步 ${res.imported} 条新阿里询盘（归入 ${res.conversationsTouched} 个会话）`, {
+          description: res.skipped > 0 ? `跳过 ${res.skipped} 条已同步记录` : undefined,
+        });
         setChannelFilter('alibaba');
       } else if (res.scanned > 0) {
-        toast.info(`已扫描 ${res.scanned} 封阿里通知邮件，全部询盘均已同步`);
+        toast.info(`已扫描 ${res.scanned} 封阿里通知邮件，全部询盘均已同步（跳过 ${res.skipped} 条）`);
       } else {
         toast.info('当前项目邮箱暂无阿里国际站询盘通知邮件');
       }
@@ -911,7 +915,21 @@ export function ChannelsPage(): React.JSX.Element {
                       </div>
                       <dl className="grid grid-cols-2 gap-2 border-t border-border pt-3">
                         <div><dt className="text-muted-foreground">国家/地区</dt><dd className="font-medium">{detail.customer.country || '—'}</dd></div>
-                        <div><dt className="text-muted-foreground">销售阶段</dt><dd className="font-medium">{detail.customer.status}</dd></div>
+                        <div>
+                          <dt className="text-muted-foreground">销售阶段</dt>
+                          <dd className="font-medium">
+                            {({
+                              pending: '待开发',
+                              contacted: '已联系',
+                              replied: '已回复',
+                              interested: '有意向',
+                              quoting: '报价中',
+                              negotiating: '谈判中',
+                              won: '已成交',
+                              lost: '已流失',
+                            } as Record<string, string>)[detail.customer.status] ?? detail.customer.status}
+                          </dd>
+                        </div>
                         <div><dt className="text-muted-foreground">邮箱</dt><dd className="font-medium">{detail.customer.email || '—'}</dd></div>
                         <div><dt className="text-muted-foreground">电话 / WhatsApp</dt><dd className="font-medium">{detail.customer.phone || '—'}</dd></div>
                       </dl>
@@ -958,7 +976,9 @@ export function ChannelsPage(): React.JSX.Element {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-mono font-semibold">{q.quotationNo}</span>
-                            <Badge variant="outline">{q.status}</Badge>
+                            <Badge variant="outline">
+                              {({ draft: '草稿', sent: '已发送', negotiating: '谈判中', accepted: '已接受', rejected: '已拒绝', expired: '已过期' } as Record<string, string>)[q.status] ?? q.status}
+                            </Badge>
                             {q.incoterm ? <Badge variant="secondary">{q.incoterm}</Badge> : null}
                           </div>
                           <p className="mt-1 text-muted-foreground">

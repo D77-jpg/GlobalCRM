@@ -146,7 +146,7 @@ export function MailCopilotPane({
       });
       setResult(res);
       switchVersion(res.duelWinner, res);
-      toast.success(res.usedAi ? '三版回复与护栏审稿已生成' : '已基于对外口径生成确定性知识库草稿');
+      toast.success(res.usedAi ? '已生成 3 版回复建议并完成风险检查' : '已按公司对外口径生成标准回复草稿');
     } catch (e) {
       toast.error(toErrorMessage(e, '起草失败'));
     } finally {
@@ -166,9 +166,9 @@ export function MailCopilotPane({
         threadSubject: effectiveSubject.slice(0, 450),
       });
       setLiveScore(res.score);
-      toast.success(`护栏复检完成：${res.score.score} 分`);
+      toast.success(`发送前风险检查完成：${res.score.score} 分`);
     } catch (e) {
-      toast.error(toErrorMessage(e));
+      toast.error('发送前风险检查失败', { description: toErrorMessage(e) });
     }
   };
 
@@ -186,7 +186,7 @@ export function MailCopilotPane({
       setEditedBody(res.body);
       setZhPreview(res.zh);
       setLiveScore(res.score);
-      toast.success('已按所选语气改写并完成护栏检查');
+      toast.success('已按所选语气改写并完成发送前检查');
     } catch (e) {
       toast.error(toErrorMessage(e, '语气改写失败'));
     } finally {
@@ -272,7 +272,7 @@ export function MailCopilotPane({
         const text = (await file.text()).slice(0, 12000);
         next.push({ name: file.name, status: 'read', text, note: '文本已解析' });
       } else if (['png', 'jpg', 'jpeg', 'webp', 'pdf'].includes(ext)) {
-        next.push({ name: file.name, status: 'binary', note: '图片/PDF 需视觉模型或人工补录文字，AI 不得假装读过' });
+        next.push({ name: file.name, status: 'binary', note: '图片/PDF 暂无法自动读取文字，请手动补充关键信息' });
       } else if (['ai', 'eps', 'psd', 'svg', 'dwg', 'step'].includes(ext)) {
         next.push({ name: file.name, status: 'partial', note: '设计源文件已登记，系统不解析内容' });
       } else {
@@ -284,8 +284,12 @@ export function MailCopilotPane({
 
   const copyBody = async () => {
     if (!editedBody.trim()) return;
-    await navigator.clipboard.writeText(editedBody);
-    toast.success('已复制英文回复正文');
+    try {
+      await navigator.clipboard.writeText(editedBody);
+      toast.success('已复制英文回复正文');
+    } catch {
+      toast.error('复制失败，请手动选中正文复制');
+    }
   };
 
   const checks = liveScore?.checks ?? [];
@@ -296,7 +300,7 @@ export function MailCopilotPane({
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
         <div className="flex items-center gap-1.5">
           <Sparkles className="h-4 w-4 text-primary" />
-          <span className="text-xs font-semibold">{mode === 'mail' ? 'AI 回复副驾驶（三版 + 护栏）' : '多渠道询盘快贴工作台'}</span>
+          <span className="text-xs font-semibold">{mode === 'mail' ? 'AI 回复副驾驶' : '多渠道询盘快贴工作台'}</span>
         </div>
         <Button size="sm" className="h-7 text-xs" loading={loading} onClick={() => void generateDrafts()}>
           {result ? '重新起草' : '生成三版草稿'}
@@ -329,11 +333,11 @@ export function MailCopilotPane({
             <div className="flex flex-wrap items-center gap-2">
               <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => void handleAttachFiles(e.target.files)} />
               <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => fileRef.current?.click()}>
-                <Upload className="h-3 w-3" />添加附件（状态分级）
+                <Upload className="h-3 w-3" />添加客户附件
               </Button>
               {attachments.map((a, idx) => (
                 <Badge key={idx} variant={a.status === 'read' ? 'outline' : 'warning'} className="text-[10px]">
-                  {a.name} · {a.status}
+                  {a.name} · {a.status === 'read' ? '已读取文本' : a.status === 'partial' ? '已登记设计稿' : a.status === 'binary' ? '图片/PDF' : '未解析'}
                 </Badge>
               ))}
             </div>
@@ -550,7 +554,9 @@ export function MailCopilotPane({
                     <li key={i} className="flex items-start justify-between gap-2 border-t border-border/50 pt-1 first:border-0 first:pt-0">
                       <span className="text-foreground/90">{q.zh || q.text}</span>
                       <Badge variant={q.handling === 'CHECKING' ? 'warning' : 'outline'} className="shrink-0 text-[9px]">
-                        {q.handling} · {q.ownerRole}
+                        {({ CHECKING: '待内部核实', ASKED: '待向客户确认', ANSWERED: '已回复', DEFERRED: '后续跟进' } as Record<string, string>)[q.handling] ?? q.handling}
+                        {' · '}
+                        {({ Sales: '销售', sales: '销售', Costing: '核算', costing: '核算', Engineering: '工程', engineering: '工程', QC: '质检', qc: '质检', Logistics: '物流', logistics: '物流', Customs: '关务', customs: '关务', Management: '管理层', management: '管理层' } as Record<string, string>)[q.ownerRole] ?? q.ownerRole}
                       </Badge>
                     </li>
                   ))}
@@ -561,10 +567,14 @@ export function MailCopilotPane({
             {learned.length > 0 ? (
               <div className="rounded-lg border border-emerald-300/60 bg-emerald-50/40 p-2.5 dark:border-emerald-500/20 dark:bg-emerald-500/5">
                 <p className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300">
-                  <BookOpen className="h-3.5 w-3.5" />终稿反哺提炼（{learned.length} 条）
+                  <BookOpen className="h-3.5 w-3.5" />已提取团队话术经验（{learned.length} 条）
                 </p>
                 <ul className="mt-1 space-y-1 text-[11px]">
-                  {learned.map((c, idx) => <li key={idx}>· [{c.type}] {c.text}（{c.why}）</li>)}
+                  {learned.map((c, idx) => (
+                    <li key={idx}>
+                      · [{({ writing_rule: '写作规范', redline: '禁用红线', policy: '对外口径', tone: '语气习惯' } as Record<string, string>)[c.type] ?? c.type}] {c.text}（{c.why}）
+                    </li>
+                  ))}
                 </ul>
               </div>
             ) : null}
@@ -579,14 +589,14 @@ export function MailCopilotPane({
             <Copy className="h-3 w-3" />复制
           </Button>
           <Button size="sm" variant="outline" className="h-7 text-xs" loading={learning} onClick={() => void runLearnFromEdit()}>
-            <BookOpen className="h-3 w-3" />终稿学习
+            <BookOpen className="h-3 w-3" />提取修改经验
           </Button>
           {onApplyReply ? (
             <Button
               size="sm"
               className="ml-auto h-7 text-xs"
               disabled={badChecks.length > 0}
-              title={badChecks.length > 0 ? '请先修复红色护栏问题' : undefined}
+              title={badChecks.length > 0 ? '请先处理标红的风险项' : undefined}
               onClick={() => onApplyReply({ subject: editedSubject, content: editedBody, zh: zhPreview || undefined })}
             >
               <Send className="h-3 w-3" />{applyLabel}

@@ -170,7 +170,9 @@ export function ProjectsPage(): React.JSX.Element {
       setEditingId(null);
       setOpen(false);
     } catch (error) {
-      toast.error('创建失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+      toast.error(editingId ? '项目资料更新失败' : '项目创建失败', {
+        description: error instanceof Error ? error.message : '请稍后重试',
+      });
     } finally { setSaving(false); }
   };
 
@@ -179,7 +181,9 @@ export function ProjectsPage(): React.JSX.Element {
       await updateProject(id, { status: archived ? 'active' : 'archived' });
       toast.success(archived ? '项目已恢复' : '项目已归档');
     } catch (error) {
-      toast.error('操作失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+      toast.error(archived ? '恢复项目失败' : '归档项目失败', {
+        description: error instanceof Error ? error.message : '请稍后重试',
+      });
     }
   };
 
@@ -192,7 +196,7 @@ export function ProjectsPage(): React.JSX.Element {
       setDeleteTarget(null);
       setDeleteConfirm('');
     } catch (error) {
-      toast.error('删除失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+      toast.error('删除项目失败', { description: error instanceof Error ? error.message : '请稍后重试' });
     } finally { setDeleting(false); }
   };
 

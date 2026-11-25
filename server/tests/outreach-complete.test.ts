@@ -1008,7 +1008,7 @@ test('Section 8: admin can batch-reverify a paused rep unverified/partial drafts
 
     // 3. Admin batch-reverifies rep's unverified drafts while campaign stays PAUSED
     const res = await reverifyUnverifiedOutreachDrafts(actorA, {}, rep.id);
-    assert.equal(res.queued, 2);
+    assert.equal(res.queued, 2, `Expected 2 queued, skippedDetails=${JSON.stringify(res.skippedDetails)}`);
     assert.equal(res.taskIds.length, 2);
     assert.equal(res.overview.config.enabled, false, 'Formal sending must remain paused');
 
@@ -1586,6 +1586,7 @@ test('P1-A/P1-B: circuit-breaker never burns customer retries, selective recover
       userId: rep._id,
       customerId: custPausedReady._id,
       status: 'paused',
+      pauseOrigin: 'manual',
       currentStep: 0,
       nextRunAt: new Date(Date.now() + 60_000),
       lastError: '第 3 封字数超限（95/103 词）',
@@ -2407,5 +2408,364 @@ test('Section 10: Grounding & Delivery Polish (Items 1-7: context gaps vs body a
       'paused',
       'Batch auto-fix must NEVER auto-resume paused queue',
     );
+  });
+});
+
+test('Section 12: safe auto-resume of system pauses, cancelOrigin recovery, uncertain delivery gating, and flaggedExcerpts', async () => {
+  const { OutreachAutomationEnrollment } = await import('../src/models');
+  const { AgentKnowledge } = await import('../src/models/AgentKnowledge');
+  const { AgentTask } = await import('../src/models/AgentTask');
+  const { draftHash } = await import('../src/services/agent/knowledge-grounding');
+  const {
+    getOutreachAutomationOverview,
+    getOutreachEnrollmentDiagnostics,
+    reconcileOutreachCampaign,
+  } = await import('../src/services/outreach-automation.service');
+
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const rep = await User.create({
+      organizationId: orgA,
+      username: 'fictional_sales_reconcile_rep',
+      passwordHash: 'not-a-real-bcrypt-hash',
+      displayName: 'Reconcile Rep',
+      role: 'user',
+      status: 'active',
+      projectIds: [new Types.ObjectId(projectAId)],
+    });
+    const campaign = await OutreachAutomationConfig.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      actorRole: 'user',
+      enabled: true,
+      rolloutMode: 'active',
+      dailyLimit: 20,
+      perDomainLimit: 3,
+      windowStart: '09:30',
+      windowEnd: '17:30',
+      timezone: 'Asia/Shanghai',
+      useBuyerTimezone: true,
+    });
+
+    const capText = 'IRONHUE produces commercial Olympic barbells and bumper plates with ISO9001 quality control.';
+    const kbDoc = await AgentKnowledge.create({
+      projectId: new Types.ObjectId(projectAId),
+      version: 1,
+      approvedVersion: 1,
+      revisions: [{
+        version: 1,
+        title: 'IRONHUE Reconcile Capability',
+        category: 'company',
+        content: capText,
+        approved: true,
+        validFrom: new Date(0),
+        createdBy: rep._id,
+        createdAt: new Date(),
+      }],
+    });
+    const kbSource = {
+      sourceId: `knowledge:${String(kbDoc._id)}:v1`,
+      knowledgeId: String(kbDoc._id),
+      kind: 'knowledge' as const,
+      title: 'IRONHUE Reconcile Capability',
+      category: 'company' as const,
+      version: 1,
+      content: capText,
+      source: 'fixture',
+      applicability: '',
+      products: ['Olympic barbells', 'bumper plates'],
+      validFrom: new Date(0).toISOString(),
+      terms: [],
+    };
+
+    const makeVerifiedDraft = (customerId: Types.ObjectId, recipientEmail: string, bodyText?: string, extra?: Record<string, unknown>) => {
+      const text = bodyText ?? `Hi team,\n\n${capText}\n\nWhich product line are you reviewing this quarter?`;
+      return {
+        projectId: new Types.ObjectId(projectAId),
+        customerId,
+        userId: rep._id,
+        outreachStep: 1,
+        subject: 'Commercial gym equipment inquiry',
+        content: `<p>${text.replace(/\n\n/g, '</p><p>')}</p>`,
+        contentText: text,
+        recipientEmail,
+        status: 'draft' as const,
+        needsReview: false,
+        knowledgeReview: {
+          version: 1,
+          projectId: projectAId,
+          taskType: 'first_outreach' as const,
+          generatedAt: new Date().toISOString(),
+          status: 'ready' as const,
+          completeness: 'complete' as const,
+          sources: [kbSource],
+          claims: [{ text: capText, sourceIds: [kbSource.sourceId] }],
+          questions: [],
+          issues: [],
+          context: {},
+          bodyHash: draftHash(text),
+          factAudit: {
+            contract: 's4.1' as const,
+            mode: 'semantic' as const,
+            attempts: 1,
+            facts: [],
+            checks: [
+              { id: 's0', text: 'Hi team,', status: 'non_claim' as const, sourceIds: [], reason: 'greeting' },
+              { id: 's1', text: capText, status: 'supported' as const, sourceIds: [kbSource.sourceId], reason: 'supported' },
+              { id: 's2', text: 'Which product line are you reviewing this quarter?', status: 'non_claim' as const, sourceIds: [], reason: 'question' },
+            ],
+          },
+        },
+        ...extra,
+      };
+    };
+
+    const [
+      custSysPaused,
+      custLegacySysPaused,
+      custManualPaused,
+      custUnknownPaused,
+      custRepliedSysPaused,
+      custTransientCancelled,
+      custManualCancelled,
+      custUncertain,
+      custOfferHighlight,
+    ] = await Customer.create([
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'SysPaused Gym', country: 'United States', email: 'syspaused@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'LegacySys Gym', country: 'United States', email: 'legacysys@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'ManualPaused Gym', country: 'United States', email: 'manualpaused@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'UnknownPaused Gym', country: 'United States', email: 'unknownpaused@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'RepliedSys Gym', country: 'United States', email: 'repliedsys@example.test', status: 'replied' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'TransientCancel Gym', country: 'United States', email: 'transientcancel@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'ManualCancel Gym', country: 'United States', email: 'manualcancel@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Uncertain Gym', country: 'United States', email: 'uncertain@example.test', status: 'pending' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'OfferHighlight Gym', country: 'United States', email: 'offerhighlight@example.test', status: 'pending' },
+    ]);
+
+    const [
+      enrSysPaused,
+      enrLegacySysPaused,
+      enrManualPaused,
+      enrUnknownPaused,
+      enrRepliedSysPaused,
+      enrTransientCancelled,
+      enrManualCancelled,
+      enrUncertain,
+      enrOfferHighlight,
+    ] = await OutreachAutomationEnrollment.create([
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custSysPaused._id,
+        status: 'paused',
+        pauseOrigin: 'system',
+        pausedAt: new Date(Date.now() - 3600_000),
+        pausedReason: '自动发送已阻止：首封缺少已发布我方能力依据',
+        lastError: '自动发送已阻止：首封缺少已发布我方能力依据',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custLegacySysPaused._id,
+        status: 'paused',
+        lastError: '自动发送已阻止：单段过长',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custManualPaused._id,
+        status: 'paused',
+        pauseOrigin: 'manual',
+        pausedAt: new Date(Date.now() - 3600_000),
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custUnknownPaused._id,
+        status: 'paused',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custRepliedSysPaused._id,
+        status: 'paused',
+        pauseOrigin: 'system',
+        lastError: '自动发送已阻止：草稿待核验',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custTransientCancelled._id,
+        status: 'active',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() - 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custManualCancelled._id,
+        status: 'active',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custUncertain._id,
+        status: 'active',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        campaignId: campaign._id,
+        userId: rep._id,
+        customerId: custOfferHighlight._id,
+        status: 'paused',
+        pauseOrigin: 'system',
+        currentStep: 0,
+        nextRunAt: new Date(Date.now() + 60_000),
+        taskIds: [],
+      },
+    ]);
+
+    const offerSentence = 'We can ship a free sample kit to your warehouse next week.';
+    const offerBody = `Hi team,\n\n${capText} ${offerSentence}\n\nWhich product line are you reviewing?`;
+
+    await DevelopmentLetter.create([
+      makeVerifiedDraft(custSysPaused._id, 'syspaused@example.test'),
+      makeVerifiedDraft(custLegacySysPaused._id, 'legacysys@example.test'),
+      makeVerifiedDraft(custManualPaused._id, 'manualpaused@example.test'),
+      makeVerifiedDraft(custUnknownPaused._id, 'unknownpaused@example.test'),
+      makeVerifiedDraft(custRepliedSysPaused._id, 'repliedsys@example.test'),
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: custTransientCancelled._id,
+        userId: rep._id,
+        outreachStep: 1,
+        subject: 'Transient cancelled draft',
+        content: '<p>Old cancelled content</p>',
+        contentText: 'Old cancelled content',
+        recipientEmail: 'transientcancel@example.test',
+        status: 'cancelled',
+        cancelOrigin: 'system_transient',
+        error: '系统临时中断，邮件未发出',
+        needsReview: false,
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: custManualCancelled._id,
+        userId: rep._id,
+        outreachStep: 1,
+        subject: 'Manual cancelled draft',
+        content: '<p>Manually cancelled content</p>',
+        contentText: 'Manually cancelled content',
+        recipientEmail: 'manualcancel@example.test',
+        status: 'cancelled',
+        cancelOrigin: 'manual',
+        error: '已手动取消，未发送',
+        needsReview: false,
+      },
+      {
+        projectId: new Types.ObjectId(projectAId),
+        customerId: custUncertain._id,
+        userId: rep._id,
+        outreachStep: 1,
+        subject: 'Uncertain delivery draft',
+        content: '<p>Uncertain content</p>',
+        contentText: 'Uncertain content',
+        recipientEmail: 'uncertain@example.test',
+        status: 'failed',
+        needsReview: true,
+        error: '发送期间服务中断，投递结果未知；请核实，系统不会自动重发',
+      },
+      makeVerifiedDraft(custOfferHighlight._id, 'offerhighlight@example.test', offerBody),
+    ]);
+
+    // Trigger explicit reconciliation
+    const rec = await reconcileOutreachCampaign(actorA, rep.id);
+    assert.equal(rec.resumedPaused, 2, 'Both explicit system-paused and unambiguous legacy system-paused enrollments should auto-resume');
+    assert.equal(rec.requeuedCancelled, 1, 'Only system_transient cancelled letter should be auto-reprepared');
+
+    // Verify DB states directly
+    const [dbSys, dbLegacy, dbManual, dbUnknown, dbReplied, dbManualCancel, dbUncertain] = await Promise.all([
+      OutreachAutomationEnrollment.findById(enrSysPaused._id).lean(),
+      OutreachAutomationEnrollment.findById(enrLegacySysPaused._id).lean(),
+      OutreachAutomationEnrollment.findById(enrManualPaused._id).lean(),
+      OutreachAutomationEnrollment.findById(enrUnknownPaused._id).lean(),
+      OutreachAutomationEnrollment.findById(enrRepliedSysPaused._id).lean(),
+      OutreachAutomationEnrollment.findById(enrManualCancelled._id).lean(),
+      OutreachAutomationEnrollment.findById(enrUncertain._id).lean(),
+    ]);
+    assert.equal(dbSys?.status, 'active');
+    assert.equal(dbLegacy?.status, 'active');
+    assert.equal(dbManual?.status, 'paused', 'Manual pause must NEVER auto-resume');
+    assert.equal(dbUnknown?.status, 'paused', 'Unknown legacy pause must NEVER guess-resume');
+    assert.equal(dbReplied?.status, 'paused', 'Replied customer must NEVER auto-resume');
+    assert.equal(dbManualCancel?.status, 'active');
+    assert.equal(dbUncertain?.status, 'active');
+
+    // Transient cancelled enrollment got a queued AgentTask to re-prepare step 1
+    const transientTasks = await AgentTask.find({ customerId: custTransientCancelled._id, status: 'queued' }).lean();
+    assert.equal(transientTasks.length, 1, 'Transient cancelled enrollment should enqueue fresh draft preparation');
+
+    // Verify overview classification, counters, and flaggedExcerpts
+    const ov = await getOutreachAutomationOverview(actorA, rep.id);
+    const sysRow = ov.queue.find((q) => q.id === enrSysPaused.id);
+    const manualRow = ov.queue.find((q) => q.id === enrManualPaused.id);
+    const manualCancelRow = ov.queue.find((q) => q.id === enrManualCancelled.id);
+    const uncertainRow = ov.queue.find((q) => q.id === enrUncertain.id);
+    const offerRow = ov.queue.find((q) => q.id === enrOfferHighlight.id);
+
+    assert.equal(sysRow?.status, 'active');
+    assert.equal(sysRow?.draftStage, 'draft_saved_verified');
+    assert.ok(sysRow?.nextSendLocalLabel, 'Active verified row should carry nextSendLocalLabel');
+
+    assert.equal(manualRow?.status, 'paused');
+    assert.equal(manualRow?.pauseOrigin, 'manual');
+
+    assert.equal(manualCancelRow?.draftStage, 'delivery_cancelled');
+    assert.equal(manualCancelRow?.cancelOrigin, 'manual');
+
+    assert.equal(uncertainRow?.draftStage, 'delivery_uncertain');
+    assert.equal(uncertainRow?.deliveryUncertain, true);
+
+    assert.equal(offerRow?.draftStage, 'send_gate_blocked');
+    assert.ok(
+      offerRow?.flaggedExcerpts?.some((s) => s.text.includes('free sample kit')),
+      'Offer-blocked draft must expose exact flaggedExcerpts sentence for editor locator',
+    );
+
+    // Action-needed counter MUST include uncertain delivery + offer blocked, and EXCLUDE manual pause, unknown pause, manual cancelled, replied, and active verified
+    assert.equal(ov.stats.deliveryUncertainCount, 1);
+    assert.equal(ov.stats.actionNeededCount, 2, 'Only uncertain delivery + offer-blocked draft require salesperson action');
+
+    const uncertainDiag = await getOutreachEnrollmentDiagnostics(actorA, enrUncertain.id, rep.id);
+    assert.equal(uncertainDiag.sendReadiness.status, 'delivery_uncertain');
   });
 });

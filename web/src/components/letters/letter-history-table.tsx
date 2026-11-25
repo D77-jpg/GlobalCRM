@@ -180,8 +180,12 @@ export function LetterHistoryTable({
 
               <TableCell>
                 <div className="flex flex-col items-start gap-1">
-                  <LetterStatusBadge status={letter.status} />
-                  {letter.status === 'failed' && letter.error ? (
+                  <LetterStatusBadge status={letter.status} needsReview={letter.needsReview} />
+                  {letter.status === 'failed' && letter.needsReview ? (
+                    <span className="text-2xs text-amber-700 dark:text-amber-300">
+                      请确认是否已发出 · 确认前不会重发
+                    </span>
+                  ) : letter.status === 'failed' && letter.error ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="inline-flex items-center gap-1 text-2xs text-status-failed">
@@ -207,12 +211,21 @@ export function LetterHistoryTable({
                     </TooltipTrigger>
                     <TooltipContent>{formatDateTime(letter.sentAt)}</TooltipContent>
                   </Tooltip>
+                ) : letter.status === 'cancelled' ? (
+                  <span className="text-xs text-muted-foreground">已取消，未发送</span>
+                ) : letter.status === 'scheduled' && letter.scheduledAt ? (
+                  <span className="text-xs text-muted-foreground">定时 {formatDateTime(letter.scheduledAt)}</span>
                 ) : (
                   <span className="text-xs text-muted-foreground">未发送</span>
                 )}
               </TableCell>
 
               <TableCell>
+                {(() => {
+                  const isInFlight = ['queued', 'scheduled', 'sending', 'retrying'].includes(letter.status);
+                  const isUncertain = letter.status === 'failed' && Boolean(letter.needsReview);
+                  const locked = isInFlight || isUncertain;
+                  return (
                 <div className="flex items-center justify-end gap-0.5">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -243,17 +256,25 @@ export function LetterHistoryTable({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-xs"
-                        className={letter.status === 'draft' ? 'h-auto min-h-11 w-auto px-3' : undefined}
-                        aria-label={letter.status === 'draft' ? '审核草稿' : '重新发送'}
-                        disabled={busy}
+                        size={letter.status === 'draft' ? 'sm' : 'icon-xs'}
+                        className={letter.status === 'draft' ? 'h-7 px-2 text-xs' : undefined}
+                        aria-label={letter.status === 'draft' ? '查看并修改' : letter.status === 'cancelled' ? '重新编辑发送' : '重新发送'}
+                        disabled={busy || locked}
                         onClick={() => onResend(letter)}
                       >
-                        {letter.status === 'draft' ? <><FilePenLine className="h-3.5 w-3.5" aria-hidden/>审核草稿</> : <RotateCw className="h-3.5 w-3.5" />}
+                        {letter.status === 'draft' ? <><FilePenLine className="h-3.5 w-3.5" aria-hidden/>查看并修改</> : <RotateCw className="h-3.5 w-3.5" />}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      {letter.status === 'draft' ? '审核并编辑草稿' : '以原内容再发一次'}
+                      {isUncertain
+                        ? '投递结果未知，请先确认是否已发出 · 确认前不会重发'
+                        : isInFlight
+                          ? '发送任务进行中，请先在邮件中心取消后再操作'
+                          : letter.status === 'draft'
+                            ? '查看并修改草稿'
+                            : letter.status === 'cancelled'
+                              ? '原邮件未发送，可重新编辑发送'
+                              : '以原内容再发一次'}
                     </TooltipContent>
                   </Tooltip>
 
@@ -264,16 +285,18 @@ export function LetterHistoryTable({
                         variant="ghost"
                         size="icon-xs"
                         aria-label="删除"
-                        disabled={busy}
+                        disabled={busy || locked}
                         className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => onDelete(letter)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>删除这条记录</TooltipContent>
+                    <TooltipContent>{locked ? '发送中或结果待确认，暂不能删除' : '删除这条记录'}</TooltipContent>
                   </Tooltip>
                 </div>
+                  );
+                })()}
               </TableCell>
             </TableRow>
           ))}

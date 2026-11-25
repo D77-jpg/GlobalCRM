@@ -145,11 +145,15 @@ export function LetterTable({
       <ul className="divide-y md:hidden">
         {letters.map((letter) => {
           const selected = selectedIds.includes(letter.id);
+          const isInFlight = ['queued', 'scheduled', 'sending', 'retrying'].includes(letter.status);
+          const isUncertain = letter.status === 'failed' && Boolean(letter.needsReview);
+          const locked = isInFlight || isUncertain;
           return (
             <li key={letter.id} className={selected ? 'bg-primary/5 p-3' : 'p-3'}>
               <div className="flex items-start gap-2.5">
                 <Checkbox
                   checked={selected}
+                  disabled={locked}
                   onCheckedChange={() => onToggleSelect(letter.id)}
                   aria-label={`选择 ${letter.subject || '开发信'}`}
                   className="mt-1"
@@ -167,9 +171,15 @@ export function LetterTable({
                   </button>
 
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <LetterStatusBadge status={letter.status} />
+                    <LetterStatusBadge status={letter.status} needsReview={letter.needsReview} />
                     <span className="text-2xs text-muted-foreground">
-                      {letter.sentAt ? formatRelative(letter.sentAt) : '未发送'}
+                      {letter.sentAt
+                        ? formatRelative(letter.sentAt)
+                        : letter.status === 'cancelled'
+                          ? '已取消，未发送'
+                          : letter.status === 'scheduled' && letter.scheduledAt
+                            ? `定时 ${formatDateTime(letter.scheduledAt)}`
+                            : '未发送'}
                     </span>
                     {letter.customer ? (
                       <Link
@@ -180,33 +190,42 @@ export function LetterTable({
                       </Link>
                     ) : null}
                   </div>
+                  {isUncertain ? (
+                    <p className="mt-1 text-2xs text-amber-700 dark:text-amber-300">
+                      请确认这封邮件是否已发出 · 确认前不会重发
+                    </p>
+                  ) : null}
 
                   <div className="mt-2 flex items-center gap-1">
                     <Button type="button" variant="ghost" size="icon-xs" aria-label="查看" onClick={() => onView(letter)}>
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className={letter.status === 'draft' ? 'h-auto min-h-11 w-auto px-3' : undefined}
-                      aria-label={letter.status === 'draft' ? '审核草稿' : '重新发送'}
-                      disabled={busy}
-                      onClick={() => onResend(letter)}
-                    >
-                      {letter.status === 'draft' ? <><FilePenLine className="h-3.5 w-3.5" aria-hidden/>审核草稿</> : <RotateCw className="h-3.5 w-3.5" />}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="删除"
-                      disabled={busy}
-                      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => onDelete(letter)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {!locked ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className={letter.status === 'draft' ? 'h-7 px-2 text-xs' : 'h-7 w-7 p-0'}
+                          aria-label={letter.status === 'draft' ? '查看并修改' : letter.status === 'cancelled' ? '重新编辑发送' : '重新发送'}
+                          disabled={busy}
+                          onClick={() => onResend(letter)}
+                        >
+                          {letter.status === 'draft' ? <><FilePenLine className="h-3.5 w-3.5" aria-hidden/>查看并修改</> : <RotateCw className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label="删除"
+                          disabled={busy}
+                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => onDelete(letter)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -247,11 +266,15 @@ export function LetterTable({
             <TableBody>
               {letters.map((letter) => {
                 const selected = selectedIds.includes(letter.id);
+                const isInFlight = ['queued', 'scheduled', 'sending', 'retrying'].includes(letter.status);
+                const isUncertain = letter.status === 'failed' && Boolean(letter.needsReview);
+                const locked = isInFlight || isUncertain;
                 return (
                   <TableRow key={letter.id} data-state={selected ? 'selected' : undefined}>
                     <TableCell className="pl-3">
                       <Checkbox
                         checked={selected}
+                        disabled={locked}
                         onCheckedChange={() => onToggleSelect(letter.id)}
                         aria-label={`选择 ${letter.subject || '开发信'}`}
                       />
@@ -298,18 +321,24 @@ export function LetterTable({
                     </TableCell>
 
                     <TableCell>
-                      <LetterStatusBadge status={letter.status} />
-                      {letter.status === 'failed' && letter.error ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="mt-1 inline-flex items-center gap-1 text-2xs text-status-failed">
-                              <MailWarning className="h-3 w-3" aria-hidden />
-                              查看原因
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent className="max-w-[18rem]">{letter.error}</TooltipContent>
-                        </Tooltip>
-                      ) : null}
+                      <div className="flex flex-col items-start gap-1">
+                        <LetterStatusBadge status={letter.status} needsReview={letter.needsReview} />
+                        {isUncertain ? (
+                          <span className="text-2xs text-amber-700 dark:text-amber-300">
+                            请确认是否已发出 · 确认前不会重发
+                          </span>
+                        ) : letter.status === 'failed' && letter.error ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex items-center gap-1 text-2xs text-status-failed">
+                                <MailWarning className="h-3 w-3" aria-hidden />
+                                查看原因
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-[18rem]">{letter.error}</TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                      </div>
                     </TableCell>
 
                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
@@ -324,6 +353,10 @@ export function LetterTable({
                           </TooltipTrigger>
                           <TooltipContent>{formatDateTime(letter.sentAt)}</TooltipContent>
                         </Tooltip>
+                      ) : letter.status === 'cancelled' ? (
+                        <span className="text-xs text-muted-foreground">已取消，未发送</span>
+                      ) : letter.status === 'scheduled' && letter.scheduledAt ? (
+                        <span className="text-xs text-muted-foreground">定时 {formatDateTime(letter.scheduledAt)}</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">未发送</span>
                       )}
@@ -366,17 +399,25 @@ export function LetterTable({
                             <Button
                               type="button"
                               variant="ghost"
-                              size="icon-xs"
-                              className={letter.status === 'draft' ? 'h-auto min-h-11 w-auto px-3' : undefined}
-                              aria-label={letter.status === 'draft' ? '审核草稿' : '重新发送'}
-                              disabled={busy}
+                              size={letter.status === 'draft' ? 'sm' : 'icon-xs'}
+                              className={letter.status === 'draft' ? 'h-7 px-2 text-xs' : undefined}
+                              aria-label={letter.status === 'draft' ? '查看并修改' : letter.status === 'cancelled' ? '重新编辑发送' : '重新发送'}
+                              disabled={busy || locked}
                               onClick={() => onResend(letter)}
                             >
-                              {letter.status === 'draft' ? <><FilePenLine className="h-3.5 w-3.5" aria-hidden/>审核草稿</> : <RotateCw className="h-3.5 w-3.5" />}
+                              {letter.status === 'draft' ? <><FilePenLine className="h-3.5 w-3.5" aria-hidden/>查看并修改</> : <RotateCw className="h-3.5 w-3.5" />}
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {letter.status === 'draft' ? '审核并编辑草稿' : '以原内容再发一次'}
+                            {isUncertain
+                              ? '投递结果未知，请先确认是否已发出 · 确认前不会重发'
+                              : isInFlight
+                                ? '发送任务进行中，请先在邮件中心取消后再操作'
+                                : letter.status === 'draft'
+                                  ? '查看并修改草稿'
+                                  : letter.status === 'cancelled'
+                                    ? '原邮件未发送，可重新编辑发送'
+                                    : '以原内容再发一次'}
                           </TooltipContent>
                         </Tooltip>
 
@@ -387,7 +428,7 @@ export function LetterTable({
                               variant="ghost"
                               size="icon-xs"
                               aria-label="删除"
-                              disabled={busy}
+                              disabled={busy || locked}
                               className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                               onClick={() => onDelete(letter)}
                             >

@@ -96,12 +96,15 @@ export function TemplateFormDialog({
     mode: 'onBlur',
   });
 
+  const templateId = template?.id ?? '';
   React.useEffect(() => {
     if (open) {
       reset(toFormValues(template));
       setServerError(null);
     }
-  }, [open, template, reset]);
+    // Only reset when dialog opens or switches to a different template, avoiding mid-typing resets on store refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, templateId]);
 
   const categoryValue = watch('category');
   const content = watch('content');

@@ -579,14 +579,21 @@ export function ImportDialog({ open, onOpenChange, entry = 'customers', onImport
 
               {importResult.failures.length > 0 ? (
                 <FailureTable failures={importResult.failures} title={`以下 ${importResult.failures.length} 行未能导入`} />
+              ) : (importResult.created + importResult.updated) === 0 ? (
+                <Alert variant="warning">
+                  <AlertTitle>未导入新数据（全部因重复被跳过）</AlertTitle>
+                  <AlertDescription>
+                    提交的 {importResult.total} 行均已存在于系统中，原记录未做修改。如需覆盖更新，请返回上一步调整去重方式。
+                  </AlertDescription>
+                </Alert>
               ) : (
                 <Alert variant="success">
                   <CheckCircle2 aria-hidden />
-                  <AlertTitle>全部导入成功</AlertTitle>
+                  <AlertTitle>导入完成：新增 {importResult.created} 条{importResult.updated > 0 ? `，更新 ${importResult.updated} 条` : ''}{importResult.skipped > 0 ? `，跳过重复 ${importResult.skipped} 条` : ''}</AlertTitle>
                   <AlertDescription>
                     {effectiveTarget === 'prospect'
-                      ? '线索已进入「客户线索池」，审核通过后才会转成客户并生成开发信草稿。'
-                      : '客户列表已刷新，可以直接开始发送开发信。'}
+                      ? '线索已进入「客户线索池」，确认联系信息后可一键转为正式客户。'
+                      : '客户列表已刷新，可以直接开始跟进或发送开发信。'}
                   </AlertDescription>
                 </Alert>
               )}

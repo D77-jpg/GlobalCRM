@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { apiGet, apiPost, toErrorMessage } from '@/lib/api';
 import { createClientId } from '@/lib/utils';
 import { stripHtml } from '@/lib/format';
+import { TEMPLATE_CATEGORY_LABEL } from '@/constants';
 import { useProjectStore } from '@/store/project.store';
 import type { LetterTemplate, TemplateSuggestion } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -126,12 +127,12 @@ export function TemplateSuggestionDialog({ template, onClose, onCopied }: Props)
           {suggestion ? <>
             <p className="text-muted-foreground">以下为根据现有记录整理的规则建议，实际效果需在使用后观察。</p>
             <p>参考模板：{suggestion.sourceTemplateSnapshot.name} · 主题：{suggestion.sourceTemplateSnapshot.subject}</p>
-            <p>核实已发送：{suggestion.sourceSummary.sentCount} 封；最低样本门槛：{suggestion.sourceSummary.minimumSampleSize}。仅依据已确认的发送记录提供建议，不代表效果预测。</p>
+            <p>已确认发送：{suggestion.sourceSummary.sentCount} 封（至少 {suggestion.sourceSummary.minimumSampleSize} 封以上更具参考性）。</p>
             <ul className="list-disc space-y-1 pl-5">{suggestion.explanation.map((line, index) => <li key={index}>{line}</li>)}</ul>
             <section className="space-y-2 rounded-md border p-3">
               <h3 className="font-semibold">拟创建的新模板（只读预览）</h3>
               <p>名称：{suggestion.suggested.name}</p>
-              <p>分类：{suggestion.suggested.category}</p>
+              <p>分类：{TEMPLATE_CATEGORY_LABEL[suggestion.suggested.category] ?? suggestion.suggested.category}</p>
               <p>主题：{suggestion.suggested.subject}</p>
               <p className="whitespace-pre-wrap break-words">正文预览：{stripHtml(suggestion.suggested.content, 2000)}</p>
               <p className="text-xs text-muted-foreground">请检查正文、客户变量和排版；确认后另存为新模板，原模板保持不变。</p>

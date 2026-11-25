@@ -769,7 +769,7 @@ export function QuotationsPage(): React.JSX.Element {
               <CardContent className="space-y-2.5 text-xs">
                 {config?.pricingMode === 'costing_approved' ? (
                   <div className="rounded-md border border-amber-300/60 bg-amber-50/50 p-2.5 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                    当前为「非标定制 · 核算员核价」模式：价格请以核算员批准行为准；含“待核价”行时，AI 邮件护栏会自动禁止写全单总价。
+                    当前为「非标定制 · 核算员核价」模式：价格请以核算员确认行为准；含「待核价」项时，AI 生成邮件不会自动汇总整单总价。
                   </div>
                 ) : null}
 
@@ -788,7 +788,14 @@ export function QuotationsPage(): React.JSX.Element {
                         <div className="flex items-center justify-between gap-1">
                           <span className="truncate font-semibold">{it.requestedName}</span>
                           <Badge variant={it.status === 'matched' ? 'outline' : it.status === 'below_catalog' || it.status === 'price_mismatch' ? 'destructive' : 'warning'} className="text-[10px]">
-                            {it.status}
+                            {({
+                              matched: '符合目录价',
+                              below_catalog: '低于目录价',
+                              price_mismatch: '价格不一致',
+                              below_moq: '低于起订量',
+                              unmatched: '未匹配目录产品',
+                              pending: '待核价',
+                            } as Record<string, string>)[it.status] ?? it.status}
                           </Badge>
                         </div>
                         {it.margin ? (
@@ -861,7 +868,7 @@ export function QuotationsPage(): React.JSX.Element {
                   <Input value={rfqTitle} onChange={(e) => setRfqTitle(e.target.value)} placeholder="如 Velvet Pouch + Magnetic Box" className="mt-1" />
                 </div>
                 <div>
-                  <Label>目的地（自动检反倾销）</Label>
+                  <Label>目的地（用于提示反倾销风险）</Label>
                   <Input value={rfqDestination} onChange={(e) => setRfqDestination(e.target.value)} placeholder="如 USA / Los Angeles" className="mt-1" />
                 </div>
                 <div>
@@ -894,13 +901,13 @@ export function QuotationsPage(): React.JSX.Element {
                         <td className="p-1"><Input value={line.qty} onChange={(e) => setRfqLines((p) => p.map((x, i) => i === idx ? { ...x, qty: e.target.value } : x))} placeholder="300/500/1000" className="h-7 text-xs" /></td>
                         <td className="p-1"><Input value={line.logo || ''} onChange={(e) => setRfqLines((p) => p.map((x, i) => i === idx ? { ...x, logo: e.target.value } : x))} placeholder="Gold foil" className="h-7 text-xs" /></td>
                         <td className="p-1"><Input value={line.color || ''} onChange={(e) => setRfqLines((p) => p.map((x, i) => i === idx ? { ...x, color: e.target.value } : x))} placeholder="Black / PMS" className="h-7 text-xs" /></td>
-                        <td className="p-1"><Input type="number" min={0} step="0.01" value={line.approvedUnitPrice ?? ''} onChange={(e) => setRfqLines((p) => p.map((x, i) => i === idx ? { ...x, approvedUnitPrice: e.target.value ? Number(e.target.value) : undefined } : x))} placeholder="核算填" className="h-7 w-20 text-xs" /></td>
+                        <td className="p-1"><Input type="number" min={0} step="0.01" value={line.approvedUnitPrice ?? ''} onChange={(e) => setRfqLines((p) => p.map((x, i) => i === idx ? { ...x, approvedUnitPrice: e.target.value ? Number(e.target.value) : undefined } : x))} placeholder="核价单价" className="h-7 w-20 text-xs" /></td>
                         <td className="p-1">
                           <Select value={line.pricingStatus ?? 'pending'} onValueChange={(v) => setRfqLines((p) => p.map((x, i) => i === idx ? { ...x, pricingStatus: v as 'pending' | 'approved' } : x))}>
                             <SelectTrigger className="h-7 w-20 text-[11px]"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="pending">待核</SelectItem>
-                              <SelectItem value="approved">已批</SelectItem>
+                              <SelectItem value="pending">待核价</SelectItem>
+                              <SelectItem value="approved">已核价</SelectItem>
                             </SelectContent>
                           </Select>
                         </td>
@@ -940,7 +947,9 @@ export function QuotationsPage(): React.JSX.Element {
                       <p className="font-semibold">{r.rfqNo} · {r.title}</p>
                       <p className="text-[11px] text-muted-foreground">{r.customer?.company || r.customer?.name} · {r.destination || '未定目的地'}</p>
                     </div>
-                    <Badge variant={r.evaluation.ready ? 'outline' : 'warning'} className="shrink-0 text-[10px]">{r.status}</Badge>
+                    <Badge variant={r.evaluation.ready ? 'outline' : 'warning'} className="shrink-0 text-[10px]">
+                      {({ draft: '草稿', pending_costing: '待核算', ready: '可转报价', converted: '已转报价', cancelled: '已取消' } as Record<string, string>)[r.status] ?? r.status}
+                    </Badge>
                   </div>
                   <p className="text-[11px] font-medium text-foreground/90">{r.evaluation.statusText}</p>
                   {r.evaluation.issues.length > 0 ? (
@@ -960,13 +969,27 @@ export function QuotationsPage(): React.JSX.Element {
                       setRfqNotes(r.notes);
                       setRfqLines(r.lines);
                     }}>编辑</Button>
-                    <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => void downloadFile(`/workbench/rfqs/${r.id}/costing-xlsx`, `${r.rfqNo}-costing.xlsx`)}>
+                    <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => void downloadFile(`/workbench/rfqs/${r.id}/costing-xlsx`, `${r.rfqNo}-costing.xlsx`).catch((e) => toast.error('导出核价表失败', { description: toErrorMessage(e) }))}>
                       <FileSpreadsheet className="h-3 w-3" />导核价表
                     </Button>
                     <Button size="sm" className="h-7 text-[11px]" onClick={() => void convertRfq(r)}>
                       <Download className="h-3 w-3" />转报价单
                     </Button>
-                    <Button size="sm" variant="ghost" className="ml-auto h-7 px-1.5 text-destructive" onClick={() => void apiDelete(`/workbench/rfqs/${r.id}`).then(() => loadAll())}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-auto h-7 px-1.5 text-destructive"
+                      aria-label={`删除核价单 ${r.rfqNo}`}
+                      onClick={() => {
+                        if (!window.confirm(`确定删除 RFQ 核价单「${r.rfqNo} · ${r.title}」吗？删除后无法恢复。`)) return;
+                        void apiDelete(`/workbench/rfqs/${r.id}`)
+                          .then(() => {
+                            toast.success(`已删除核价单 ${r.rfqNo}`);
+                            return loadAll();
+                          })
+                          .catch((e) => toast.error('删除核价单失败', { description: toErrorMessage(e) }));
+                      }}
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -1012,7 +1035,7 @@ export function QuotationsPage(): React.JSX.Element {
                               <Link to={customerDetailPath(q.customerId)} className="font-medium hover:text-primary hover:underline">
                                 {q.customer.company || q.customer.name}
                               </Link>
-                            ) : q.customerId}
+                            ) : <span className="text-muted-foreground">未知客户</span>}
                           </td>
                           <td className="p-3 text-muted-foreground">
                             {q.incoterm || '—'}{q.destinationPort ? ` · ${q.destinationPort}` : ''}
