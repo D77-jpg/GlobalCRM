@@ -14,10 +14,10 @@ export function MailInteractionSummary({
 }): React.JSX.Element {
   if (!detailed) {
     const openDisplay = tracking?.opened
-      ? `打开 × ${tracking.dedupedOpenCount ?? tracking.openCount}${tracking.humanReadConfidence === 'uncertain' ? '（无法确定真实阅读）' : ''}`
+      ? `已打开 ${tracking.dedupedOpenCount ?? tracking.openCount} 次${tracking.humanReadConfidence === 'uncertain' ? '（可能为自动预览）' : ''}`
       : '未记录打开';
     const clickDisplay = tracking?.clicked
-      ? `点击 × ${tracking.dedupedClickCount ?? tracking.clickCount}`
+      ? `点击 ${tracking.dedupedClickCount ?? tracking.clickCount} 次`
       : '未记录点击';
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground" aria-label="邮件互动情况">
@@ -32,15 +32,15 @@ export function MailInteractionSummary({
   }
 
   const confidenceLabel = tracking?.humanReadConfidence === 'likely_clicked'
-    ? '高（存在非扫描器点击）'
+    ? '较高（客户点击过链接）'
     : tracking?.humanReadConfidence === 'uncertain'
-      ? '无法确定（可能含代理/预加载）'
-      : '暂无互动信号';
+      ? '待确认（可能为邮箱自动预览）'
+      : '暂无互动';
 
   const tiles: { label: string; value: string; tone?: string }[] = [
-    { label: '去重打开（原始）', value: tracking ? `${tracking.dedupedOpenCount ?? tracking.openCount}（${tracking.openCount}）` : '—', tone: tracking?.opened ? 'text-mint' : undefined },
-    { label: '去重点击（原始）', value: tracking ? `${tracking.dedupedClickCount ?? tracking.clickCount}（${tracking.clickCount}）` : '—', tone: tracking?.clicked ? 'text-violet' : undefined },
-    { label: '真实阅读判断', value: tracking ? confidenceLabel : '—' },
+    { label: '打开次数', value: tracking ? `${tracking.dedupedOpenCount ?? tracking.openCount} 次` : '—', tone: tracking?.opened ? 'text-mint' : undefined },
+    { label: '链接点击', value: tracking ? `${tracking.dedupedClickCount ?? tracking.clickCount} 次` : '—', tone: tracking?.clicked ? 'text-violet' : undefined },
+    { label: '阅读判断', value: tracking ? confidenceLabel : '—' },
     { label: '最近互动', value: tracking?.lastClickedAt ? formatDateTime(tracking.lastClickedAt) : tracking?.lastOpenedAt ? formatDateTime(tracking.lastOpenedAt) : '暂无记录' },
   ];
 

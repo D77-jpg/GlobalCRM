@@ -205,7 +205,7 @@ export function DashboardPage(): React.JSX.Element {
           <SalesWorkspaceSection stats={data} />
 
           {data.analytics ? (
-            <section aria-label="转化与决策分析" className="grid gap-4 lg:grid-cols-3">
+            <section aria-label="转化与决策分析" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {/* Conversion Funnel */}
               <div className="panel p-4">
                 <div className="flex items-center justify-between gap-2">

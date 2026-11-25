@@ -321,10 +321,10 @@ export function KnowledgeReviewPanel({
     const rawModelDraft = Boolean(value?.issues.some((i) => i.code === 'draft_unverified'));
     todos.push({
       key: 'unverified',
-      title: '这封稿子没做逐项核对',
+      title: '这封草稿尚未完成自动核对',
       detail: rawModelDraft
-        ? '这封是未完成逐项核验的模型原稿；请对照依据核对数字、条件和承诺，审核通过后即可发送。'
-        : '系统只保留了有依据的安全内容；发送前请确认，或重新生成。',
+        ? '发送前请先人工确认正文中的数字、条件和承诺无误，审核通过后即可发送。'
+        : '系统已优先保留有资料依据的内容；发送前请人工确认，或重新生成。',
       action: letterId ? 'regenerate' : undefined,
     });
   }
@@ -360,10 +360,9 @@ export function KnowledgeReviewPanel({
 
       {value?.context?.playbook ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-          <span className="font-medium text-foreground">本次行业卡</span>
-          <Badge variant="outline">{value.context.playbook.segmentCode} · {value.context.playbook.segmentName}</Badge>
-          {value.context.playbook.preferenceCode ? <Badge variant="outline">{value.context.playbook.preferenceCode} · {value.context.playbook.preferenceName}</Badge> : null}
-          <span>选卡置信度：{value.context.playbook.confidence === 'high' ? '高' : value.context.playbook.confidence === 'low' ? '低' : '中'}</span>
+          <span className="font-medium text-foreground">参考话术方向</span>
+          <Badge variant="outline">{value.context.playbook.segmentName}</Badge>
+          {value.context.playbook.preferenceName ? <Badge variant="outline">{value.context.playbook.preferenceName}</Badge> : null}
         </div>
       ) : null}
 
@@ -425,9 +424,9 @@ export function KnowledgeReviewPanel({
 
           {audit ? (
             <div role="status" className="rounded-md border bg-muted/20 p-2.5 text-xs leading-5">
-              <p className="font-medium">{audit.mode === 'semantic' ? '已按当前内容重新核对' : '语义核对没跑起来，请人工确认'}</p>
+              <p className="font-medium">{audit.mode === 'semantic' ? '已按当前内容完成核对' : '自动核对暂未完成，请人工确认'}</p>
               <details className="mt-1">
-                <summary className="min-h-9 cursor-pointer py-1 text-primary">看 {audit.checks.length} 项核对结果</summary>
+                <summary className="min-h-9 cursor-pointer py-1 text-primary">查看 {audit.checks.length} 项核对结果</summary>
                 {audit.checks.map((check, index) => (
                   <div key={check.id + index} className="border-l pl-2.5">
                     <p className="break-words">{check.text}</p>
@@ -529,10 +528,10 @@ export function KnowledgeReviewPanel({
                   <h4 className="font-semibold">逐句核对（{value.factAudit.checks.length}）</h4>
                   <p className="mt-1 text-2xs leading-5 text-muted-foreground">
                     {value.factAudit.mode === 'semantic'
-                      ? '已按语义逐句核对，交易承诺另核了数值和完整条件。'
+                      ? '已逐句对照知识库与客户资料核对，交易承诺另已核查数值与条件。'
                       : value.factAudit.mode === 'deterministic'
-                        ? '只呈现已确认的条件记录，普通事实仍需人工看。'
-                        : '语义核对没跑起来，逐句结论都需要人工确认'}核对不代表证书或协议已自动生效。
+                        ? '已核对关键业务条件，普通描述请人工确认。'
+                        : '自动核对暂未完成，发送前请逐句人工确认。'}
                   </p>
                   {value.factAudit.checks.length ? (
                     <ul className="mt-1 divide-y">

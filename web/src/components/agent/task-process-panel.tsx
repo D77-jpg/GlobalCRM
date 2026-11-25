@@ -11,22 +11,24 @@ export type TaskWorkflowStep = { key: string; label: string; epoch: number; stat
 export type TaskProcess = { workflow?: TaskWorkflowStep[]; workflowEpoch?: number; workflowCalls?: number;
   workflowActiveMs?: number; budgetCharged?: number; tokenBudget?: number; status: string };
 
-const seconds = (ms?: number) => (ms === undefined ? '—' : ms < 100 ? '<0.1s' : (ms / 1000).toFixed(1) + 's');
-const kb = (bytes?: number) => (bytes === undefined ? '—' : bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB');
+const seconds = (ms?: number) => (ms === undefined ? '—' : ms < 100 ? '<0.1 秒' : (ms / 1000).toFixed(1) + ' 秒');
 const num = (value?: number) => (value === undefined ? '—' : value.toLocaleString('en-US'));
-const verifyLabels: Record<string, string> = { semantic: '语义核验', deterministic: '条件渲染', unavailable: '未核验' };
+const verifyLabels: Record<string, string> = { semantic: '自动核对', deterministic: '规则核对', unavailable: '未完成' };
 
 function stepChips(step: TaskWorkflowStep): string[] {
   const m = step.metrics ?? {};
   const chips: string[] = [];
-  if (step.key === 'read_context') chips.push('来源 ' + num(m.sources));
-  if (step.key === 'extract_requirements') chips.push('问题 ' + num(m.questions), '政策主题 ' + num(m.topics));
-  if (step.key === 'load_rules') chips.push('规则 ' + num(m.rules) + ' 条');
-  if (step.key.startsWith('retrieve_')) chips.push('依据 ' + num(m.sources) + ' 条', num(m.chars) + ' 字符', '条件事实 ' + num(m.facts));
-  if (step.key === 'assess_evidence') chips.push('缺失 ' + num(m.missing), '冲突 ' + num(m.conflicts));
-  if (step.key === 'generate_email') chips.push('正文 ' + num(m.chars) + ' 字', '依据 ' + num(m.facts) + ' 条', '待补 ' + num(m.gaps) + ' 项', '用量 ' + num(m.tokens));
-  if (step.key === 'audit_claims') chips.push('核验 ' + (verifyLabels[m.verifyMode ?? ''] ?? '—'), '逐项 ' + num(m.checks) + ' 条', '提示 ' + num(m.issues));
-  if (step.key === 'research_customer' && step.tool) chips.push('官网抓取');
+  if (step.key === 'read_context') chips.push('读取资料 ' + num(m.sources) + ' 份');
+  if (step.key === 'extract_requirements') chips.push('识别问题 ' + num(m.questions) + ' 个');
+  if (step.key === 'load_rules') chips.push('业务规则 ' + num(m.rules) + ' 条');
+  if (step.key.startsWith('retrieve_')) chips.push('匹配资料 ' + num(m.sources) + ' 条');
+  if (step.key === 'assess_evidence' && ((m.missing ?? 0) > 0 || (m.conflicts ?? 0) > 0)) {
+    if ((m.missing ?? 0) > 0) chips.push('待补充 ' + num(m.missing) + ' 项');
+    if ((m.conflicts ?? 0) > 0) chips.push('待确认差异 ' + num(m.conflicts) + ' 项');
+  }
+  if (step.key === 'generate_email') chips.push('引用依据 ' + num(m.facts) + ' 条');
+  if (step.key === 'audit_claims') chips.push('核对方式：' + (verifyLabels[m.verifyMode ?? ''] ?? '—'), '核对 ' + num(m.checks) + ' 处');
+  if (step.key === 'research_customer' && step.tool) chips.push('已读取客户官网');
   return chips;
 }
 
@@ -44,17 +46,16 @@ export function TaskProcessPanel({ task }: { task: TaskProcess }) {
   const partial = Boolean(audit?.partial) && verified;
 
   return (
-    <section aria-label="处理过程数据" className="space-y-4">
+    <section aria-label="处理进度" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-medium">处理过程</h4>
-        <p className="text-xs leading-5 text-muted-foreground">数据来自本次任务的实际步骤记录，不包含被拒绝的候选片段。</p>
+        <h4 className="text-sm font-medium">处理进度</h4>
+        <span className="text-xs text-muted-foreground">已完成 {done}/{steps.length} 步</span>
       </div>
-      <dl className="grid grid-cols-2 gap-2">
+      <dl className="grid grid-cols-3 gap-2">
         {[
-          ['总耗时', seconds(task.workflowActiveMs), task.workflowCalls ? task.workflowCalls + ' 次步骤' : ''],
-          ['依据', retrieval ? num(retrieval.metrics?.sources) + ' 条' : '—', retrieval?.metrics?.chars ? num(retrieval.metrics.chars) + ' 字符' : ''],
-          ['核验', unavailable ? '未完成' : partial ? '部分核验' : verified ? '已核验' : '—', audit?.metrics?.checks !== undefined ? '逐项 ' + num(audit.metrics.checks) + ' 条' : ''],
-          ['额度', task.tokenBudget ? Math.round(((task.budgetCharged ?? 0) / task.tokenBudget) * 100) + '%' : '—', task.tokenBudget ? num(task.budgetCharged) + ' / ' + num(task.tokenBudget) : ''],
+          ['总耗时', seconds(task.workflowActiveMs), ''],
+          ['参考资料', retrieval ? num(retrieval.metrics?.sources) + ' 条' : '—', ''],
+          ['内容核对', unavailable ? '待确认' : partial ? '部分通过' : verified ? '已通过' : '—', audit?.metrics?.checks !== undefined ? '共 ' + num(audit.metrics.checks) + ' 处' : ''],
         ].map(([label, value, hint]) => (
           <div key={label} className="rounded-md border bg-background px-3 py-2">
             <dt className="text-[11px] leading-4 text-muted-foreground">{label}</dt>
@@ -66,12 +67,12 @@ export function TaskProcessPanel({ task }: { task: TaskProcess }) {
       {unavailable ? (
         <p role="status" className="flex min-w-0 items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-5 break-words text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span className="min-w-0 break-words">本次逐项核验没有完成，草稿正文保留的是模型原稿，发送前请对照下方依据人工核对。</span>
+          <span className="min-w-0 break-words">本次自动核对暂未完成，发送前请先人工确认正文中的数字和承诺。</span>
         </p>
       ) : verified ? (
         <p role="status" className="flex min-w-0 items-start gap-2 text-xs leading-5 break-words text-muted-foreground">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-          <span className="min-w-0 break-words">{partial ? '部分段落未通过核验：承诺类内容已替换成有依据的条件答复，介绍性内容保留原稿，发送前请人工过目。' : '正文已逐句对照依据核验；未通过核验的承诺类句子不会被保留。'}</span>
+          <span className="min-w-0 break-words">{partial ? '部分内容需要确认，发送前请人工过目。' : '正文已逐句对照资料核对通过。'}</span>
         </p>
       ) : null}
       <ol className="space-y-2">
@@ -86,19 +87,20 @@ export function TaskProcessPanel({ task }: { task: TaskProcess }) {
                     : <span className="h-3 w-3 shrink-0 rounded-full border" aria-hidden />}
                 <span className="min-w-0 break-words">{step.label}</span>
                 <span className="text-xs tabular-nums text-muted-foreground">{seconds(step.durationMs)}</span>
-                {step.reused > 0 ? <span className="text-[11px] text-muted-foreground">复用 {step.reused} 次</span> : null}
                 {step.state === 'failed' ? <span className="text-[11px] text-destructive">未完成</span> : null}
-                {step.key === 'audit_claims' && step.partial && !unavailable ? <span className="text-[11px] text-amber-700 dark:text-amber-400">部分核验</span> : null}
+                {step.key === 'audit_claims' && step.partial && !unavailable ? <span className="text-[11px] text-amber-700 dark:text-amber-400">待确认</span> : null}
               </div>
               <div className="ml-6 mt-0.5 h-1 w-full max-w-64 overflow-hidden rounded-full bg-muted" aria-hidden>
                 <div className={'h-full rounded-full ' + (step.state === 'failed' ? 'bg-destructive/60' : step.state === 'running' ? 'bg-primary/60' : 'bg-emerald-600/60')} style={{ width: width + '%' }} />
               </div>
-              {chips.length > 0 && <p className="ml-6 mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">{chips.map(chip => <span key={chip}>{chip}</span>)}<span>记录 {kb(step.metrics?.bytes)}</span></p>}
+              {chips.length > 0 && <p className="ml-6 mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">{chips.map(chip => <span key={chip}>{chip}</span>)}</p>}
             </li>
           );
         })}
       </ol>
-      <p className="text-[11px] leading-4 text-muted-foreground">已完成 {done}/{steps.length} 步{failed ? ' · 有步骤未完成' : ''}{epoch > 0 ? ' · 资料变化后重新核对过' : ''}</p>
+      {failed || epoch > 0 ? (
+        <p className="text-[11px] leading-4 text-muted-foreground">{failed ? '部分步骤未完成' : ''}{failed && epoch > 0 ? ' · ' : ''}{epoch > 0 ? '资料更新后已重新核对' : ''}</p>
+      ) : null}
     </section>
   );
 }

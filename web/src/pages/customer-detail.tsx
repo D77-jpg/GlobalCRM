@@ -700,7 +700,7 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       <PendingDrafts feed={pendingDrafts} onOpenDraft={letter=>navigate('/customers/'+customer.id+'?knowledgeDraft='+letter.id)} busy={letterBusy}/>
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_21rem] xl:items-start">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_19.5rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_21.5rem]">
       <div className="min-w-0 space-y-4">
       {/* ---------------------------- 客户档案 ---------------------------- */}
 
@@ -743,7 +743,7 @@ export function CustomerDetailPage(): React.JSX.Element {
               <span>该客户的下一次跟进时间（{formatDate(customer.nextFollowUpAt)}）已逾期，请尽快联系。</span>
             </div>
           ) : null}
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <section aria-labelledby="customer-contact-title" className="min-w-0">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <h3 id="customer-contact-title" className="text-sm font-semibold">联系资料</h3>
@@ -765,11 +765,11 @@ export function CustomerDetailPage(): React.JSX.Element {
                             toast.success(res.message || (res.added > 0 ? `已补充 ${res.added} 位候选联系人` : '暂未发现更多决策人邮箱'));
                           })
                           .catch((caught) => {
-                            toast.error('补查联系人失败', { description: toErrorMessage(caught, '请检查官网或 Hunter 配置') });
+                            toast.error('补查联系人失败', { description: toErrorMessage(caught, '请检查官网地址或稍后重试') });
                           })
                           .finally(() => setEnrichingContact(false));
                       }}
-                      title="针对缺失邮箱或 info@/hello@ 通用邮箱，尝试从官网与 Hunter 查找品牌/采购决策人"
+                      title="针对缺失邮箱或通用邮箱，尝试从官网与公开企业资料查找品牌/采购决策人"
                     >
                       {enrichingContact ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Search className="h-3.5 w-3.5" aria-hidden />}
                       {isGeneric ? '通用邮箱 · 补查决策人' : '补查联系人'}
@@ -1242,14 +1242,16 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       <CustomerAttachments customerId={customer.id} />
       </div>
-      <CustomerWorkbenchSidebar
-        customer={customer}
-        onPatchCustomer={async (patch) => {
-          await updateCustomer(customer.id, patch as Partial<CustomerInput>);
-          await reloadCustomer();
-          toast.success('客户商机信息已更新');
-        }}
-      />
+      <div className="min-w-0 xl:sticky xl:top-4">
+        <CustomerWorkbenchSidebar
+          customer={customer}
+          onPatchCustomer={async (patch) => {
+            await updateCustomer(customer.id, patch as Partial<CustomerInput>);
+            await reloadCustomer();
+            toast.success('客户商机信息已更新');
+          }}
+        />
+      </div>
       </div>
 
       {/* ---------------------------- 弹窗 ---------------------------- */}

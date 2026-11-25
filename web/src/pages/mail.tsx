@@ -165,7 +165,7 @@ export function MailPage(): React.JSX.Element {
   const [mailPlanBusy, setMailPlanBusy] = React.useState(false);
   const [customers, setCustomers] = React.useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = React.useState<Customer | null>(null);
-  const [copilotOpen, setCopilotOpen] = React.useState(true);
+  const [copilotOpen, setCopilotOpen] = React.useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= 1440));
   const [focusMode, setFocusMode] = React.useState(false);
   const [quickPasteOpen, setQuickPasteOpen] = React.useState(false);
   const [replySeed, setReplySeed] = React.useState<{ subject: string; content: string } | null>(null);
@@ -386,13 +386,15 @@ export function MailPage(): React.JSX.Element {
     {compose && !selectedCustomer && customerPicker}
 
     <div className={cn(
-      'mail-workspace grid min-h-[520px] overflow-hidden rounded-lg border border-border bg-card xl:h-[calc(100dvh-15.25rem)]',
+      'mail-workspace grid min-h-[540px] overflow-hidden rounded-lg border border-border bg-card lg:h-[calc(100dvh-14.25rem)]',
       focusMode
-        ? (copilotOpen ? 'xl:grid-cols-[minmax(0,1fr)_26rem]' : 'xl:grid-cols-1')
-        : (copilotOpen ? 'xl:grid-cols-[19rem_minmax(0,1fr)_25rem]' : 'xl:grid-cols-[21rem_minmax(0,1fr)]'),
+        ? (copilotOpen ? 'xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_25rem]' : 'lg:grid-cols-1')
+        : (copilotOpen
+          ? 'lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1fr)_21rem] 2xl:grid-cols-[18.5rem_minmax(0,1fr)_24rem]'
+          : 'lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]'),
     )}>
       {!focusMode ? (
-      <section className="flex min-w-0 flex-col overflow-hidden border-b border-border xl:border-b-0 xl:border-r" aria-label={folderLabels[folder]} aria-busy={loading}>
+      <section className="flex min-w-0 flex-col overflow-hidden border-b border-border lg:border-b-0 lg:border-r" aria-label={folderLabels[folder]} aria-busy={loading}>
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
           <p className="flex items-center gap-2 text-[0.8125rem] font-semibold">{folderLabels[folder]}<span className="text-[11px] font-normal tabular-nums text-muted-foreground">{total}</span></p>
           {loading ? <span className="text-[11px] text-muted-foreground">加载中…</span> : null}

@@ -84,7 +84,7 @@ export function AppShell(): React.JSX.Element {
             id="workspace-main"
             ref={scrollRef}
             tabIndex={-1}
-            className="workspace-main no-print min-w-0 flex-1 overflow-y-auto bg-background px-4 py-4 sm:px-4 sm:py-4"
+            className="workspace-main no-print min-w-0 flex-1 overflow-y-auto bg-background px-3 py-3.5 sm:px-5 sm:py-5 lg:px-6 xl:px-7"
           >
             <div className="mx-auto min-w-0 w-full max-w-[var(--workspace-content-width)]">
               {readOnly ? (

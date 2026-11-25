@@ -436,7 +436,7 @@ export function ProspectingPage(): React.JSX.Element {
         <div className={cn('flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-4 py-3 text-sm',
           run.status === 'failed' ? 'border-destructive/30 bg-destructive/5 text-destructive' : run.status === 'running' ? 'border-amber-300/60 bg-amber-50 text-amber-900' : 'bg-muted/30')}>
           {run.status === 'running' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-          <span>本轮{run.profileName?'（'+run.profileName+'）':''}：搜索到 {run.imported} 个域名，去重后 {run.deduped} 个，补全 {run.enriched} 个，Hunter 补到 {run.hunterFound} 个邮箱，入选 {run.selected} 个</span>
+          <span>本轮{run.profileName?'（'+run.profileName+'）':''}：找到 {run.imported} 个企业网站，去除重复后 {run.deduped} 个，补全资料 {run.enriched} 个，找到 {run.hunterFound} 个联系邮箱，入选 {run.selected} 个</span>
           {run.failed.length ? <span className="text-xs text-muted-foreground">{run.failed.length} 条失败</span> : null}
           {run.error ? <span>{run.error}</span> : null}
           {run.status === 'failed' ? <span className="text-xs">本轮没有保存线索，请重新生成。</span> : null}
