@@ -111,7 +111,7 @@ export function ChannelsPage(): React.JSX.Element {
   const [detail, setDetail] = React.useState<ChannelConversationDetailDto | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [centerTab, setCenterTab] = React.useState<'chat' | 'customer' | 'quotations' | 'items'>('chat');
-  const [copilotOpen, setCopilotOpen] = React.useState(true);
+  const [copilotOpen, setCopilotOpen] = React.useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= 1440));
 
   // Composer state
   const [composerDirection, setComposerDirection] = React.useState<'outbound' | 'inbound'>('outbound');
@@ -481,9 +481,9 @@ export function ChannelsPage(): React.JSX.Element {
             onClick={() => (canManage ? setCfgOpen(true) : toast.info('请联系管理员配置 WhatsApp Cloud API'))}
           >
             {stats.whatsappConnected ? (
-              <><Wifi className="h-3.5 w-3.5 text-emerald-600" />WhatsApp API 已连接</>
+              <><Wifi className="h-3.5 w-3.5 text-emerald-600" />WhatsApp 已连接</>
             ) : (
-              <><WifiOff className="h-3.5 w-3.5 text-muted-foreground" />半自动协同 · 配置官方 API</>
+              <><WifiOff className="h-3.5 w-3.5 text-muted-foreground" />连接官方 WhatsApp</>
             )}
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setCopilotOpen((v) => !v)}>
@@ -501,10 +501,12 @@ export function ChannelsPage(): React.JSX.Element {
       {/* 3-Pane Split Workspace */}
       <div className={cn(
         'grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card',
-        copilotOpen ? 'grid-cols-1 xl:grid-cols-[290px_minmax(0,1fr)_385px]' : 'grid-cols-1 lg:grid-cols-[290px_minmax(0,1fr)]',
+        copilotOpen
+          ? 'grid-cols-1 lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1fr)_21rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_24rem]'
+          : 'grid-cols-1 lg:grid-cols-[17.5rem_minmax(0,1fr)]',
       )}>
         {/* LEFT PANE: Conversation List */}
-        <aside className="flex min-h-0 flex-col border-b border-border xl:border-b-0 xl:border-r">
+        <aside className="flex min-h-0 flex-col border-b border-border lg:border-b-0 lg:border-r">
           <div className="space-y-2 border-b border-border p-2.5">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />

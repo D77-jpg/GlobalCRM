@@ -80,7 +80,7 @@ export function Header({ onOpenMobileNav, sidebarCollapsed, onToggleSidebar }: H
   const toggleAgent = useUiStore((state) => state.toggleAgent);
 
   return (
-    <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card px-3 sm:px-4 lg:px-5">
+    <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-card/95 px-3 backdrop-blur-sm sm:px-5 lg:px-6 xl:px-7">
       <Button type="button" variant="ghost" size="icon-sm" className="lg:hidden" onClick={onOpenMobileNav} aria-label={t('nav.open')}>
         <Menu className="h-4 w-4" />
       </Button>

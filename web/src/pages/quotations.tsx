@@ -497,9 +497,9 @@ export function QuotationsPage(): React.JSX.Element {
 
       {/* TAB 1: Standard 3-Column Quotation Builder */}
       {tab === 'builder' ? (
-        <div className="grid gap-4 xl:grid-cols-[17rem_minmax(0,1fr)_21rem]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] 2xl:grid-cols-[16.5rem_minmax(0,1fr)_20rem] 2xl:items-start">
           {/* Left: Customer & Product Picker */}
-          <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:col-span-2 2xl:col-span-1 2xl:grid-cols-1">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">选择报价客户</CardTitle>

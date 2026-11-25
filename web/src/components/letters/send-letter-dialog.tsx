@@ -1024,7 +1024,7 @@ export function SendLetterDialog({
                       <p className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                         <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                         <span>
-                          以下占位符在该客户档案中没有值，发送时会使用兜底文案：
+                          以下字段在该客户档案中暂未填写，发送时将使用默认称呼：
                           <strong className="font-semibold">{missingLabels.join('、')}</strong>
                           。建议先补全客户信息，或从正文中移除它们。
                         </span>

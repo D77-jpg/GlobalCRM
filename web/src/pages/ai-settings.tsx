@@ -560,7 +560,7 @@ export function AiSettingsPage(): React.JSX.Element {
                         ? activeProvider.kind === 'mock'
                           ? '演示模式，不调用外部模型'
                           : `${activeProvider.model} · ${activeProvider.baseUrl || '接口地址未配置'}`
-                        : `当前回退到${catalog?.fallback.source === 'environment' ? '环境变量' : '旧版单例配置'}${activeFallback ? ` · ${catalog.fallback.model}` : ''}`}
+                        : `当前使用${catalog?.fallback.source === 'environment' ? '系统环境变量配置' : '系统默认配置'}${activeFallback ? ` · ${catalog.fallback.model}` : ''}`}
                     </p>
                   </div>
                 </div>

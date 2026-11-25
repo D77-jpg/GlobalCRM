@@ -387,10 +387,10 @@ export function MailCopilotPane({
             {!result.usedAi ? (
               <div className="rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                 <p className="flex items-center gap-1 font-semibold">
-                  <AlertTriangle className="h-3.5 w-3.5" />当前已降级为知识库规则兜底（未生成 AI 版）
+                  <AlertTriangle className="h-3.5 w-3.5" />当前采用知识库标准草稿（AI 暂未响应）
                 </p>
                 <p className="mt-0.5 text-[11px] opacity-90">
-                  原因：{result.aiFallbackReason || 'AI 模型调用未返回有效 JSON'}。三版卡片暂基于规则底稿打分，可检查「AI 配置」后点重新起草。
+                  已先基于产品与知识库资料生成可参考的标准草稿；稍后可点击「重新起草」获取 AI 定制版本。
                 </p>
               </div>
             ) : (
@@ -457,27 +457,18 @@ export function MailCopilotPane({
               ) : null}
             </div>
 
-            {/* Guardrails */}
+            {/* Quality Checks */}
             <div className="space-y-1.5 rounded-lg border border-border p-2.5">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1 font-semibold">
                   {badChecks.length > 0 ? <ShieldAlert className="h-3.5 w-3.5 text-destructive" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />}
-                  确定性护栏（{liveScore?.score ?? 0} 分 · {liveScore?.words ?? 0} 词）
+                  发送前质量检查（{liveScore?.score ?? 0} 分 · {liveScore?.words ?? 0} 词）
                 </span>
-                <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => void recheckGuardrails()}>复检</Button>
+                <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => void recheckGuardrails()}>重新检查</Button>
               </div>
-              {liveScore ? (
-                <div className="grid grid-cols-5 gap-1 rounded bg-muted/40 px-2 py-1 text-center text-[10px] tabular-nums text-muted-foreground">
-                  <div>覆盖 <span className="font-semibold text-foreground">{liveScore.parts.coverage}</span>/35</div>
-                  <div>具体 <span className="font-semibold text-foreground">{liveScore.parts.specificity}</span>/15</div>
-                  <div>安全 <span className="font-semibold text-foreground">{liveScore.parts.safety}</span>/30</div>
-                  <div>写作 <span className="font-semibold text-foreground">{liveScore.parts.writing}</span>/10</div>
-                  <div>篇幅 <span className="font-semibold text-foreground">{liveScore.parts.length}</span>/10</div>
-                </div>
-              ) : null}
               {liveScore && liveScore.reasons.length > 0 ? (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                  扣分说明：{liveScore.reasons.join('；')}
+                  优化建议：{liveScore.reasons.join('；')}
                 </p>
               ) : null}
               <ul className="space-y-1">
@@ -492,7 +483,7 @@ export function MailCopilotPane({
               </ul>
               {result.revisedDiff ? (
                 <details className="pt-1 text-[11px] text-muted-foreground">
-                  <summary className="cursor-pointer font-medium text-primary">已自动修正红线 1 轮（查看修改摘要）</summary>
+                  <summary className="cursor-pointer font-medium text-primary">已自动优化风险表述（查看修改说明）</summary>
                   <ul className="mt-1 list-disc pl-4">
                     {result.revisedDiff.changesZh.map((c, idx) => <li key={idx}>{c}</li>)}
                   </ul>

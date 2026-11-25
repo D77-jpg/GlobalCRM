@@ -32,8 +32,8 @@ export function PageHeader({
 
   return (
     <header className={cn('workspace-page-header flex flex-col gap-2.5', className)}>
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 flex-1">
           {backTo ? (
             <Button
               type="button"
@@ -47,9 +47,9 @@ export function PageHeader({
             </Button>
           ) : null}
           <h1 className="break-words text-[1.25rem] font-semibold leading-tight tracking-[-0.025em] sm:text-[1.375rem]">{title}</h1>
-          {description ? <p className="mt-1 max-w-4xl text-xs leading-relaxed text-muted-foreground">{description}</p> : null}
+          {description ? <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">{description}</p> : null}
         </div>
-        {actions ? <div className="workspace-page-actions flex shrink-0 flex-wrap items-center gap-1.5">{actions}</div> : null}
+        {actions ? <div className="workspace-page-actions flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2 md:justify-end">{actions}</div> : null}
       </div>
       {children}
     </header>

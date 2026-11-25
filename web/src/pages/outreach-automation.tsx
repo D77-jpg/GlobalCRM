@@ -182,24 +182,32 @@ interface EnrollmentDiagnosticsDto {
   } | null;
 }
 
+const CHECK_STATUS_LABELS: Record<string, string> = {
+  supported: '已核对',
+  non_claim: '常规表达',
+  unsupported: '缺少依据',
+  contradicted: '与资料冲突',
+  unverifiable: '待人工确认',
+};
+
 const DRAFT_STAGE_META: Record<
   Exclude<OutreachDraftStage, 'none'>,
   { label: string; variant: 'outline' | 'warning' | 'failed' | 'developed' }
 > = {
-  reverify_queued: { label: '已提交重核（排队）', variant: 'outline' },
-  waiting_model: { label: '等待模型', variant: 'warning' },
-  draft_saved_verified: { label: '核验通过', variant: 'developed' },
-  draft_audit_failed: { label: '核验不完整', variant: 'failed' },
+  reverify_queued: { label: '排队重新生成', variant: 'outline' },
+  waiting_model: { label: '正在生成草稿', variant: 'warning' },
+  draft_saved_verified: { label: '核对通过', variant: 'developed' },
+  draft_audit_failed: { label: '内容待核对', variant: 'failed' },
   waiting_delivery: { label: '等待投递', variant: 'outline' },
   delivery_cancelled: { label: '已取消（未发送）', variant: 'warning' },
-  task_failed: { label: 'AI 任务失败', variant: 'failed' },
-  delivery_failed: { label: '投递失败（SMTP）', variant: 'failed' },
+  task_failed: { label: '生成未完成', variant: 'failed' },
+  delivery_failed: { label: '发信失败', variant: 'failed' },
 };
 
 const TZ_SOURCE_LABELS: Record<'explicit' | 'country' | 'fallback', string> = {
-  explicit: '客户指定时区',
-  country: '国家/区号推断',
-  fallback: '回退默认时区',
+  explicit: '客户时区',
+  country: '按国家匹配',
+  fallback: '默认时区',
 };
 
 const TIMEZONES = [
@@ -254,7 +262,7 @@ function phaseBadge(
     return blockedStatus(row.lastError ?? '');
   }
   if (row.draftStage === 'delivery_failed') {
-    return { label: '投递失败（SMTP）', variant: 'failed' };
+    return { label: '发信失败', variant: 'failed' };
   }
   if (row.draftStage === 'delivery_cancelled') {
     return { label: '已取消（未发送）', variant: 'warning' };
@@ -267,9 +275,9 @@ function phaseBadge(
   }
   if (row.draftStage === 'draft_audit_failed') {
     if (row.sendGateDetail) {
-      return { label: '其他发送检查拦截', variant: 'failed' };
+      return { label: '发送前待调整', variant: 'failed' };
     }
-    return { label: '事实核验不完整', variant: 'failed' };
+    return { label: '内容待核对', variant: 'failed' };
   }
   const effectiveOpen = row.recipientWindowOpen ?? windowOpen;
   if (!effectiveOpen && ['due', 'ready', 'generating', 'sending'].includes(row.phase)) {
@@ -290,54 +298,54 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
     return '按规则停止（非系统故障）';
   }
   if (row.draftStage === 'delivery_failed') {
-    return `第 ${row.nextStep} 封邮件投递失败（与草稿核验无关），请排查收件箱/退信后处理`;
+    return `第 ${row.nextStep} 封邮件发送失败，请检查客户邮箱或发件记录后再处理`;
   }
   if (row.draftStage === 'delivery_cancelled') {
-    return `第 ${row.nextStep} 封邮件已取消（未发送），不会再投递；如需重发可点「单条试跑」`;
+    return `第 ${row.nextStep} 封邮件已取消（未发送），如需重发可点「重新生成」`;
   }
   if (row.draftStage === 'waiting_delivery') {
-    return `第 ${row.nextStep} 封已进入发送队列，等待邮件中心投递`;
+    return `第 ${row.nextStep} 封已进入发信队列，等待邮件中心投递`;
   }
   if (row.draftStage === 'waiting_model') {
-    return row.taskStepLabel ? `模型执行中：${row.taskStepLabel}` : '模型正在生成与核验草稿';
+    return row.taskStepLabel ? `处理中：${row.taskStepLabel}` : '正在生成并核对草稿';
   }
   if (row.draftStage === 'reverify_queued') {
-    return '已入队等待模型处理';
+    return '已加入队列，等待生成新草稿';
   }
   if (row.pausedReadyToResume) {
-    return '当前草稿检查已通过，队列仍暂停，待恢复（不会自动恢复）';
+    return '当前草稿已通过检查，队列仍暂停，确认后请手动恢复';
   }
   if (row.draftStage === 'draft_audit_failed') {
     if (row.sendGateDetail) {
       return row.sendGateDetail.guidance;
     }
     return row.draftAuditDetail?.rebuiltAndFailedAgain
-      ? '新稿再次核验失败：请查看下方具体缺失句子/步骤，补充依据后再处理'
-      : '请查看具体缺失句子或点「诊断」定位核验缺口，勿盲目反复重建';
+      ? '新稿仍有待核对内容：请查看下方具体句子，补充资料后再处理'
+      : '请查看下方提示或点「查看详情」确认缺失依据，再决定是否重新生成';
   }
   if (row.draftStage === 'task_failed') {
     return row.taskRetryAt
-      ? `下次退避重试：${formatDateTime(row.taskRetryAt)}`
-      : '请点「诊断」排查 AI 上游错误后再单条试跑';
+      ? `预计自动重试：${formatDateTime(row.taskRetryAt)}`
+      : '请点「查看详情」确认原因后再点「重新生成」';
   }
   if (!effectiveOpen && ['due', 'ready', 'sending'].includes(row.phase)) {
     return `等当地工作日 ${windowText}（${formatDateTime(row.nextRunAt)}）`;
   }
   switch (row.phase) {
     case 'waiting':
-      return `${formatRelative(row.nextRunAt)}（${formatDateTime(row.nextRunAt)}）${row.draftReady ? ' · 草稿已过核验待发' : ''}`;
+      return `${formatRelative(row.nextRunAt)}（${formatDateTime(row.nextRunAt)}）${row.draftReady ? ' · 草稿已就绪' : ''}`;
     case 'generating':
-      return '正在生成并核验草稿';
+      return '正在生成并核对草稿';
     case 'ready':
-      return row.draftReady ? '草稿已过核验，等待发送队列' : '等待核验与发送检查';
+      return row.draftReady ? '草稿已就绪，等待发送' : '等待核对与检查';
     case 'sending':
-      return '正在通过 SMTP 发送';
+      return '正在发送邮件';
     case 'due':
       return '已到发送时间，等待处理';
     case 'paused':
-      return row.draftStage === 'draft_saved_verified' ? '当前草稿检查已通过，队列仍暂停，待恢复' : '暂停中（可单条试跑核验）';
+      return row.draftStage === 'draft_saved_verified' ? '当前草稿已通过检查，队列仍暂停，待手动恢复' : '已暂停（可先重新生成草稿）';
     case 'failed':
-      return '请点「诊断」排查后单条试跑';
+      return '请点「查看详情」确认后再处理';
     case 'completed':
     default:
       return '—';
@@ -649,10 +657,10 @@ export function OutreachAutomationPage(): React.JSX.Element {
       }>(scoped(`/outreach-automation/enrollments/${row.id}/regenerate`), {});
       setOverview(res.overview);
       setForm(res.overview.config);
-      toast.success(`已为 ${row.customerName} 提交单条第 ${row.nextStep} 封生成与核验`, {
+      toast.success(`已为 ${row.customerName} 提交重新生成第 ${row.nextStep} 封草稿`, {
         description: res.overview.config.enabled
-          ? '核验通过后按买家当地排程发送。'
-          : '正式发送仍保持暂停；可点「诊断」跟踪步骤耗时与核验结果。',
+          ? '核对通过后将按客户当地工作日时段发送。'
+          : '自动发送仍保持暂停；可点「查看详情」跟踪生成与核对进度。',
       });
     } catch (caught) {
       setError(toErrorMessage(caught, '重新生成草稿失败'));
@@ -671,11 +679,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
       );
       setOverview(res.overview);
       setForm(res.overview.config);
-      toast.success(`已清理 ${res.cancelled} 条积压排队任务`, {
-        description: '正在执行的任务和已保存草稿未受影响；现在可挑 1 条客户点「单条试跑」验证。',
+      toast.success(`已清理 ${res.cancelled} 条排队中的生成任务`, {
+        description: '正在处理的任务和已保存草稿不受影响；需要时可对单个客户点「重新生成」。',
       });
     } catch (caught) {
-      setError(toErrorMessage(caught, '清理积压排队任务失败'));
+      setError(toErrorMessage(caught, '清理排队任务失败'));
     } finally {
       setBusy(false);
     }
@@ -694,16 +702,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
       if (res.recovered > 0) {
         toast.success(
           includeUpstreamAiFailures
-            ? `已用当前模型重新恢复 ${res.recovered} 位旧 AI 失败客户`
-            : `已恢复 ${res.recovered} 位因 AI 熔断误停的客户`,
+            ? `已重新安排 ${res.recovered} 位之前未生成成功的客户`
+            : `已恢复 ${res.recovered} 位因 AI 服务繁忙暂停的客户`,
           {
             description: res.overview.config.enabled
-              ? '已错峰排程并在单账号并发上限 3 条内逐步恢复；历史发信失败和合规停止的客户未受影响。'
-              : '已重置为暂停待发状态（总开关仍关闭），不会触发发送；历史发信失败和合规停止的客户未受影响。',
+              ? '系统将分批错峰继续准备草稿；发信失败和按规则停止的客户不受影响。'
+              : '已重置为暂停待处理状态（总开关仍关闭），不会自动发信；发信失败和按规则停止的客户不受影响。',
           },
         );
       } else {
-        toast.info('当前没有符合条件的 AI 失败客户需要恢复');
+        toast.info('当前没有需要恢复的客户');
       }
     } catch (caught) {
       setError(toErrorMessage(caught, '恢复失败客户失败'));
@@ -850,26 +858,25 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 当前不在发送时段（工作日 {formatWindow(overview.config)}，{overview.config.timezone}）。队列会保留，等到下一个工作日自动继续。
               </p>
             ) : null}
-            {(queuedTasksCount > 0 || runningTasksCount > 0 || retryingTasksCount > 0 || failedTasksCount > 0 || historicalFailedTasksCount > 0) ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs">
-                <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
-                  <span className="font-medium text-foreground">AI 草稿任务状态：</span>
-                  <span>当前排队 <strong className="tabular-nums text-foreground">{queuedTasksCount}</strong></span>
-                  <span>· 运行中 <strong className="tabular-nums text-foreground">{runningTasksCount}</strong></span>
-                  <span>· 待重试 <strong className="tabular-nums text-foreground">{retryingTasksCount}</strong></span>
+            {(queuedTasksCount > 0 || runningTasksCount > 0 || retryingTasksCount > 0 || failedTasksCount > 0) ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-muted-foreground">
+                  <span className="font-medium text-foreground">草稿准备进度：</span>
+                  <span>排队中 <strong className="tabular-nums text-foreground">{queuedTasksCount}</strong></span>
+                  <span>· 生成中 <strong className="tabular-nums text-foreground">{runningTasksCount}</strong></span>
+                  {retryingTasksCount > 0 ? (
+                    <span>· 自动重试中 <strong className="tabular-nums text-foreground">{retryingTasksCount}</strong></span>
+                  ) : null}
                   {failedTasksCount > 0 ? (
-                    <span>· 当前任务阻塞 <strong className="tabular-nums text-destructive">{failedTasksCount}</strong></span>
+                    <span>· 未完成 <strong className="tabular-nums text-destructive">{failedTasksCount}</strong></span>
                   ) : null}
-                  {historicalFailedTasksCount > 0 ? (
-                    <Badge variant="outline" className="font-normal text-muted-foreground">
-                      历史失败记录 {historicalFailedTasksCount}（旧轮次累计，非当前阻塞）
-                    </Badge>
+                  {isAdmin && historicalFailedTasksCount > 0 ? (
+                    <span className="text-[11px] text-muted-foreground/80">（历史记录 {historicalFailedTasksCount}）</span>
                   ) : null}
-                  <span className="text-[11px]">（单账号自动并发上限 3 条）</span>
                 </div>
                 {queuedTasksCount > 0 ? (
                   <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void drainQueuedTasks()}>
-                    清理积压排队任务（{queuedTasksCount}）
+                    清空排队（{queuedTasksCount}）
                   </Button>
                 ) : null}
               </div>
@@ -886,13 +893,13 @@ export function OutreachAutomationPage(): React.JSX.Element {
                   <div className="space-y-0.5">
                     <p className="font-semibold">
                       {circuitOpen
-                        ? `AI 通道处于熔断冷却中（剩余约 ${circuitCooldownSec} 秒），期间已暂停新建任务且不消耗客户重试次数`
+                        ? `AI 服务暂时繁忙，约 ${circuitCooldownSec} 秒后自动恢复`
                         : circuitFailedCount > 0
-                          ? `发现 ${circuitFailedCount} 位客户曾因 AI 通道熔断/并发保护误停（共 ${aiFailedCount} 位旧 AI 失败客户）`
-                          : `发现 ${aiFailedCount} 位客户因历史 AI 超时/502 达到重试上限而停发`}
+                          ? `有 ${circuitFailedCount} 位客户因 AI 服务繁忙暂停生成`
+                          : `有 ${aiFailedCount} 位客户此前生成草稿多次超时，已暂停自动重试`}
                     </p>
                     <p className="leading-5 text-muted-foreground">
-                      切换更稳定的模型（如 DeepSeek）后，点击右侧按钮可一键清理旧 AI 失败记录并错峰恢复（严格不动历史 SMTP 发信失败与合规停止客户）。
+                      确认 AI 服务正常后，点击右侧按钮可分批恢复草稿生成（不会影响已发信失败或已停止跟进的客户）。
                     </p>
                   </div>
                 </div>
@@ -907,7 +914,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       onClick={() => void recoverCircuitFailed(false)}
                     >
                       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-                      仅恢复熔断误停（{circuitFailedCount}）
+                      恢复繁忙暂停（{circuitFailedCount}）
                     </Button>
                   ) : null}
                   {aiFailedCount > 0 ? (
@@ -920,7 +927,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       onClick={() => void recoverCircuitFailed(true)}
                     >
                       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-                      切模型后恢复旧 AI 失败（{aiFailedCount}）
+                      重试未生成客户（{aiFailedCount}）
                     </Button>
                   ) : null}
                 </div>
@@ -933,12 +940,12 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                     <div className="space-y-0.5">
                       <p className="font-semibold">
-                        事实核验不完整：{unverifiedCount} 封（当前可重建 {rebuildableCount} 封）
-                        {sendGateBlockedCount > 0 ? `；另有 ${sendGateBlockedCount} 封正文已过核验、卡在其他发送检查` : ''}
+                        内容待核对：{unverifiedCount} 封（可重新生成 {rebuildableCount} 封）
+                        {sendGateBlockedCount > 0 ? `；另有 ${sendGateBlockedCount} 封待按提示微调` : ''}
                       </p>
                       <p className="leading-5">
-                        右侧按钮仅重建「事实核验不完整」且满足条件的可重建草稿，不会误处理其他发送检查或已人工批准草稿
-                        {overview.config.enabled ? '。' : '（正式发送仍保持暂停，核验通过后您再手动恢复）。'}
+                        点击右侧按钮将只重新生成未通过内容核对的草稿，不会覆盖已人工审核通过的草稿
+                        {overview.config.enabled ? '。' : '（自动发送仍保持暂停，确认无误后再手动恢复）。'}
                       </p>
                     </div>
                   </div>
@@ -951,7 +958,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     onClick={() => void reverifyAllUnverified()}
                   >
                     {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-                    一键重建未核验草稿（{rebuildableCount}）
+                    一键重新生成（{rebuildableCount}）
                   </Button>
                 </div>
               </div>
@@ -1000,14 +1007,14 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-300/70 bg-sky-50/70 p-2.5 text-xs text-sky-900 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200">
                 <div className="space-y-0.5">
                   <p className="font-semibold">
-                    其他发送检查拦截：{sendGateBlockedCount} 封（正文逐项核验已通过，请勿盲目重建）
+                    发送前待调整：{sendGateBlockedCount} 封（正文已核对通过，按提示处理即可发送）
                   </p>
                   <p className="leading-5">
                     {[
-                      sendGateCounts.missingEvidence > 0 ? `首封缺我方能力依据 ${sendGateCounts.missingEvidence} 封` : '',
-                      sendGateCounts.offerMismatch > 0 ? `寄样/色卡或优惠授权不匹配 ${sendGateCounts.offerMismatch} 封（可一键删除提议后重检）` : '',
-                      sendGateCounts.layoutOrLength > 0 ? `单段过长/字数/提问规则 ${sendGateCounts.layoutOrLength} 封（可拆段或调整后重检）` : '',
-                    ].filter(Boolean).join(' · ') || '请在下方队列按每行具体拦截提示使用对应处理按钮。'}
+                      sendGateCounts.missingEvidence > 0 ? `首封缺少公司能力资料 ${sendGateCounts.missingEvidence} 封` : '',
+                      sendGateCounts.offerMismatch > 0 ? `寄样/色卡或优惠未授权 ${sendGateCounts.offerMismatch} 封（可一键移除提议）` : '',
+                      sendGateCounts.layoutOrLength > 0 ? `段落或字数待调整 ${sendGateCounts.layoutOrLength} 封（可一键拆段）` : '',
+                    ].filter(Boolean).join(' · ') || '请在下方队列按每行提示处理。'}
                   </p>
                 </div>
                 <Button
@@ -1025,37 +1032,37 @@ export function OutreachAutomationPage(): React.JSX.Element {
               </div>
             ) : null}
             {pausedReadyCount > 0 || deliveryFailedCount > 0 || deliveryCancelledCount > 0 || contextWarningCount > 0 ? (
-              <div className="mt-2.5 flex flex-wrap items-center gap-3 rounded-md border border-border/70 bg-muted/20 px-2.5 py-2 text-xs text-muted-foreground">
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                 {pausedReadyCount > 0 ? (
                   <span>
-                    · 已有 <strong className="text-foreground">{pausedReadyCount}</strong> 位客户当前草稿检查已通过，队列仍暂停，待手动恢复（不会自动恢复发送）
+                    已过检待手动恢复 <strong className="text-foreground">{pausedReadyCount}</strong> 位
                   </span>
                 ) : null}
                 {contextWarningCount > 0 ? (
                   <span>
-                    · 另有 <strong className="text-foreground">{contextWarningCount}</strong> 封草稿正文核验已通过，仅附带背景资料缺口提醒（未写入正文，不拦截发送，不计入重建）
+                    附带背景资料提示（不影响发送）<strong className="text-foreground">{contextWarningCount}</strong> 封
                   </span>
                 ) : null}
                 {deliveryCancelledCount > 0 ? (
                   <span>
-                    · 另有 <strong className="text-amber-700 dark:text-amber-300">{deliveryCancelledCount}</strong> 位客户当前步骤邮件已取消（未发送，不会再投递）
+                    邮件已取消（未发送）<strong className="text-amber-700 dark:text-amber-300">{deliveryCancelledCount}</strong> 位
                   </span>
                 ) : null}
                 {deliveryFailedCount > 0 ? (
                   <span>
-                    · 另有 <strong className="text-destructive">{deliveryFailedCount}</strong> 位客户历史发信投递失败（SMTP 拒收/发送异常，与草稿核验无关）
+                    发信失败 <strong className="text-destructive">{deliveryFailedCount}</strong> 位
                   </span>
                 ) : null}
               </div>
             ) : null}
           </section>
 
-          <section aria-label="自动开发指标" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <section aria-label="自动开发指标" className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             {[
               { label: '可加入客户', value: overview.stats.eligible, hint: '待开发，或已有开发信记录', icon: Users },
               { label: '进行中', value: overview.stats.active, hint: `队列共 ${overview.stats.enrolled} 位`, icon: Bot },
               { label: '今日已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit}`, hint: `剩余 ${overview.stats.remainingToday} 封`, icon: Send },
-              { label: '需要处理', value: issueCount, hint: `暂停/待处理/异常停止${ruleStoppedCount > 0 ? `（按规则停止 ${ruleStoppedCount} 位不计入）` : ''}`, icon: ShieldCheck },
+              { label: '需要处理', value: issueCount, hint: `暂停或待确认${ruleStoppedCount > 0 ? `（正常停止 ${ruleStoppedCount} 位不计入）` : ''}`, icon: ShieldCheck },
             ].map((item) => (
               <div key={item.label} className="rounded-lg border bg-card p-3.5">
                 <div className="flex items-center justify-between gap-2">
@@ -1068,8 +1075,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
             ))}
           </section>
 
-          <div className="grid gap-3 xl:grid-cols-[20rem_minmax(0,1fr)]">
-            <Card>
+          <div className="grid gap-4 2xl:grid-cols-[19.5rem_minmax(0,1fr)] 2xl:items-start">
+            <Card className="order-2 2xl:order-1">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Settings2 className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -1186,8 +1193,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
               </CardContent>
             </Card>
 
-            <Card ref={queueCardRef} className="min-w-0">
-              <CardHeader className="flex-row items-start justify-between gap-3 pb-2">
+            <Card ref={queueCardRef} className="order-1 min-w-0 2xl:order-2">
+              <CardHeader className="flex-col items-start justify-between gap-3 pb-2 sm:flex-row sm:items-center">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-sm">
                     <Clock3 className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -1262,7 +1269,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     );
                   }
                   return (
-                  <div className="overflow-x-auto">
+                  <div className="workspace-table">
                     <Table aria-label="自动开发队列">
                       <TableHeader>
                         <TableRow>
@@ -1302,25 +1309,18 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 <div className="flex flex-wrap items-center gap-1">
                                   <Badge variant={status.variant}>{status.label}</Badge>
                                   {showStageMeta && stageMeta ? <Badge variant={stageMeta.variant}>{stageMeta.label}</Badge> : null}
-                                  {row.draftAuditDetail?.completeness === 'partial' ? (
-                                    <Badge variant="outline" className="text-[10px]">部分核验</Badge>
-                                  ) : null}
-                                  {row.draftAuditDetail?.failureStageLabel ? (
-                                    <Badge variant="outline" className="text-[10px]">{row.draftAuditDetail.failureStageLabel}</Badge>
-                                  ) : null}
                                   {row.draftAuditDetail?.rebuiltAndFailedAgain ? (
-                                    <Badge variant="warning" className="text-[10px]">新稿再次失败</Badge>
+                                    <Badge variant="warning" className="text-[10px]">新稿仍待处理</Badge>
                                   ) : null}
                                 </div>
                                 {row.draftStage === 'task_failed' && row.taskError ? (
                                   <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-destructive">
-                                    {row.taskStepLabel ? `[${row.taskStepLabel}] ` : ''}
+                                    {row.taskStepLabel ? `${row.taskStepLabel}：` : ''}
                                     {row.taskError}
-                                    {row.taskErrorCode ? ` (${row.taskErrorCode})` : ''}
                                   </p>
                                 ) : row.draftStage === 'delivery_failed' ? (
                                   <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4 text-destructive">
-                                    <p>第 {row.nextStep} 封邮件投递失败（SMTP）：{row.deliveryError || row.lastError || '邮件发送被拒或异常'}</p>
+                                    <p>第 {row.nextStep} 封发信失败：{row.deliveryError || row.lastError || '邮件发送被拒或异常'}</p>
                                     <Link to={`/customers/${row.customerId}`} className="inline-block text-primary underline underline-offset-2">
                                       查看客户发信记录
                                     </Link>
@@ -1334,11 +1334,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                   </div>
                                 ) : row.draftStage === 'waiting_delivery' ? (
                                   <p className="mt-1 max-w-[16rem] text-[11px] leading-4 text-sky-700 dark:text-sky-300">
-                                    第 {row.nextStep} 封已进入发送队列，等待邮件中心投递
+                                    第 {row.nextStep} 封已进入发信队列，等待邮件中心投递
                                   </p>
                                 ) : row.draftStage === 'waiting_model' && row.taskStepLabel ? (
                                   <p className="mt-1 max-w-[15rem] text-[11px] leading-4 text-amber-700 dark:text-amber-300">
-                                    当前步骤：{row.taskStepLabel}
+                                    当前进度：{row.taskStepLabel}
                                   </p>
                                 ) : sendGate ? (
                                   <div className="mt-1 max-w-[20rem] space-y-0.5 text-[11px] leading-4">
@@ -1353,21 +1353,21 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                     </p>
                                     {row.draftAuditDetail?.previousError ? (
                                       <p className="text-muted-foreground">
-                                        上次失败原因（已归档）：{row.draftAuditDetail.previousError}
+                                        上次未通过原因（已解决）：{row.draftAuditDetail.previousError}
                                       </p>
                                     ) : null}
                                     {row.draftAuditDetail?.failedChecks?.length ? (
                                       <ul className="space-y-0.5 rounded bg-muted/40 p-1.5 text-[11px]">
                                         {row.draftAuditDetail.failedChecks.slice(0, 2).map((chk, idx) => (
                                           <li key={`${chk.id}-${idx}`} className="text-muted-foreground">
-                                            <span className="font-medium text-destructive">[{chk.status}]</span>{' '}
+                                            <span className="font-medium text-destructive">[{CHECK_STATUS_LABELS[chk.status] ?? '待核对'}]</span>{' '}
                                             {chk.excerpt ? `“${chk.excerpt}”` : ''}{' '}
                                             <span>{chk.reason}</span>
                                           </li>
                                         ))}
                                         {row.draftAuditDetail.checksFailed > 2 ? (
                                           <li className="text-muted-foreground">
-                                            还有 {row.draftAuditDetail.checksFailed - 2} 处未通过句，点「诊断」查看全部
+                                            还有 {row.draftAuditDetail.checksFailed - 2} 处待核对，点「查看详情」查看全部
                                           </li>
                                         ) : null}
                                       </ul>
@@ -1376,11 +1376,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 ) : row.pausedReadyToResume ? (
                                   <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4">
                                     <p className="text-emerald-700 dark:text-emerald-300">
-                                      当前草稿核验与发送检查均已通过（队列仍暂停）
+                                      当前草稿已通过核对与发送检查（队列仍暂停）
                                     </p>
                                     {lastArchivedError ? (
                                       <p className="text-muted-foreground">
-                                        已归档旧拦截：{lastArchivedError.message}
+                                        已解决旧提示：{lastArchivedError.message}
                                       </p>
                                     ) : null}
                                   </div>
@@ -1395,7 +1395,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 ) : null}
                                 {row.contextWarnings && row.contextWarnings.length > 0 && !row.draftAuditDetail ? (
                                   <p className="mt-1 max-w-[18rem] rounded bg-muted/40 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                                    背景资料提醒（未写入正文，不拦截发送）：{row.contextWarnings.map((w) => w.message).join('；')}
+                                    背景提示（不影响发送）：{row.contextWarnings.map((w) => w.message).join('；')}
                                   </p>
                                 ) : null}
                               </TableCell>
@@ -1464,11 +1464,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                     </Button>
                                   ) : null}
                                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void loadDiagnostics(row.id)}>
-                                    诊断
+                                    查看详情
                                   </Button>
                                   {canSingleTestRun ? (
                                     <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void regenerateRow(row)}>
-                                      单条试跑
+                                      重新生成
                                     </Button>
                                   ) : null}
                                   {controllable ? (
@@ -1492,8 +1492,19 @@ export function OutreachAutomationPage(): React.JSX.Element {
 
           {isAdmin ? <ApprovedProofBlocksCard key={`proofs-${activeProjectId}`} onSaved={() => void load(true)} /> : null}
           <OutreachResultsPanel key={`${activeProjectId}-${ownerId}`} endpoint={scoped('/outreach-automation/results')} isAdmin={isAdmin} />
-          {isAdmin ? <WritingReleaseCard key={`release-${activeProjectId}`} /> : null}
-          {isAdmin ? <OutreachExperimentsCard key={`exp-${activeProjectId}`} /> : null}
+          {isAdmin ? (
+            <details className="group rounded-lg border bg-card">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-xs font-medium text-muted-foreground hover:text-foreground">
+                <span>高级管理：写信版本切换与文案效果实验（仅管理员）</span>
+                <span className="text-[11px] group-open:hidden">展开</span>
+                <span className="hidden text-[11px] group-open:inline">收起</span>
+              </summary>
+              <div className="space-y-4 border-t p-4">
+                <WritingReleaseCard key={`release-${activeProjectId}`} />
+                <OutreachExperimentsCard key={`exp-${activeProjectId}`} />
+              </div>
+            </details>
+          ) : null}
 
           {overview.recent.length ? (
             <Card>
@@ -1523,16 +1534,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between gap-2 text-base">
-              <span>单条诊断 · {diagData?.customerName || '加载中'}</span>
+              <span>发送状态详情 · {diagData?.customerName || '加载中'}</span>
               {diagRowId ? (
                 <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={diagLoading} onClick={() => void loadDiagnostics(diagRowId)}>
                   <RefreshCw className={`h-3 w-3 ${diagLoading ? 'animate-spin' : ''}`} aria-hidden />
-                  刷新诊断
+                  刷新
                 </Button>
               ) : null}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              按任务 ID 串联模型生成、逐项核验耗时与错误码、草稿保存状态以及买家实际时区排程。
+              查看当前草稿的内容核对结果、预计发送时段与处理建议。
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-4 text-xs">
@@ -1563,10 +1574,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         {diagData.sendReadiness.label}
                       </Badge>
                       <span className="text-[11px] text-muted-foreground">
-                        正文核验：{diagData.sendReadiness.auditPassed ? '通过' : '未通过'}
-                        {' · '}发送闸门：{diagData.sendReadiness.sendGatePassed ? '通过' : '未通过'}
-                        {diagData.sendReadiness.bodyHashValid !== undefined ? ` · 正文指纹：${diagData.sendReadiness.bodyHashValid ? '一致' : '已变更'}` : ''}
-                        {diagData.sendReadiness.knowledgeFresh !== undefined ? ` · 依据新鲜度：${diagData.sendReadiness.knowledgeFresh ? '最新' : '已过期'}` : ''}
+                        内容核对：{diagData.sendReadiness.auditPassed ? '已通过' : '待核对'}
+                        {' · '}发前检查：{diagData.sendReadiness.sendGatePassed ? '已通过' : '待调整'}
+                        {diagData.sendReadiness.knowledgeFresh === false ? ' · 引用资料已更新' : ''}
                       </span>
                     </div>
                     <p className="leading-5 text-foreground">{diagData.sendReadiness.detail}</p>
@@ -1607,7 +1617,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                               disabled={busy}
                               onClick={() => void fixSendGate(diagData.enrollmentId, 'recheck', true)}
                             >
-                              立即重检
+                              重新检查
                             </Button>
                           ) : null}
                         </div>
@@ -1625,7 +1635,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
 
                 {diagData.errorHistory && diagData.errorHistory.length > 0 ? (
                   <div className="rounded-md border bg-muted/20 p-3 space-y-1.5">
-                    <p className="font-semibold text-foreground">历史拦截归档记录（{diagData.errorHistory.length}）</p>
+                    <p className="font-semibold text-foreground">历史处理记录（{diagData.errorHistory.length}）</p>
                     <ul className="space-y-1 text-[11px] text-muted-foreground">
                       {diagData.errorHistory.slice().reverse().map((item, idx) => (
                         <li key={`${item.at}-${idx}`} className="rounded bg-background px-2 py-1">
@@ -1641,143 +1651,113 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 ) : null}
 
                 <div className="rounded-md border bg-muted/20 p-3 space-y-1">
-                  <p className="font-semibold text-foreground">买家实际排程时区（第 {diagData.nextStep} 封）</p>
+                  <p className="font-semibold text-foreground">客户发送时段（第 {diagData.nextStep} 封）</p>
                   <p className="text-muted-foreground">
-                    使用时区：<strong className="text-foreground">{diagData.timezone.effectiveTimezone}</strong>（{TZ_SOURCE_LABELS[diagData.timezone.source]}）
-                    · 发送时段 {diagData.timezone.windowStart}–{diagData.timezone.windowEnd}
-                    · {diagData.timezone.windowOpen ? '当前在时段内' : `下一次可发送：${formatDateTime(diagData.timezone.nextSendAt)}`}
+                    发送时区：<strong className="text-foreground">{diagData.timezone.effectiveTimezone}</strong>（{TZ_SOURCE_LABELS[diagData.timezone.source]}）
+                    · 工作日 {diagData.timezone.windowStart}–{diagData.timezone.windowEnd}
+                    · {diagData.timezone.windowOpen ? '当前处于可发送时段' : `预计发送时间：${formatDateTime(diagData.timezone.nextSendAt)}`}
                   </p>
                 </div>
 
                 <div className="rounded-md border p-3 space-y-2">
-                  <p className="font-semibold text-foreground">最新草稿与逐项核验分层</p>
+                  <p className="font-semibold text-foreground">当前草稿核对情况</p>
                   {diagData.latestDraft ? (
                     <div className="space-y-1.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant={diagData.latestDraft.needsReverify || diagData.latestDraft.sendGateIssue ? 'failed' : 'developed'}>
                           {diagData.latestDraft.needsReverify
-                            ? (diagData.latestDraft.failureCategoryLabel ? `核验失败 · ${diagData.latestDraft.failureCategoryLabel}` : '正文核验未通过')
+                            ? (diagData.latestDraft.failureCategoryLabel ? `待核对 · ${diagData.latestDraft.failureCategoryLabel}` : '正文内容待核对')
                             : diagData.latestDraft.sendGateIssue
-                              ? '正文核验通过 · 其他发送检查未通过'
-                              : '草稿已保存且核验通过'}
+                              ? '正文已通过 · 待按提示微调'
+                              : '草稿已通过核对'}
                         </Badge>
-                        {diagData.latestDraft.fastPath ? (
-                          <Badge variant="developed">预审卖点零等待直通</Badge>
-                        ) : null}
-                        {diagData.latestDraft.fallbackApplied ? (
-                          <Badge variant="outline">槽位安全降级</Badge>
-                        ) : null}
-                        {diagData.latestDraft.failureStageLabel ? (
-                          <Badge variant="outline">阶段：{diagData.latestDraft.failureStageLabel}</Badge>
-                        ) : null}
-                        {diagData.latestDraft.failureCode ? (
-                          <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{diagData.latestDraft.failureCode}</code>
-                        ) : null}
                         <span className="text-muted-foreground">
-                          第 {diagData.latestDraft.outreachStep ?? '—'} 封 · completeness={diagData.latestDraft.completeness ?? '—'} · mode={diagData.latestDraft.factAuditMode ?? '—'}
+                          第 {diagData.latestDraft.outreachStep ?? '—'} 封 · 更新于 {formatDateTime(diagData.latestDraft.updatedAt)}
                         </span>
                       </div>
                       <p className="text-foreground">主题：{diagData.latestDraft.subject}</p>
                       <p className="text-muted-foreground">
-                        逐项核验：总计 {diagData.latestDraft.checksTotal} 项 · 支持 {diagData.latestDraft.checksSupported} · 非事实 {diagData.latestDraft.checksNonClaim} · 未通过 {diagData.latestDraft.checksFailed} · 更新于 {formatDateTime(diagData.latestDraft.updatedAt)}
+                        已逐句核对 {diagData.latestDraft.checksTotal} 处：通过 {diagData.latestDraft.checksSupported + diagData.latestDraft.checksNonClaim} 处
+                        {diagData.latestDraft.checksFailed > 0 ? ` · 待确认 ${diagData.latestDraft.checksFailed} 处` : ''}
                       </p>
-                      {diagData.latestDraft.tierSummary ? (
-                        <p className="text-muted-foreground">
-                          红/黄/绿分层：红线 {diagData.latestDraft.tierSummary.red} · 黄线客户实体 {diagData.latestDraft.tierSummary.yellow} · 绿线卖点/非事实 {diagData.latestDraft.tierSummary.green}
-                          {diagData.latestDraft.tierSummary.proofBlocksUsed.length > 0 ? ` · 命中预审块 ${diagData.latestDraft.tierSummary.proofBlocksUsed.length} 条` : ''}
-                        </p>
-                      ) : null}
-                      {diagData.latestDraft.fallbackNote ? (
-                        <p className="rounded bg-sky-50/70 px-2 py-1 text-sky-900 dark:bg-sky-400/10 dark:text-sky-200">
-                          降级说明：{diagData.latestDraft.fallbackNote}
-                        </p>
-                      ) : null}
                       {diagData.latestDraft.failureDetail ? (
                         <p className="rounded bg-amber-50/70 px-2 py-1 text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
-                          核验分层说明：{diagData.latestDraft.failureDetail}
+                          原因说明：{diagData.latestDraft.failureDetail}
                         </p>
                       ) : null}
                       {diagData.latestDraft.failedChecks && diagData.latestDraft.failedChecks.length > 0 ? (
                         <div className="space-y-1 rounded border bg-muted/20 p-2">
-                          <p className="font-medium text-foreground">未通过核验的段落/句子（{diagData.latestDraft.failedChecks.length} 处）：</p>
+                          <p className="font-medium text-foreground">需要修改或核对的句子（{diagData.latestDraft.failedChecks.length} 处）：</p>
                           <ul className="space-y-1.5">
                             {diagData.latestDraft.failedChecks.map((chk, idx) => (
                               <li key={`${chk.id}-${idx}`} className="rounded bg-background p-1.5 text-[11px]">
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  <Badge variant="failed" className="px-1.5 py-0 text-[10px]">{chk.status}</Badge>
+                                  <Badge variant="failed" className="px-1.5 py-0 text-[10px]">{CHECK_STATUS_LABELS[chk.status] ?? '待核对'}</Badge>
                                   <span className="font-medium text-destructive">{chk.reason}</span>
                                 </div>
-                                {chk.excerpt ? <p className="mt-1 text-muted-foreground">摘录：{chk.excerpt}</p> : null}
+                                {chk.excerpt ? <p className="mt-1 text-muted-foreground">原文：{chk.excerpt}</p> : null}
                               </li>
                             ))}
                           </ul>
                         </div>
                       ) : null}
                       {diagData.latestDraft.sendGateIssue ? (
-                        <p className="text-destructive">自动发送闸门原因：{diagData.latestDraft.sendGateIssue}</p>
+                        <p className="text-destructive">发送前检查提示：{diagData.latestDraft.sendGateIssue}</p>
                       ) : null}
                       {diagData.latestDraft.contextWarnings && diagData.latestDraft.contextWarnings.length > 0 ? (
                         <div className="rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">
-                          <p className="font-medium text-foreground">背景资料缺口提醒（未写入正文，不拦截发送）：</p>
+                          <p className="font-medium text-foreground">背景资料提示（未写入正文，不影响发送）：</p>
                           <ul className="mt-0.5 list-disc pl-4">
                             {diagData.latestDraft.contextWarnings.map((w, idx) => (
-                              <li key={idx}>[{w.code}] {w.message}</li>
+                              <li key={idx}>{w.message}</li>
                             ))}
                           </ul>
                         </div>
                       ) : null}
-                      {diagData.latestDraft.issues.length > 0 ? (
-                        <ul className="list-disc pl-4 text-amber-700 dark:text-amber-300">
-                          {diagData.latestDraft.issues.map((i, idx) => (
-                            <li key={idx}>[{i.code}] {i.message}</li>
-                          ))}
-                        </ul>
-                      ) : null}
                     </div>
                   ) : (
-                    <p className="text-muted-foreground">当前第 {diagData.nextStep} 封尚未保存新草稿。</p>
+                    <p className="text-muted-foreground">当前第 {diagData.nextStep} 封尚未生成新草稿。</p>
                   )}
                 </div>
 
-                <div className="rounded-md border p-3 space-y-2">
-                  <p className="font-semibold text-foreground">最新 AI 任务串联日志</p>
-                  {diagData.latestTask ? (
-                    <div className="space-y-2">
+                {isAdmin && diagData.latestTask ? (
+                  <details className="rounded-md border bg-muted/10 p-3">
+                    <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground">
+                      展开生成过程详情（仅管理员）
+                    </summary>
+                    <div className="mt-2.5 space-y-2">
                       <p className="text-muted-foreground">
-                        任务 ID：<code className="text-[11px]">{diagData.latestTask.id}</code>
-                        · 状态：<strong className="text-foreground">{diagData.latestTask.status}</strong>
+                        当前状态：<strong className="text-foreground">{diagData.latestTask.status === 'completed' ? '已完成' : diagData.latestTask.status === 'failed' ? '未完成' : diagData.latestTask.status === 'running' ? '处理中' : '排队中'}</strong>
                         {diagData.latestTask.currentStepLabel ? ` · 步骤：${diagData.latestTask.currentStepLabel}` : ''}
-                        · 累计耗时：{(diagData.latestTask.totalDurationMs / 1000).toFixed(1)}s
+                        · 耗时：{(diagData.latestTask.totalDurationMs / 1000).toFixed(1)} 秒
                       </p>
                       {diagData.latestTask.errorMessage ? (
                         <p className="rounded bg-destructive/10 px-2 py-1 text-destructive">
-                          {diagData.latestTask.failureClass === 'circuit_rejected' ? '[熔断/并发保护，未发往上游] ' : '[实际发往上游失败] '}
                           {diagData.latestTask.errorMessage}
-                          {diagData.latestTask.errorCode ? ` (${diagData.latestTask.errorCode})` : ''}
                         </p>
                       ) : null}
                       {diagData.latestTask.steps.length > 0 ? (
-                        <div className="overflow-x-auto rounded border">
+                        <div className="overflow-x-auto rounded border bg-background">
                           <Table>
                             <TableHeader>
                               <TableRow>
                                 <TableHead className="h-7 text-[11px]">步骤</TableHead>
                                 <TableHead className="h-7 text-[11px]">状态</TableHead>
                                 <TableHead className="h-7 text-[11px]">耗时</TableHead>
-                                <TableHead className="h-7 text-[11px]">核验/错误详情</TableHead>
+                                <TableHead className="h-7 text-[11px]">结果说明</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {diagData.latestTask.steps.map((s, idx) => (
                                 <TableRow key={`${s.key}-${idx}`}>
                                   <TableCell className="py-1.5 text-[11px]">{s.label}</TableCell>
-                                  <TableCell className="py-1.5 text-[11px]">{s.state}</TableCell>
+                                  <TableCell className="py-1.5 text-[11px]">{s.state === 'completed' ? '完成' : s.state === 'failed' ? '失败' : '进行中'}</TableCell>
                                   <TableCell className="py-1.5 text-[11px] tabular-nums">{s.durationMs ? `${(s.durationMs / 1000).toFixed(1)}s` : '—'}</TableCell>
                                   <TableCell className="py-1.5 text-[11px] text-muted-foreground">
                                     {s.error
                                       ? <span className="text-destructive">{s.error}</span>
-                                      : s.verifyMode
-                                        ? `${s.verifyMode} · ${s.checksCount ?? 0} checks · ${s.issuesCount ?? 0} issues${s.failureCategory ? ` · ${s.failureCategory}` : ''}`
+                                      : s.checksCount !== undefined
+                                        ? `已核对 ${s.checksCount} 项${s.issuesCount ? ` · 提示 ${s.issuesCount} 项` : ''}`
                                         : '—'}
                                   </TableCell>
                                 </TableRow>
@@ -1787,10 +1767,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         </div>
                       ) : null}
                     </div>
-                  ) : (
-                    <p className="text-muted-foreground">暂无第 {diagData.nextStep} 封 AI 任务记录。</p>
-                  )}
-                </div>
+                  </details>
+                ) : null}
               </>
             ) : null}
           </DialogBody>
@@ -1909,9 +1887,9 @@ function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin
     setHarvesting(true);
     try {
       const res = await apiPost<{ harvested: number }>('/outreach-automation/exemplars/harvest', { days: 60 });
-      toast.success(`已回流 ${res.harvested} 篇脱敏优秀邮件范本`, { description: '后续写信与英文模板建议将参考已验证表现良好的范本。' });
+      toast.success(`已整理 ${res.harvested} 篇高回复邮件范本`, { description: '后续撰写开发信与英文模板建议时将优先参考这些高回复示例。' });
     } catch (reason) {
-      toast.error('回流范本失败', { description: toErrorMessage(reason, '请稍后重试') });
+      toast.error('整理范本失败', { description: toErrorMessage(reason, '请稍后重试') });
     } finally {
       setHarvesting(false);
     }
@@ -1919,8 +1897,8 @@ function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin
 
   return <Card>
     <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
-      <div className="space-y-1"><CardTitle className="text-sm">近 30 天自动开发效果与归因复盘</CardTitle>
-        <CardDescription>按切入点、采购偏好、步骤和写信版本统计；自动标记「打开多、回复少」并给出保留/改写/停用建议。</CardDescription></div>
+      <div className="space-y-1"><CardTitle className="text-sm">近 30 天自动开发效果复盘</CardTitle>
+        <CardDescription>按切入角度与发送轮次统计回复与转化表现，帮助优化开发信话术。</CardDescription></div>
       <div className="flex flex-wrap items-center gap-2">
         {isAdmin ? (
           <div className="inline-flex rounded-md border p-0.5 text-xs">
@@ -1930,7 +1908,7 @@ function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin
         ) : null}
         {isAdmin ? (
           <Button size="sm" variant="outline" onClick={() => void harvestExemplars()} disabled={harvesting}>
-            {harvesting ? '回流中…' : '回流优秀范本'}
+            {harvesting ? '整理中…' : '沉淀高回复范本'}
           </Button>
         ) : null}
         <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>{loading ? '加载中' : (mode === 'cross_brand' ? crossBrand : data) ? '刷新' : '查看'}</Button>
@@ -1962,21 +1940,20 @@ function OutreachResultsPanel({ endpoint, isAdmin }: { endpoint: string; isAdmin
         {data.truncated ? <p className="text-amber-700 dark:text-amber-300">注：匹配记录超出单次窗口上限，已按最新发送记录优先统计。</p> : null}
       </div>
       {data.groups.length ? <div className="overflow-x-auto"><Table>
-        <TableHeader><TableRow>{['切入点 / 偏好', '已发（改稿）', '有效回复', '询价 / 要样', '报价 / 成交', '打开 / 点击（代理）', '负反馈（退订/退信）', '复盘建议'].map(title => <TableHead key={title}>{title}</TableHead>)}</TableRow></TableHeader>
+        <TableHeader><TableRow>{['切入角度 / 偏好', '已发（人工微调）', '有效回复', '询价 / 要样', '报价 / 成交', '打开 / 点击', '退订 / 退信', '复盘建议'].map(title => <TableHead key={title}>{title}</TableHead>)}</TableRow></TableHeader>
         <TableBody>{data.groups.map(row => {
           const rec = row.recommendation ? RECOMMENDATION_BADGE[row.recommendation] : undefined;
           return <TableRow key={`${row.angle}-${row.preferenceName || ''}-${row.step}-${row.version}`}>
             <TableCell>
               <p className="font-medium">{row.angle}{row.preferenceName && row.preferenceName !== '未标定' ? ` · ${row.preferenceName}` : ''}</p>
-              <p className="text-xs text-muted-foreground">第 {row.step || '—'} 封 · {row.version}</p>
+              <p className="text-xs text-muted-foreground">第 {row.step || '—'} 封</p>
             </TableCell>
             <TableCell className="tabular-nums">{row.sent}{row.humanEdited ? `（改 ${row.humanEdited}）` : ''}</TableCell>
-            <TableCell className="tabular-nums">{row.replies}{row.autoReplies ? <span className="block text-[11px] text-muted-foreground">排除自动回复 {row.autoReplies}</span> : null}</TableCell>
+            <TableCell className="tabular-nums">{row.replies}{row.autoReplies ? <span className="block text-[11px] text-muted-foreground">已过滤自动回复 {row.autoReplies}</span> : null}</TableCell>
             <TableCell className="tabular-nums">{row.inquiries} / {row.sampleRequests}</TableCell>
             <TableCell className="tabular-nums">{row.quoted ?? 0} / {row.won ?? 0}</TableCell>
-            <TableCell className="tabular-nums">
+            <TableCell className="tabular-nums" title={`其中自动预加载 ${row.proxyOpens} · 安全扫描 ${row.scannerClicks}`}>
               {row.opened} / {row.clicked}
-              <span className="block text-[11px] text-muted-foreground">代理 {row.proxyOpens} · 扫描 {row.scannerClicks}</span>
             </TableCell>
             <TableCell className="tabular-nums">{row.optOuts ?? 0} / {row.hardBounces}</TableCell>
             <TableCell>
@@ -2116,7 +2093,8 @@ function LegacyUpgradeAuditBanner({ onMigrated }: { onMigrated: () => void }) {
     setBusy(true);
     try {
       await apiPost('/outreach-automation/migrate-legacy-modes', { targetMode });
-      toast.success(`已将历史配置统一迁移为 ${targetMode} 模式`);
+      const modeLabel = targetMode === 'shadow' ? '模拟校验' : targetMode === 'pilot' ? '小流量试发' : '正式发送';
+      toast.success(`已将历史配置统一设为「${modeLabel}」模式`);
       setAudit(null);
       onMigrated();
     } catch (reason) {
@@ -2297,9 +2275,9 @@ function OutreachExperimentsCard() {
 }
 
 const PROOF_SLOT_LABELS: Record<ProjectApprovedProofBlock['slot'], string> = {
-  identity: '公司定位（identity）',
-  proof: '核心卖点（proof）',
-  cta: '低压力提问（cta）',
+  identity: '公司介绍',
+  proof: '核心卖点',
+  cta: '结尾提问',
 };
 
 function ApprovedProofBlocksCard({ onSaved }: { onSaved: () => void }) {
@@ -2375,12 +2353,12 @@ function ApprovedProofBlocksCard({ onSaved }: { onSaved: () => void }) {
       const res = await apiPut<{ blocks: ProjectApprovedProofBlock[] }>('/outreach-automation/proof-blocks', { blocks: cleaned });
       setBlocks(res.blocks);
       setDirty(false);
-      toast.success(`已保存 ${res.blocks.filter((b) => b.enabled).length} 条启用的项目预审卖点块`, {
-        description: '新生成开发信将优先原句锚定这些卖点块，核验可直接零等待直通，减少 50%+ AI 请求和 502 风险。',
+      toast.success(`已保存 ${res.blocks.filter((b) => b.enabled).length} 条启用的标准英文卖点`, {
+        description: '新生成开发信将优先引用这些已审核表述，提高生成速度与内容通过率。',
       });
       onSaved();
     } catch (caught) {
-      toast.error('保存预审卖点块失败', { description: toErrorMessage(caught, '请检查每条卖点块的标题和英文正文') });
+      toast.error('保存卖点库失败', { description: toErrorMessage(caught, '请检查每条卖点的标题和英文内容') });
     } finally {
       setSaving(false);
     }
@@ -2394,11 +2372,11 @@ function ApprovedProofBlocksCard({ onSaved }: { onSaved: () => void }) {
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 text-sm">
             <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
-            项目预审英文卖点块（Approved Proof Blocks）
+            项目标准英文卖点库
             <Badge variant={enabledCount > 0 ? 'developed' : 'outline'}>已启用 {enabledCount} 条</Badge>
           </CardTitle>
           <CardDescription className="text-xs leading-5">
-            行业标准 4 槽位写稿 + 红黄绿分级核验：开发信原句引用下方预审卖点块时可走零 LLM 快速核验直通，大幅提升通过率并降低上游 502/超时；红线商业承诺（价格/MOQ/交期/认证/免费）仍 100% 严格拦截。
+            维护经审核的标准英文公司介绍与产品卖点。生成开发信时将优先引用这些表述以提升核对通过率；价格、起订量、交期与认证承诺仍会严格核查。
           </CardDescription>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
