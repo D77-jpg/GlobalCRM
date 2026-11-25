@@ -16,6 +16,7 @@ import {
   Eye,
   Link2,
   NotebookPen,
+  Paperclip,
   ReceiptText,
   RefreshCw,
   UserPlus,
@@ -78,7 +79,32 @@ function EventBody({
   onViewLetter?: (letterId: string) => void;
 }): React.JSX.Element | null {
   switch (event.type) {
-    case 'mail_received': return <a className="text-sm text-primary underline" href={'/mail?id=' + event.mail?.id}>{event.mail?.subject} · {event.mail?.from}</a>;
+    case 'mail_received': {
+      const mail = event.mail;
+      if (!mail) return null;
+      return (
+        <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md bg-muted/35 px-2 py-1.5">
+          <span className="text-sm font-medium">{mail.subject || '（无主题）'}</span>
+          <span className="text-xs text-muted-foreground">{mail.from}</span>
+          {mail.attachmentCount && mail.attachmentCount > 0 ? (
+            <Badge variant="outline" className="gap-1 text-[11px]">
+              <Paperclip className="h-3 w-3" aria-hidden />
+              {mail.attachmentCount} 个附件
+            </Badge>
+          ) : null}
+          <CustomerReplyMailButton
+            customerId={customerId}
+            status="replied"
+            mailId={mail.id}
+            label="查看来信与附件"
+            attachmentCount={mail.attachmentCount}
+          />
+          <a className="text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline" href={`/mail?id=${mail.id}`}>
+            去邮件中心
+          </a>
+        </div>
+      );
+    }
     case 'mail_opened':
     case 'mail_clicked': {
       const interaction = event.interaction;
@@ -170,6 +196,7 @@ function EventBody({
                 status="replied"
                 mailId={change.replyMail.id}
                 sourceLabel={change.replyMail.sourceLabel}
+                attachmentCount={change.replyMail.attachmentCount}
                 label="查看这封回复"
               />
             </div>

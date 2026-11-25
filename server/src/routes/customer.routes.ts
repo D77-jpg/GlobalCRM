@@ -28,6 +28,7 @@ import {
   createFollowUpSchema,
   followUpIdParamsSchema,
   listFollowUpsQuerySchema,
+  replyMailAttachmentParamsSchema,
   updateFollowUpSchema,
 } from '../validators/followup.validator';
 import {
@@ -63,6 +64,7 @@ import {
 import {
   createFollowUpHandler,
   deleteFollowUpHandler,
+  downloadCustomerReplyMailAttachmentHandler,
   getCustomerReplyMailsHandler,
   getCustomerTimelineHandler,
   listFollowUpsHandler,
@@ -147,6 +149,11 @@ router.post('/:id/letters', validate({ params: idParamsSchema, body: sendLetterS
 /* ---------- 嵌套的跟进记录 / 活动时间线 ---------- */
 router.get('/:id/timeline', validate({ params: idParamsSchema }), getCustomerTimelineHandler);
 router.get('/:id/reply-mails', validate({ params: idParamsSchema }), getCustomerReplyMailsHandler);
+router.get(
+  '/:id/reply-mails/:mailId/attachments/:attachmentId',
+  validate({ params: replyMailAttachmentParamsSchema }),
+  downloadCustomerReplyMailAttachmentHandler,
+);
 router.get('/:id/follow-ups', validate({ params: idParamsSchema, query: listFollowUpsQuerySchema }), listFollowUpsHandler);
 router.post('/:id/follow-ups', validate({ params: idParamsSchema, body: createFollowUpSchema }), createFollowUpHandler);
 router.put('/:id/follow-ups/:followUpId', validate({ params: followUpIdParamsSchema, body: updateFollowUpSchema }), updateFollowUpHandler);

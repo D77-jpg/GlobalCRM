@@ -36,6 +36,14 @@ export interface IOutreachAutomationConfig {
   updatedAt: Date;
 }
 
+export interface OutreachEnrollmentErrorHistoryItem {
+  at: Date;
+  step?: number;
+  message: string;
+  resolvedAt?: Date;
+  resolvedReason?: string;
+}
+
 export interface IOutreachAutomationEnrollment {
   projectId: Types.ObjectId;
   campaignId: Types.ObjectId;
@@ -49,6 +57,7 @@ export interface IOutreachAutomationEnrollment {
   queuedAt?: Date;
   taskIds: Types.ObjectId[];
   lastError?: string;
+  errorHistory?: OutreachEnrollmentErrorHistoryItem[];
   attempts: number;
   lastSentAt?: Date;
   createdAt: Date;
@@ -101,6 +110,16 @@ const enrollmentSchema = new Schema<IOutreachAutomationEnrollment>(
     queuedAt: Date,
     taskIds: [{ type: Schema.Types.ObjectId, ref: 'AgentTask' }],
     lastError: { type: String, maxlength: 500 },
+    errorHistory: {
+      type: [{
+        at: { type: Date, required: true },
+        step: { type: Number, min: 1, max: 3 },
+        message: { type: String, required: true, maxlength: 500 },
+        resolvedAt: Date,
+        resolvedReason: { type: String, maxlength: 200 },
+      }],
+      default: [],
+    },
     attempts: { type: Number, default: 0, min: 0 },
     lastSentAt: Date,
   },

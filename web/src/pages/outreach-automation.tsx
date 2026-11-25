@@ -38,9 +38,31 @@ import type {
   OutreachAutomationQueueRow,
   OutreachAutomationStartResult,
   OutreachDraftStage,
+  OutreachEnrollmentErrorHistoryItem,
+  OutreachSendGateDetail,
   ProjectApprovedProofBlock,
   UserDto,
 } from '@/types';
+
+type SendGateFixAction = 'recheck' | 'strip_offer' | 'split_paragraphs';
+
+interface ReverifyBatchResult {
+  scanned: number;
+  queued: number;
+  skipped: number;
+  skippedDetails?: { customerId: string; customerName: string; reason: string }[];
+  skippedReasons?: { reason: string; count: number }[];
+}
+
+function isExceptionQueueRow(row: OutreachAutomationQueueRow): boolean {
+  return Boolean(
+    row.draftNeedsReverify
+    || row.draftStage === 'draft_audit_failed'
+    || row.draftStage === 'task_failed'
+    || row.draftStage === 'delivery_failed'
+    || row.status === 'failed',
+  );
+}
 
 interface EnrollmentDiagnosticsDto {
   enrollmentId: string;
@@ -52,12 +74,16 @@ interface EnrollmentDiagnosticsDto {
   currentStep: number;
   nextStep: number;
   lastError?: string;
+  pausedReadyToResume?: boolean;
+  errorHistory?: OutreachEnrollmentErrorHistoryItem[];
   sendReadiness?: {
     status:
       | 'ready_to_send'
+      | 'paused_ready_to_resume'
       | 'waiting_buyer_window'
       | 'blocked_by_send_gate'
       | 'blocked_by_audit'
+      | 'delivery_failed'
       | 'task_in_progress'
       | 'task_failed'
       | 'completed'
@@ -68,6 +94,7 @@ interface EnrollmentDiagnosticsDto {
     auditPassed: boolean;
     sendGatePassed: boolean;
     sendGateIssues: string[];
+    sendGateDetail?: OutreachSendGateDetail;
     bodyHashValid?: boolean;
     knowledgeFresh?: boolean;
     staleSources?: { sourceId: string; title: string; reason: string }[];
@@ -154,8 +181,9 @@ const DRAFT_STAGE_META: Record<
   reverify_queued: { label: '已提交重核（排队）', variant: 'outline' },
   waiting_model: { label: '等待模型', variant: 'warning' },
   draft_saved_verified: { label: '核验通过', variant: 'developed' },
-  draft_audit_failed: { label: '核验失败', variant: 'failed' },
+  draft_audit_failed: { label: '核验不完整', variant: 'failed' },
   task_failed: { label: 'AI 任务失败', variant: 'failed' },
+  delivery_failed: { label: '投递失败（SMTP）', variant: 'failed' },
 };
 
 const TZ_SOURCE_LABELS: Record<'explicit' | 'country' | 'fallback', string> = {
@@ -183,7 +211,7 @@ const PHASE_META: Record<
   sending: { label: (step) => `正在发送第 ${step} 封`, variant: 'outline' },
   due: { label: (step) => `等待发送第 ${step} 封`, variant: 'warning' },
   paused: { label: () => '已暂停', variant: 'warning' },
-  blocked: { label: () => '已停止', variant: 'failed' },
+  blocked: { label: () => '按规则停止', variant: 'muted' },
   completed: { label: () => '三封已完成', variant: 'developed' },
   failed: { label: () => '需要处理', variant: 'failed' },
 };
@@ -194,51 +222,81 @@ function formatWindow(config: OutreachAutomationConfig): string {
 
 function blockedStatus(reason: string): { label: string; detail: string; variant: 'warning' | 'muted' | 'developed' } {
   if (reason.includes('已回复')) {
-    return { label: '客户已回复', detail: '已停止自动发送，转人工跟进', variant: 'developed' };
+    return { label: '按规则停止 · 客户已回复', detail: '已自动停止后续开发，转人工跟进（非故障）', variant: 'developed' };
   }
   if (reason.includes('退订') || reason.includes('退信') || reason.includes('拒绝')) {
-    return { label: '已退订/拒收', detail: '已停止发送，避免继续打扰', variant: 'warning' };
+    return { label: '按规则停止 · 退订/拒收', detail: '已按合规规则停止发送（非故障）', variant: 'muted' };
   }
   if (reason.includes('已删除') || reason.includes('归属已变化')) {
-    return { label: '归属待确认', detail: '客户已删除或负责人已变更', variant: 'warning' };
+    return { label: '按规则停止 · 归属变更', detail: '客户已删除或负责人已变更', variant: 'muted' };
   }
   if (reason.includes('不在可开发状态')) {
-    return { label: '已转人工', detail: '客户状态已变化，自动开发停止', variant: 'muted' };
+    return { label: '按规则停止 · 已转人工', detail: '客户状态已变化，自动开发停止（非故障）', variant: 'muted' };
   }
-  return { label: '已停止', detail: reason || '不再继续发送', variant: 'muted' };
+  return { label: '按规则停止', detail: reason || '按业务规则不再继续发送', variant: 'muted' };
 }
 
 function phaseBadge(
   row: OutreachAutomationQueueRow,
   windowOpen: boolean,
 ): { label: string; variant: 'outline' | 'warning' | 'failed' | 'muted' | 'developed'; detail?: string } {
+  if (row.isRuleStopped || row.phase === 'blocked') {
+    return blockedStatus(row.lastError ?? '');
+  }
+  if (row.draftStage === 'delivery_failed') {
+    return { label: '投递失败（SMTP）', variant: 'failed' };
+  }
+  if (row.pausedReadyToResume) {
+    return { label: '队列暂停 · 待恢复', variant: 'warning' };
+  }
   if (row.draftStage === 'draft_audit_failed') {
-    return { label: '草稿不可自动发送', variant: 'failed' };
+    if (row.sendGateDetail) {
+      return { label: '其他发送检查拦截', variant: 'failed' };
+    }
+    return { label: '事实核验不完整', variant: 'failed' };
   }
   const effectiveOpen = row.recipientWindowOpen ?? windowOpen;
   if (!effectiveOpen && ['due', 'ready', 'generating', 'sending'].includes(row.phase)) {
     return { label: '等待当地发送时段', variant: 'outline' };
   }
-  if (row.phase === 'blocked') return blockedStatus(row.lastError ?? '');
   const meta = PHASE_META[row.phase];
   return { label: meta.label(row.nextStep), variant: meta.variant };
 }
 
 function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, windowText: string): string {
   const effectiveOpen = row.recipientWindowOpen ?? windowOpen;
+  if (row.isRuleStopped || row.phase === 'blocked') {
+    const status = blockedStatus(row.lastError ?? '');
+    if (status.label.includes('客户已回复')) return '按规则停止：查看客户并人工跟进';
+    if (status.label.includes('归属变更')) return '按规则停止：请确认负责人后重新加入';
+    if (status.label.includes('退订/拒收')) return '按规则停止：保持停发，保留记录';
+    if (status.label.includes('已转人工')) return '按规则停止：已转人工跟进';
+    return '按规则停止（非系统故障）';
+  }
+  if (row.draftStage === 'delivery_failed') {
+    return `第 ${row.nextStep} 封邮件投递失败（与草稿核验无关），请排查收件箱/退信后处理`;
+  }
   if (row.draftStage === 'waiting_model') {
     return row.taskStepLabel ? `模型执行中：${row.taskStepLabel}` : '模型正在生成与核验草稿';
   }
   if (row.draftStage === 'reverify_queued') {
     return '已入队等待模型处理';
   }
+  if (row.pausedReadyToResume) {
+    return '当前草稿检查已通过，队列仍暂停，待恢复（不会自动恢复）';
+  }
   if (row.draftStage === 'draft_audit_failed') {
-    return '草稿已保存，但未通过核验/质量检查（不可自动发送，请点「诊断」或「单条重核」）';
+    if (row.sendGateDetail) {
+      return row.sendGateDetail.guidance;
+    }
+    return row.draftAuditDetail?.rebuiltAndFailedAgain
+      ? '新稿再次核验失败：请查看下方具体缺失句子/步骤，补充依据后再处理'
+      : '请查看具体缺失句子或点「诊断」定位核验缺口，勿盲目反复重建';
   }
   if (row.draftStage === 'task_failed') {
     return row.taskRetryAt
       ? `下次退避重试：${formatDateTime(row.taskRetryAt)}`
-      : '请点「诊断」排查原因后单条试跑';
+      : '请点「诊断」排查 AI 上游错误后再单条试跑';
   }
   if (!effectiveOpen && ['due', 'ready', 'sending'].includes(row.phase)) {
     return `等当地工作日 ${windowText}（${formatDateTime(row.nextRunAt)}）`;
@@ -255,17 +313,9 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
     case 'due':
       return '已到发送时间，等待处理';
     case 'paused':
-      return row.draftStage === 'draft_saved_verified' ? '草稿已核验通过，恢复后可发送' : '暂停中（可单条试跑核验）';
+      return row.draftStage === 'draft_saved_verified' ? '当前草稿检查已通过，队列仍暂停，待恢复' : '暂停中（可单条试跑核验）';
     case 'failed':
       return '请点「诊断」排查后单条试跑';
-    case 'blocked': {
-      const status = blockedStatus(row.lastError ?? '');
-      if (status.label === '客户已回复') return '查看客户并继续跟进';
-      if (status.label === '归属待确认') return '请确认负责人后重新加入';
-      if (status.label === '已退订/拒收') return '停止发送，保留客户记录';
-      if (status.label === '已转人工') return '请人工确认客户状态';
-      return '已停止发送';
-    }
     case 'completed':
     default:
       return '—';
@@ -324,10 +374,12 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const [diagLoading, setDiagLoading] = React.useState(false);
   const [diagData, setDiagData] = React.useState<EnrollmentDiagnosticsDto | null>(null);
   const [diagRowId, setDiagRowId] = React.useState('');
-  const [queueFilter, setQueueFilter] = React.useState<'all' | 'exceptions'>('all');
+  const [queueFilter, setQueueFilter] = React.useState<'all' | 'exceptions' | 'paused_ready'>('all');
+  const [lastReverifyResult, setLastReverifyResult] = React.useState<ReverifyBatchResult | null>(null);
   const [error, setError] = React.useState('');
   const dirtyRef = React.useRef(false);
   const ownerTouchedRef = React.useRef(false);
+  const queueCardRef = React.useRef<HTMLDivElement | null>(null);
 
   const query = ownerId ? `?userId=${encodeURIComponent(ownerId)}` : '';
   const scoped = React.useCallback((path: string) => `${path}${query}`, [query]);
@@ -378,6 +430,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
     setDirty(false);
     setForm(null);
     setOverview(null);
+    setLastReverifyResult(null);
   }, [ownerId]);
 
   const patch = (value: Partial<OutreachAutomationConfig>): void => {
@@ -492,25 +545,68 @@ export function OutreachAutomationPage(): React.JSX.Element {
     setBusy(true);
     setError('');
     try {
-      const res = await apiPost<{
-        scanned: number;
-        queued: number;
-        skipped: number;
-        overview: OutreachAutomationOverview;
-      }>(scoped('/outreach-automation/reverify-unverified'), {});
+      const res = await apiPost<ReverifyBatchResult & { overview: OutreachAutomationOverview }>(
+        scoped('/outreach-automation/reverify-unverified'),
+        {},
+      );
       setOverview(res.overview);
       setForm(res.overview.config);
+      setLastReverifyResult({
+        scanned: res.scanned,
+        queued: res.queued,
+        skipped: res.skipped,
+        skippedDetails: res.skippedDetails,
+        skippedReasons: res.skippedReasons,
+      });
+      const skipSummary = res.skippedReasons?.length
+        ? `；跳过原因：${res.skippedReasons.map((r) => `${r.reason}（${r.count}）`).join('，')}`
+        : '';
       if (res.queued > 0) {
-        toast.success(`已提交 ${res.queued} 封未核验草稿重新生成并核验`, {
-          description: res.overview.config.enabled
-            ? '新草稿将在后台用当前模型完成逐项核验后按节奏发送。'
-            : '正式发送仍保持暂停；等待核验完成后确认无待核验项再恢复发送。',
+        toast.success(`重建结果：入队 ${res.queued} 封，跳过 ${res.skipped} 封`, {
+          description: `${res.overview.config.enabled
+            ? '新草稿将在后台用当前模型完成逐项核验后按节奏发送'
+            : '正式发送仍保持暂停；等待核验完成后确认无待核验项再恢复发送'}${skipSummary}`,
+        });
+      } else if (res.skipped > 0) {
+        toast.info(`已扫描 ${res.scanned} 封：入队 0 封，跳过 ${res.skipped} 封`, {
+          description: skipSummary.replace(/^；/, '') || '请查看横幅下方跳过明细',
         });
       } else {
-        toast.info('当前没有需要重建的未核验草稿');
+        toast.info('当前没有可重建的未核验草稿（其余拦截请按各自入口处理）');
       }
     } catch (caught) {
       setError(toErrorMessage(caught, '批量重建未核验草稿失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fixSendGate = async (enrollmentId: string, action: SendGateFixAction, refreshDiag = false): Promise<void> => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await apiPost<{
+        fixed: boolean;
+        action: SendGateFixAction;
+        remainingIssue?: string;
+        summary: string;
+        overview: OutreachAutomationOverview;
+      }>(scoped(`/outreach-automation/enrollments/${enrollmentId}/fix-send-gate`), { action });
+      setOverview(res.overview);
+      setForm(res.overview.config);
+      if (res.fixed) {
+        toast.success(res.summary);
+      } else {
+        toast.warning(res.summary);
+      }
+      if (refreshDiag) {
+        const updatedDiag = await apiGet<EnrollmentDiagnosticsDto>(
+          scoped(`/outreach-automation/enrollments/${enrollmentId}/diagnostics`),
+        );
+        setDiagData(updatedDiag);
+      }
+    } catch (caught) {
+      toast.error(toErrorMessage(caught, '发送检查处理失败'));
     } finally {
       setBusy(false);
     }
@@ -606,15 +702,32 @@ export function OutreachAutomationPage(): React.JSX.Element {
 
   const mailbox = overview?.mailbox;
   const canStart = (overview?.config.rolloutMode === 'shadow' || Boolean(mailbox?.canSend)) && Boolean(overview?.stats.eligible || overview?.stats.enrolled);
-  const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + (overview?.stats.blocked ?? 0);
+  const ruleStoppedCount = overview?.stats.ruleStopped ?? 0;
+  const nonRuleBlocked = Math.max(0, (overview?.stats.blocked ?? 0) - ruleStoppedCount);
+  const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + nonRuleBlocked;
   const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
+  const rebuildableCount = overview?.stats.rebuildableUnverifiedDrafts ?? unverifiedCount;
+  const sendGateBlockedCount = overview?.stats.sendGateBlockedDrafts ?? 0;
+  const pausedReadyCount = overview?.stats.pausedReadyCount ?? 0;
+  const deliveryFailedCount = overview?.stats.deliveryFailedCount ?? 0;
   const circuitFailedCount = overview?.stats.circuitFailed ?? 0;
   const aiFailedCount = overview?.stats.aiFailed ?? 0;
   const circuitOpen = Boolean(overview?.circuit?.open);
   const circuitCooldownSec = Math.ceil((overview?.circuit?.cooldownRemainingMs ?? 0) / 1000);
   const queuedTasksCount = overview?.stats.queuedTasks ?? 0;
   const runningTasksCount = overview?.stats.runningTasks ?? 0;
+  const retryingTasksCount = overview?.stats.retryingTasks
+    ?? (overview?.queue.filter((r) => r.draftStage === 'task_failed' && Boolean(r.taskRetryAt)).length ?? 0);
   const failedTasksCount = overview?.stats.failedTasks ?? 0;
+  const historicalFailedTasksCount = overview?.stats.historicalFailedTasks ?? 0;
+  const sendGateCounts = React.useMemo(() => {
+    const rows = (overview?.queue ?? []).filter((r) => r.draftStage === 'draft_audit_failed' && r.sendGateDetail);
+    return {
+      missingEvidence: rows.filter((r) => r.sendGateDetail?.code === 'missing_supplier_evidence').length,
+      offerMismatch: rows.filter((r) => r.sendGateDetail?.code === 'offer_unauthorized' || r.sendGateDetail?.code === 'offer_condition_unmet').length,
+      layoutOrLength: rows.filter((r) => ['paragraph_too_long', 'word_count', 'cta_count'].includes(r.sendGateDetail?.code ?? '')).length,
+    };
+  }, [overview?.queue]);
 
   return (
     <div className="workspace-page">
@@ -709,14 +822,22 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 当前不在发送时段（工作日 {formatWindow(overview.config)}，{overview.config.timezone}）。队列会保留，等到下一个工作日自动继续。
               </p>
             ) : null}
-            {(queuedTasksCount > 0 || runningTasksCount > 0 || failedTasksCount > 0) ? (
+            {(queuedTasksCount > 0 || runningTasksCount > 0 || retryingTasksCount > 0 || failedTasksCount > 0 || historicalFailedTasksCount > 0) ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-2 text-xs">
                 <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
                   <span className="font-medium text-foreground">AI 草稿任务状态：</span>
-                  <span>排队 <strong className="tabular-nums text-foreground">{queuedTasksCount}</strong></span>
+                  <span>当前排队 <strong className="tabular-nums text-foreground">{queuedTasksCount}</strong></span>
                   <span>· 运行中 <strong className="tabular-nums text-foreground">{runningTasksCount}</strong></span>
-                  <span>· 失败 <strong className={`tabular-nums ${failedTasksCount > 0 ? 'text-destructive' : 'text-foreground'}`}>{failedTasksCount}</strong></span>
-                  <span className="text-[11px]">（单账号自动并发上限 3 条，防止积压打爆上游）</span>
+                  <span>· 待重试 <strong className="tabular-nums text-foreground">{retryingTasksCount}</strong></span>
+                  {failedTasksCount > 0 ? (
+                    <span>· 当前任务阻塞 <strong className="tabular-nums text-destructive">{failedTasksCount}</strong></span>
+                  ) : null}
+                  {historicalFailedTasksCount > 0 ? (
+                    <Badge variant="outline" className="font-normal text-muted-foreground">
+                      历史失败记录 {historicalFailedTasksCount}（旧轮次累计，非当前阻塞）
+                    </Badge>
+                  ) : null}
+                  <span className="text-[11px]">（单账号自动并发上限 3 条）</span>
                 </div>
                 {queuedTasksCount > 0 ? (
                   <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void drainQueuedTasks()}>
@@ -778,30 +899,98 @@ export function OutreachAutomationPage(): React.JSX.Element {
               </div>
             ) : null}
             {unverifiedCount > 0 ? (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
-                <div className="flex min-w-0 items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  <div className="space-y-0.5">
-                    <p className="font-semibold">
-                      发现 {unverifiedCount} 封待发草稿尚未完成事实核验（含 partial / unavailable）
-                    </p>
-                    <p className="leading-5">
-                      切换 AI 模型不会自动重核旧草稿。点击右侧按钮将归档旧未核验草稿，并用当前模型重新生成及逐项核验
-                      {overview.config.enabled ? '。' : '（正式发送仍保持暂停，核验通过后您再手动恢复）。'}
-                    </p>
+              <div className="mt-3 space-y-2 rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <div className="space-y-0.5">
+                      <p className="font-semibold">
+                        事实核验不完整：{unverifiedCount} 封（当前可重建 {rebuildableCount} 封）
+                        {sendGateBlockedCount > 0 ? `；另有 ${sendGateBlockedCount} 封正文已过核验、卡在其他发送检查` : ''}
+                      </p>
+                      <p className="leading-5">
+                        右侧按钮仅重建「事实核验不完整」且满足条件的可重建草稿，不会误处理其他发送检查或已人工批准草稿
+                        {overview.config.enabled ? '。' : '（正式发送仍保持暂停，核验通过后您再手动恢复）。'}
+                      </p>
+                    </div>
                   </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 border-amber-400/70 bg-background text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                    disabled={busy || rebuildableCount === 0}
+                    onClick={() => void reverifyAllUnverified()}
+                  >
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                    一键重建未核验草稿（{rebuildableCount}）
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {lastReverifyResult ? (
+              <div className="mt-2.5 flex flex-wrap items-start justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs">
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">
+                    本次批量重建结果：已扫描 {lastReverifyResult.scanned} 封 · 入队 <strong className="text-emerald-600 dark:text-emerald-400">{lastReverifyResult.queued}</strong> 封 · 跳过 <strong>{lastReverifyResult.skipped}</strong> 封
+                  </p>
+                  {lastReverifyResult.skippedReasons && lastReverifyResult.skippedReasons.length > 0 ? (
+                    <p className="text-muted-foreground">
+                      跳过原因汇总：{lastReverifyResult.skippedReasons.map((r) => `${r.reason}（${r.count}）`).join('；')}
+                    </p>
+                  ) : null}
+                  {lastReverifyResult.skippedDetails && lastReverifyResult.skippedDetails.length > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      跳过明细：{lastReverifyResult.skippedDetails.slice(0, 8).map((d) => `${d.customerName}：${d.reason}`).join('；')}
+                      {lastReverifyResult.skippedDetails.length > 8 ? ` 等共 ${lastReverifyResult.skippedDetails.length} 条` : ''}
+                    </p>
+                  ) : null}
+                </div>
+                <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setLastReverifyResult(null)}>
+                  收起
+                </Button>
+              </div>
+            ) : null}
+            {sendGateBlockedCount > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-300/70 bg-sky-50/70 p-2.5 text-xs text-sky-900 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200">
+                <div className="space-y-0.5">
+                  <p className="font-semibold">
+                    其他发送检查拦截：{sendGateBlockedCount} 封（正文逐项核验已通过，请勿盲目重建）
+                  </p>
+                  <p className="leading-5">
+                    {[
+                      sendGateCounts.missingEvidence > 0 ? `首封缺我方能力依据 ${sendGateCounts.missingEvidence} 封` : '',
+                      sendGateCounts.offerMismatch > 0 ? `寄样/色卡或优惠授权不匹配 ${sendGateCounts.offerMismatch} 封（可一键删除提议后重检）` : '',
+                      sendGateCounts.layoutOrLength > 0 ? `单段过长/字数/提问规则 ${sendGateCounts.layoutOrLength} 封（可拆段或调整后重检）` : '',
+                    ].filter(Boolean).join(' · ') || '请在下方队列按每行具体拦截提示使用对应处理按钮。'}
+                  </p>
                 </div>
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="shrink-0 border-amber-400/70 bg-background text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-500/20"
-                  disabled={busy}
-                  onClick={() => void reverifyAllUnverified()}
+                  className="shrink-0 bg-background"
+                  onClick={() => {
+                    setQueueFilter('exceptions');
+                    queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
                 >
-                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-                  一键重建未核验草稿（{unverifiedCount}）
+                  查看并处理（{sendGateBlockedCount}）
                 </Button>
+              </div>
+            ) : null}
+            {pausedReadyCount > 0 || deliveryFailedCount > 0 ? (
+              <div className="mt-2.5 flex flex-wrap items-center gap-3 rounded-md border border-border/70 bg-muted/20 px-2.5 py-2 text-xs text-muted-foreground">
+                {pausedReadyCount > 0 ? (
+                  <span>
+                    · 已有 <strong className="text-foreground">{pausedReadyCount}</strong> 位客户当前草稿检查已通过，队列仍暂停，待手动恢复（不会自动恢复发送）
+                  </span>
+                ) : null}
+                {deliveryFailedCount > 0 ? (
+                  <span>
+                    · 另有 <strong className="text-destructive">{deliveryFailedCount}</strong> 位客户历史发信投递失败（SMTP 拒收/发送异常，与草稿核验无关）
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -811,7 +1000,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
               { label: '可加入客户', value: overview.stats.eligible, hint: '待开发，或已有开发信记录', icon: Users },
               { label: '进行中', value: overview.stats.active, hint: `队列共 ${overview.stats.enrolled} 位`, icon: Bot },
               { label: '今日已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit}`, hint: `剩余 ${overview.stats.remainingToday} 封`, icon: Send },
-              { label: '需要处理', value: issueCount, hint: '暂停、失败或已停止', icon: ShieldCheck },
+              { label: '需要处理', value: issueCount, hint: `暂停/待处理/异常停止${ruleStoppedCount > 0 ? `（按规则停止 ${ruleStoppedCount} 位不计入）` : ''}`, icon: ShieldCheck },
             ].map((item) => (
               <div key={item.label} className="rounded-lg border bg-card p-3.5">
                 <div className="flex items-center justify-between gap-2">
@@ -942,7 +1131,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
               </CardContent>
             </Card>
 
-            <Card className="min-w-0">
+            <Card ref={queueCardRef} className="min-w-0">
               <CardHeader className="flex-row items-start justify-between gap-3 pb-2">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-sm">
@@ -969,8 +1158,19 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       className="h-7 px-2 text-xs"
                       onClick={() => setQueueFilter('exceptions')}
                     >
-                      异常待审（{overview.queue.filter((r) => Boolean(r.draftNeedsReverify || r.draftStage === 'draft_audit_failed' || r.draftStage === 'task_failed' || r.status === 'failed')).length}）
+                      异常待审（{overview.queue.filter(isExceptionQueueRow).length}）
                     </Button>
+                    {pausedReadyCount > 0 ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={queueFilter === 'paused_ready' ? 'secondary' : 'ghost'}
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setQueueFilter('paused_ready')}
+                      >
+                        已过检待恢复（{pausedReadyCount}）
+                      </Button>
+                    ) : null}
                   </div>
                   <Button type="button" variant="outline" size="sm" disabled={busy || !overview.config.enabled || overview.stats.eligible === 0} onClick={() => void enrollMore()}>
                     <Users className="h-4 w-4" aria-hidden />
@@ -981,17 +1181,27 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <CardContent className="p-0">
                 {(() => {
                   const visibleQueue = queueFilter === 'exceptions'
-                    ? overview.queue.filter((r) => Boolean(r.draftNeedsReverify || r.draftStage === 'draft_audit_failed' || r.draftStage === 'task_failed' || r.status === 'failed'))
-                    : overview.queue;
+                    ? overview.queue.filter(isExceptionQueueRow)
+                    : queueFilter === 'paused_ready'
+                      ? overview.queue.filter((r) => Boolean(r.pausedReadyToResume))
+                      : overview.queue;
                   if (visibleQueue.length === 0) {
                     return (
                       <div className="px-4 py-10 text-center">
                         <Bot className="mx-auto h-7 w-7 text-muted-foreground/60" aria-hidden />
-                        <p className="mt-2 text-sm font-medium">{queueFilter === 'exceptions' ? '当前没有异常待审客户' : '还没有自动开发客户'}</p>
+                        <p className="mt-2 text-sm font-medium">
+                          {queueFilter === 'exceptions'
+                            ? '当前没有异常待审客户'
+                            : queueFilter === 'paused_ready'
+                              ? '当前没有已过检待恢复的客户'
+                              : '还没有自动开发客户'}
+                        </p>
                         <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
                           {queueFilter === 'exceptions'
-                            ? '所有已生成的草稿均已通过分级核验，无需人工介入。'
-                            : canStart ? '点击右上角「开始自动开发」，系统会从符合条件的客户开始准备并发送下一封。' : '先配置并验证个人发件邮箱，再开始自动开发。'}
+                            ? '所有已生成的草稿均已通过分级核验与发送检查，无需人工介入。'
+                            : queueFilter === 'paused_ready'
+                              ? '当前没有处于暂停且草稿已过检的客户。'
+                              : canStart ? '点击右上角「开始自动开发」，系统会从符合条件的客户开始准备并发送下一封。' : '先配置并验证个人发件邮箱，再开始自动开发。'}
                         </p>
                       </div>
                     );
@@ -1012,10 +1222,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         {visibleQueue.map((row) => {
                           const status = phaseBadge(row, overview.windowOpen);
                           const verificationBlocked = row.status === 'blocked' && Boolean(row.lastError && /核验|依据审核|依据已变化|模拟校验|缺少依据|partial|unverif/i.test(row.lastError));
-                          const complianceBlocked = row.status === 'blocked' && !verificationBlocked;
-                          const controllable = row.status === 'active' || row.status === 'paused' || row.status === 'failed' || verificationBlocked;
-                          const canSingleTestRun = row.status !== 'completed' && !complianceBlocked && row.draftStage !== 'waiting_model';
+                          const complianceBlocked = Boolean(row.isRuleStopped) || (row.status === 'blocked' && !verificationBlocked);
+                          const controllable = !complianceBlocked && (row.status === 'active' || row.status === 'paused' || row.status === 'failed' || verificationBlocked);
+                          const sendGate = row.sendGateDetail;
+                          const canSingleTestRun = row.status !== 'completed'
+                            && !complianceBlocked
+                            && row.draftStage !== 'waiting_model'
+                            && !sendGate;
                           const stageMeta = row.draftStage && row.draftStage !== 'none' ? DRAFT_STAGE_META[row.draftStage] : undefined;
+                          const showStageMeta = Boolean(stageMeta && stageMeta.label !== status.label);
+                          const lastArchivedError = row.errorHistory?.length ? row.errorHistory[row.errorHistory.length - 1] : undefined;
                           return (
                             <TableRow key={row.id}>
                               <TableCell>
@@ -1030,23 +1246,78 @@ export function OutreachAutomationPage(): React.JSX.Element {
                               <TableCell>
                                 <div className="flex flex-wrap items-center gap-1">
                                   <Badge variant={status.variant}>{status.label}</Badge>
-                                  {stageMeta ? <Badge variant={stageMeta.variant}>{stageMeta.label}</Badge> : null}
+                                  {showStageMeta && stageMeta ? <Badge variant={stageMeta.variant}>{stageMeta.label}</Badge> : null}
+                                  {row.draftAuditDetail?.completeness === 'partial' ? (
+                                    <Badge variant="outline" className="text-[10px]">部分核验</Badge>
+                                  ) : null}
+                                  {row.draftAuditDetail?.failureStageLabel ? (
+                                    <Badge variant="outline" className="text-[10px]">{row.draftAuditDetail.failureStageLabel}</Badge>
+                                  ) : null}
+                                  {row.draftAuditDetail?.rebuiltAndFailedAgain ? (
+                                    <Badge variant="warning" className="text-[10px]">新稿再次失败</Badge>
+                                  ) : null}
                                 </div>
                                 {row.draftStage === 'task_failed' && row.taskError ? (
-                                  <p className="mt-1 max-w-[16rem] text-[11px] leading-4 text-destructive">
+                                  <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-destructive">
                                     {row.taskStepLabel ? `[${row.taskStepLabel}] ` : ''}
                                     {row.taskError}
                                     {row.taskErrorCode ? ` (${row.taskErrorCode})` : ''}
                                   </p>
+                                ) : row.draftStage === 'delivery_failed' ? (
+                                  <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4 text-destructive">
+                                    <p>第 {row.nextStep} 封邮件投递失败（SMTP）：{row.deliveryError || row.lastError || '邮件发送被拒或异常'}</p>
+                                    <Link to={`/customers/${row.customerId}`} className="inline-block text-primary underline underline-offset-2">
+                                      查看客户发信记录
+                                    </Link>
+                                  </div>
                                 ) : row.draftStage === 'waiting_model' && row.taskStepLabel ? (
                                   <p className="mt-1 max-w-[15rem] text-[11px] leading-4 text-amber-700 dark:text-amber-300">
                                     当前步骤：{row.taskStepLabel}
                                   </p>
-                                ) : row.draftNeedsReverify && row.draftAuditReason ? (
-                                  <p className="mt-1 max-w-[15rem] text-[11px] leading-4 text-amber-700 dark:text-amber-300">
-                                    {row.draftAuditReason}
-                                    {row.draftUpdatedAt ? `（草稿更新：${formatDateTime(row.draftUpdatedAt)}）` : ''}
-                                  </p>
+                                ) : sendGate ? (
+                                  <div className="mt-1 max-w-[20rem] space-y-0.5 text-[11px] leading-4">
+                                    <p className="font-medium text-destructive">{sendGate.label}</p>
+                                    <p className="text-muted-foreground">{sendGate.detail}</p>
+                                  </div>
+                                ) : row.draftNeedsReverify && (row.draftAuditDetail || row.draftAuditReason) ? (
+                                  <div className="mt-1 max-w-[20rem] space-y-1 text-[11px] leading-4">
+                                    <p className="text-destructive">
+                                      {row.draftAuditDetail?.summary || row.draftAuditReason}
+                                      {row.draftUpdatedAt ? `（更新：${formatDateTime(row.draftUpdatedAt)}）` : ''}
+                                    </p>
+                                    {row.draftAuditDetail?.previousError ? (
+                                      <p className="text-muted-foreground">
+                                        上次失败原因（已归档）：{row.draftAuditDetail.previousError}
+                                      </p>
+                                    ) : null}
+                                    {row.draftAuditDetail?.failedChecks?.length ? (
+                                      <ul className="space-y-0.5 rounded bg-muted/40 p-1.5 text-[11px]">
+                                        {row.draftAuditDetail.failedChecks.slice(0, 2).map((chk, idx) => (
+                                          <li key={`${chk.id}-${idx}`} className="text-muted-foreground">
+                                            <span className="font-medium text-destructive">[{chk.status}]</span>{' '}
+                                            {chk.excerpt ? `“${chk.excerpt}”` : ''}{' '}
+                                            <span>{chk.reason}</span>
+                                          </li>
+                                        ))}
+                                        {row.draftAuditDetail.checksFailed > 2 ? (
+                                          <li className="text-muted-foreground">
+                                            还有 {row.draftAuditDetail.checksFailed - 2} 处未通过句，点「诊断」查看全部
+                                          </li>
+                                        ) : null}
+                                      </ul>
+                                    ) : null}
+                                  </div>
+                                ) : row.pausedReadyToResume ? (
+                                  <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4">
+                                    <p className="text-emerald-700 dark:text-emerald-300">
+                                      当前草稿核验与发送检查均已通过（队列仍暂停）
+                                    </p>
+                                    {lastArchivedError ? (
+                                      <p className="text-muted-foreground">
+                                        已归档旧拦截：{lastArchivedError.message}
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 ) : status.detail ? (
                                   <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${status.variant === 'warning' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
                                     {status.detail}
@@ -1057,7 +1328,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                   </p>
                                 ) : null}
                               </TableCell>
-                              <TableCell className="min-w-[13rem] text-xs text-muted-foreground">
+                              <TableCell className="min-w-[14rem] text-xs text-muted-foreground">
                                 <p>{nextActionLabel(row, overview.windowOpen, formatWindow(overview.config))}</p>
                                 {row.effectiveTimezone && row.status !== 'completed' && !complianceBlocked ? (
                                   <p className="mt-0.5 text-[11px] text-muted-foreground/80">
@@ -1067,7 +1338,60 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 ) : null}
                               </TableCell>
                               <TableCell className="text-right">
-                                <div className="inline-flex items-center justify-end gap-1">
+                                <div className="inline-flex flex-wrap items-center justify-end gap-1">
+                                  {sendGate?.canStripOffer ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={busy}
+                                      onClick={() => void fixSendGate(row.id, 'strip_offer')}
+                                    >
+                                      删除提议后重检
+                                    </Button>
+                                  ) : null}
+                                  {sendGate?.canSplitParagraphs ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={busy}
+                                      onClick={() => void fixSendGate(row.id, 'split_paragraphs')}
+                                    >
+                                      拆段并重检
+                                    </Button>
+                                  ) : null}
+                                  {sendGate?.code === 'missing_supplier_evidence' ? (
+                                    isAdmin ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-2 text-xs"
+                                        onClick={() => document.getElementById('approved-proof-blocks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                                      >
+                                        去补充证据块
+                                      </Button>
+                                    ) : (
+                                      <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" asChild>
+                                        <Link to="/knowledge">查看知识依据</Link>
+                                      </Button>
+                                    )
+                                  ) : null}
+                                  {sendGate?.canRecheck ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={busy}
+                                      onClick={() => void fixSendGate(row.id, 'recheck')}
+                                    >
+                                      重检
+                                    </Button>
+                                  ) : null}
                                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void loadDiagnostics(row.id)}>
                                     诊断
                                   </Button>
@@ -1171,6 +1495,49 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       </span>
                     </div>
                     <p className="leading-5 text-foreground">{diagData.sendReadiness.detail}</p>
+                    {diagData.sendReadiness.sendGateDetail ? (
+                      <div className="space-y-1.5 rounded border border-border/70 bg-background/80 p-2">
+                        <p className="font-medium text-foreground">处理建议：{diagData.sendReadiness.sendGateDetail.guidance}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {diagData.sendReadiness.sendGateDetail.canStripOffer ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              disabled={busy}
+                              onClick={() => void fixSendGate(diagData.enrollmentId, 'strip_offer', true)}
+                            >
+                              删除提议后重检
+                            </Button>
+                          ) : null}
+                          {diagData.sendReadiness.sendGateDetail.canSplitParagraphs ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              disabled={busy}
+                              onClick={() => void fixSendGate(diagData.enrollmentId, 'split_paragraphs', true)}
+                            >
+                              拆段并重检
+                            </Button>
+                          ) : null}
+                          {diagData.sendReadiness.sendGateDetail.canRecheck ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              disabled={busy}
+                              onClick={() => void fixSendGate(diagData.enrollmentId, 'recheck', true)}
+                            >
+                              立即重检
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                     {diagData.sendReadiness.sendGateIssues.length > 0 ? (
                       <ul className="list-disc pl-4 text-destructive">
                         {diagData.sendReadiness.sendGateIssues.map((msg, idx) => (
@@ -1178,6 +1545,23 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         ))}
                       </ul>
                     ) : null}
+                  </div>
+                ) : null}
+
+                {diagData.errorHistory && diagData.errorHistory.length > 0 ? (
+                  <div className="rounded-md border bg-muted/20 p-3 space-y-1.5">
+                    <p className="font-semibold text-foreground">历史拦截归档记录（{diagData.errorHistory.length}）</p>
+                    <ul className="space-y-1 text-[11px] text-muted-foreground">
+                      {diagData.errorHistory.slice().reverse().map((item, idx) => (
+                        <li key={`${item.at}-${idx}`} className="rounded bg-background px-2 py-1">
+                          <span className="font-medium text-foreground">
+                            {item.step ? `第 ${item.step} 封 · ` : ''}{item.message}
+                          </span>
+                          {item.resolvedReason ? ` → ${item.resolvedReason}` : ''}
+                          {item.resolvedAt ? `（${formatDateTime(item.resolvedAt)}）` : `（${formatDateTime(item.at)}）`}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ) : null}
 
@@ -1920,7 +2304,7 @@ function ApprovedProofBlocksCard({ onSaved }: { onSaved: () => void }) {
   const enabledCount = blocks.filter((b) => b.enabled && b.text.trim()).length;
 
   return (
-    <Card>
+    <Card id="approved-proof-blocks">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 pb-3">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 text-sm">

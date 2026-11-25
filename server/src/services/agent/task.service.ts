@@ -16,7 +16,7 @@ import {AgentBatch} from '../../models/AgentBatch';
 import {hasProtectedCustomerMail} from './mail-thread-analysis.service';
 import { randomUUID } from 'node:crypto';
 import mongoose, { Types } from 'mongoose';
-import { AgentSession, AgentAction, AgentCustomerAnalysis, User, Project, Customer, DevelopmentLetter } from '../../models';
+import { AgentSession, AgentAction, AgentCustomerAnalysis, User, Project, Customer, DevelopmentLetter, OutreachAutomationEnrollment } from '../../models';
 import { AgentTask, type AgentTaskDocument, type IAgentTask, type TaskStep } from '../../models/AgentTask';
 import type { AuthUser } from '../../types/express';
 import { customerScope, requireProjectId } from '../../utils/access';
@@ -306,6 +306,35 @@ export async function processAgentTask(id?: string, providerOverride?: AgentProv
   }
   await step('verify_draft','核对草稿归属和保存结果。');
   await getLetter(String(task.draftId),await check());
+  const nowForEnrollment = new Date();
+  const matchingEnrollments = await OutreachAutomationEnrollment.find({
+   projectId: task.projectId,
+   userId: task.userId,
+   customerId: task.customerId,
+   status: { $ne: 'blocked' },
+   lastError: { $exists: true, $nin: [null, ''] },
+  }).select('_id lastError').lean();
+  for (const item of matchingEnrollments) {
+   if (!item.lastError) continue;
+   await OutreachAutomationEnrollment.updateOne(
+    { _id: item._id, lastError: item.lastError },
+    {
+     $unset: { lastError: 1 },
+     $push: {
+      errorHistory: {
+       $each: [{
+        at: nowForEnrollment,
+        ...(task.outreachStep ? { step: task.outreachStep } : {}),
+        message: String(item.lastError),
+        resolvedAt: nowForEnrollment,
+        resolvedReason: '新草稿已保存，旧拦截原因归档',
+       }],
+       $slice: -20,
+      },
+     },
+    },
+   ).catch(() => undefined);
+  }
   await workflow.run('handoff',{draftId:String(task.draftId)},async()=>({draftId:String(task.draftId),customerId:String(task.customerId),reviewRequired:true,sent:false}));
   await change({status:'awaiting_review'},'草稿准备完成，请打开审核页面；真实 SMTP 接受后才会记录已发送跟进。','verify_draft');
  } catch(error) {

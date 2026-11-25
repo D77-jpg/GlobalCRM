@@ -12,6 +12,7 @@ import { brandLogoUrl, safeMailHtml } from '../src/services/mail-security';
 import {
   LETTER_SIGNATURE,
   SIGNATURE_MARKER,
+  embedInlineBrandLogos,
   ensureSignature,
   hasSignature,
   renderLetterContent,
@@ -182,4 +183,26 @@ test('固定结尾：Quill 编辑器把空格写成 &nbsp; 并剥掉 logo 后，
   const dedupedText = htmlToPlainText(deduped);
   assert.equal((dedupedText.match(/Gold Supplier on Alibaba\.com since 2014/g) ?? []).length, 1);
   assert.equal((dedupedText.match(/Susan Yao/g) ?? []).length, 1);
+});
+
+test('外发邮件内联化：签名品牌 logo 替换为 CID 内联附件，保留外部/已内联图不重复附加', () => {
+  const html = [
+    '<p>Hello,</p>',
+    '<img src="https://crm.example.com/api/brand/genesis-logo.png" alt="Genesis" width="160">',
+    '<img src="/api/brand/genesis-logo.png" alt="Genesis2" width="160">',
+    '<img src="/api/brand/ironhue-logo.png" alt="IRONHUE" width="160">',
+    '<img src="cid:already@inline" alt="Already">',
+  ].join('');
+  const result = embedInlineBrandLogos(html);
+  assert.ok(result.html.includes('src="cid:genesis-logo@globalcrm.inline"'));
+  assert.ok(result.html.includes('src="cid:ironhue-logo@globalcrm.inline"'));
+  assert.ok(result.html.includes('src="cid:already@inline"'));
+  assert.ok(!result.html.includes('/api/brand/genesis-logo.png'));
+  assert.ok(!result.html.includes('/api/brand/ironhue-logo.png'));
+  assert.equal(result.inlineAttachments.length, 2);
+  for (const att of result.inlineAttachments) {
+    assert.equal(att.contentDisposition, 'inline');
+    assert.equal(att.contentType, 'image/png');
+    assert.ok(att.content.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));
+  }
 });

@@ -11,7 +11,7 @@ import type { Request, Response } from 'express';
 import { asyncHandler } from '../utils/asyncHandler';
 import { sendSuccess } from '../utils/pagination';
 import { createFollowUp, deleteFollowUp, listFollowUps, updateFollowUp } from '../services/followup.service';
-import { getCustomerReplyMails, getCustomerTimeline } from '../services/timeline.service';
+import { getCustomerReplyMailAttachment, getCustomerReplyMails, getCustomerTimeline } from '../services/timeline.service';
 import { getCustomerByIdOrThrow } from '../services/customer.service';
 import type { CreateFollowUpInput, ListFollowUpsQuery, UpdateFollowUpInput } from '../validators/followup.validator';
 
@@ -60,4 +60,24 @@ export const getCustomerReplyMailsHandler = asyncHandler(async (req: Request, re
   await getCustomerByIdOrThrow(req.params.id, req.user);
   const data = await getCustomerReplyMails(req.params.id, req.user, 20);
   sendSuccess(res, { items: data });
+});
+
+/** GET /api/customers/:id/reply-mails/:mailId/attachments/:attachmentId —— 下载或预览客户回复附件 */
+export const downloadCustomerReplyMailAttachmentHandler = asyncHandler(async (req: Request, res: Response) => {
+  await getCustomerByIdOrThrow(req.params.id, req.user);
+  const file = await getCustomerReplyMailAttachment(
+    req.params.id,
+    req.params.mailId,
+    req.params.attachmentId,
+    req.user,
+  );
+  const inlineImage = /^image\/(?:png|jpeg|webp)$/i.test(file.mimeType);
+  res.setHeader('Content-Type', inlineImage ? file.mimeType : 'application/octet-stream');
+  res.setHeader(
+    'Content-Disposition',
+    `${inlineImage ? 'inline' : 'attachment'}; filename="attachment"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(file.buffer);
 });

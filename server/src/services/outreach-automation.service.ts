@@ -24,7 +24,20 @@ import { automatedReviewIssue } from './agent/knowledge-send-gate';
 import { workflowLabels } from './agent/evidence-workflow';
 import { modelCircuitState } from './agent/model-transport';
 import type { FactAuditFailureCategory, FactAuditStage } from './agent/knowledge-types';
-import { assertAutomaticDraftCanSend, resendLetter } from './letter.service';
+import { assertAutomaticDraftCanSend, renderLetter, resendLetter } from './letter.service';
+import { splitSignatureText } from './letter-signature';
+import { resolveSignerName } from './signer.service';
+import {
+  countEnglishWords,
+  evaluateOutreachDraftQuality,
+  extractQuestions,
+  FREE_PATTERN,
+  SAMPLE_PATTERN,
+  SHIPPING_PATTERN,
+  splitLongParagraphsText,
+  stripSalutationAndSignoff,
+  stripUnauthorizedOfferSentences,
+} from './agent/outreach-quality';
 import {
   cancelPendingOutreachLetters,
   hasInboundReplySince,
@@ -37,7 +50,7 @@ const AUTO_TARGET_STATUSES = ['pending', 'contacted'] as const;
 const MAX_AUTO_STEPS = 3;
 const DAY_MS = 86_400_000;
 const TICK_MS = 15_000;
-const MAX_QUEUE_ROWS = 80;
+const MAX_QUEUE_ROWS = 200;
 export const MAX_INFLIGHT_OUTREACH_TASKS = 3;
 const TASK_BACKOFF_MS = [5 * 60_000, 15 * 60_000, 45 * 60_000] as const;
 
@@ -242,6 +255,225 @@ export function isVerificationBlockedReason(reason?: string | null): boolean {
   return /核验|依据审核|依据已变化|模拟校验|缺少依据|partial|unverif/i.test(reason);
 }
 
+export type OutreachSendGateCode =
+  | 'missing_supplier_evidence'
+  | 'offer_unauthorized'
+  | 'offer_condition_unmet'
+  | 'paragraph_too_long'
+  | 'word_count'
+  | 'cta_count'
+  | 'body_changed'
+  | 'stale_knowledge'
+  | 'other_send_gate';
+
+export interface OutreachSendGateDetail {
+  code: OutreachSendGateCode;
+  label: string;
+  detail: string;
+  guidance: string;
+  wordCount?: number;
+  paragraphCount?: number;
+  maxParagraphWords?: number;
+  canStripOffer?: boolean;
+  canSplitParagraphs?: boolean;
+  canRecheck?: boolean;
+}
+
+export interface OutreachDraftAuditDetail {
+  completeness?: string;
+  factAuditMode?: string;
+  failureCategory?: string;
+  failureCategoryLabel?: string;
+  failureCode?: string;
+  failureStage?: string;
+  failureStageLabel?: string;
+  failureDetail?: string;
+  summary: string;
+  checksTotal: number;
+  checksFailed: number;
+  failedChecks: { id: string; status: string; excerpt: string; reason: string }[];
+  rebuiltAndFailedAgain?: boolean;
+  previousError?: string;
+}
+
+function classifySendGateDetail(
+  issueMessage: string,
+  letter?: { contentText?: string; subject?: string; outreachStep?: number; knowledgeReview?: unknown } | null,
+  signature?: ReturnType<typeof resolveProjectSalesProfile>['signature'],
+  approvedOffers?: Parameters<typeof automatedReviewIssue>[2] extends infer O
+    ? O extends { approvedOffers?: infer A } ? A : undefined
+    : undefined,
+): OutreachSendGateDetail {
+  const rawBody = String(letter?.contentText ?? '');
+  const cleanBody = signature && rawBody ? splitSignatureText(rawBody, signature).body : rawBody;
+  const quality = cleanBody
+    ? evaluateOutreachDraftQuality({
+      bodyText: cleanBody,
+      subject: letter?.subject,
+      step: letter?.outreachStep ?? 1,
+      approvedOffers,
+      review: letter?.knowledgeReview as Parameters<typeof evaluateOutreachDraftQuality>[0]['review'],
+    })
+    : undefined;
+
+  if (/首封缺少已发布的我方能力依据/.test(issueMessage)) {
+    return {
+      code: 'missing_supplier_evidence',
+      label: '首封缺少已发布我方能力依据',
+      detail: issueMessage,
+      guidance: '首封需至少引用 1 条已发布的公司产能、资质认证（如 ISO/CE）、产品规格或 OEM/ODM 交付依据。可在下方添加/启用英文「已批准证据块」，或在知识库发布对应文档后点「单条重建」。',
+      canRecheck: true,
+    };
+  }
+  if (/寄样\/色卡|免费承诺|运费\/快递|未授权|授权条件不满足|未获授权/.test(issueMessage)) {
+    const conditionUnmet = /条件不满足|requiresEvidence|缺少依据/.test(issueMessage);
+    return {
+      code: conditionUnmet ? 'offer_condition_unmet' : 'offer_unauthorized',
+      label: conditionUnmet ? '寄样/色卡或优惠授权条件不满足' : '寄样/色卡或优惠提议未获授权',
+      detail: issueMessage,
+      guidance: conditionUnmet
+        ? '项目已启用对应授权，但要求附带已发布知识依据而当前草稿未匹配到依据。可直接点「删除提议后重检」移除该句，或补充依据后重建。'
+        : '当前项目未开启该寄样/色卡/免费/运费授权。可直接点「删除提议后重检」移除该句并立即重检，或先在项目设置开启授权后点「重检」。',
+      canStripOffer: true,
+      canRecheck: true,
+    };
+  }
+  if (/存在过长段落/.test(issueMessage)) {
+    return {
+      code: 'paragraph_too_long',
+      label: quality
+        ? `存在过长段落（单段 ${quality.maxParagraphWords} 词，共 ${quality.paragraphCount} 段）`
+        : '存在过长段落',
+      detail: issueMessage,
+      guidance: '建议将正文改写拆分为 2–3 个短段落（单段建议 ≤ 52 词、硬上限 68 词），可直接点「拆段并重检」或去编辑分段后重检。',
+      wordCount: quality?.wordCount,
+      paragraphCount: quality?.paragraphCount,
+      maxParagraphWords: quality?.maxParagraphWords,
+      canSplitParagraphs: true,
+      canRecheck: true,
+    };
+  }
+  if (/字数超界|正文过短|正文过长/.test(issueMessage)) {
+    return {
+      code: 'word_count',
+      label: quality ? `正文字数超界（${quality.wordCount} 词）` : '正文字数超界',
+      detail: issueMessage,
+      guidance: '请精简或补充正文至对应步骤建议词数后点「重检」，或点「单条重建」由模型重新生成。',
+      wordCount: quality?.wordCount,
+      paragraphCount: quality?.paragraphCount,
+      canRecheck: true,
+    };
+  }
+  if (/回复问题|CTA|提问负担/.test(issueMessage)) {
+    return {
+      code: 'cta_count',
+      label: '回复提问（CTA）不符合规则',
+      detail: issueMessage,
+      guidance: '第 1、2 封应保留 1 个轻量明确的回复问题；请调整后点「重检」或「单条重建」。',
+      canRecheck: true,
+    };
+  }
+  if (/bodyHash|正文核验指纹|发生变化/.test(issueMessage)) {
+    return {
+      code: 'body_changed',
+      label: '正文在核验后发生修改',
+      detail: issueMessage,
+      guidance: '草稿修改后与核验指纹不一致，请点「单条重建」或重新完成核验。',
+      canRecheck: true,
+    };
+  }
+  if (/依据已更新|过期|新鲜度/.test(issueMessage)) {
+    return {
+      code: 'stale_knowledge',
+      label: '引用的知识依据已更新',
+      detail: issueMessage,
+      guidance: '草稿引用的知识条目在生成后有更新，请点「单条重建」按最新知识依据重核。',
+      canRecheck: true,
+    };
+  }
+  return {
+    code: 'other_send_gate',
+    label: '其他发送检查未通过',
+    detail: issueMessage,
+    guidance: '请对照具体拦截原因处理后点击「重检」或「单条重建」。',
+    canRecheck: true,
+  };
+}
+
+function buildDraftAuditDetail(
+  letter: {
+    updatedAt?: Date | string;
+    knowledgeReview?: {
+      status?: string;
+      completeness?: string;
+      issues?: { code?: string; message?: string }[];
+      factAudit?: {
+        mode?: string;
+        checks?: { id?: string; text?: string; status?: string; reason?: string }[];
+        failureCategory?: FactAuditFailureCategory;
+        failureCode?: string;
+        failureStage?: FactAuditStage;
+        failureDetail?: string;
+      };
+    } | null;
+  } | null | undefined,
+  auditReason: string | undefined,
+  errorHistory: { at: Date | string; message: string; resolvedReason?: string }[],
+  enrollmentLastError?: string,
+): OutreachDraftAuditDetail | undefined {
+  if (!letter) return undefined;
+  const review = letter.knowledgeReview;
+  const checks = review?.factAudit?.checks ?? [];
+  const rawFailed = checks.filter((c) => c.status !== 'supported' && c.status !== 'non_claim');
+  const failedChecks = rawFailed.slice(0, 5).map((c, idx) => ({
+    id: String(c.id ?? `s${idx}`),
+    status: String(c.status ?? 'unverifiable'),
+    excerpt: String(c.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    reason: String(c.reason || '未提供原因'),
+  }));
+  const failureInfo = inferDraftAuditFailure(review ?? undefined);
+  const completeness = review?.completeness;
+  const factAuditMode = review?.factAudit?.mode;
+
+  let summary = '';
+  if (failedChecks.length > 0) {
+    const first = failedChecks[0]!;
+    const statusText = first.status === 'contradicted'
+      ? '与依据冲突'
+      : first.status === 'unsupported'
+        ? '缺少依据（unsupported）'
+        : '无法核验（unverifiable）';
+    summary = `${completeness === 'partial' ? '仅部分核验（partial）· ' : ''}${rawFailed.length} 句未通过（${statusText}：“${first.excerpt}”${first.reason ? ` — ${first.reason}` : ''}）`;
+  } else if (failureInfo.failureDetail) {
+    summary = `${failureInfo.failureStageLabel ? `[${failureInfo.failureStageLabel}] ` : ''}${failureInfo.failureCategoryLabel ? `${failureInfo.failureCategoryLabel}：` : ''}${failureInfo.failureDetail}`;
+  } else if (completeness === 'partial') {
+    summary = '核验只完成了一部分（completeness=partial），未形成完整逐项依据结论';
+  } else {
+    summary = auditReason || '正文尚未完成核验';
+  }
+
+  const priorMessages = errorHistory.map((item) => item.message).filter(Boolean);
+  const previousDiffers = Boolean(
+    (priorMessages.length > 0 && priorMessages[priorMessages.length - 1] !== summary)
+    || (enrollmentLastError && enrollmentLastError !== summary && enrollmentLastError !== auditReason),
+  );
+  const rebuiltAndFailedAgain = errorHistory.length > 0 || previousDiffers;
+
+  return {
+    ...(completeness ? { completeness } : {}),
+    ...(factAuditMode ? { factAuditMode } : {}),
+    ...failureInfo,
+    summary,
+    checksTotal: checks.length,
+    checksFailed: rawFailed.length,
+    failedChecks,
+    ...(rebuiltAndFailedAgain ? {
+      rebuiltAndFailedAgain: true,
+      ...(priorMessages.length > 0 ? { previousError: priorMessages[priorMessages.length - 1] } : {}),
+    } : {}),
+  };
+}
+
 export interface OutreachAutomationConfigDto {
   rolloutMode: 'shadow' | 'pilot' | 'active';
   legacyModeUnset?: boolean;
@@ -265,6 +497,7 @@ export type OutreachDraftStage =
   | 'draft_saved_verified'
   | 'draft_audit_failed'
   | 'task_failed'
+  | 'delivery_failed'
   | 'none';
 
 export interface OutreachAutomationQueueRow {
@@ -281,12 +514,19 @@ export interface OutreachAutomationQueueRow {
   nextStep: number;
   /** waiting=等待下一次；generating=准备草稿；ready=待发送；sending=发送中；due=到期待处理。 */
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
-  /** 明确区分草稿/核验/任务执行阶段，避免“进行中”掩盖核验失败或 AI 任务失败。 */
+  /** 明确区分草稿/核验/任务执行/SMTP 投递阶段，避免“进行中”掩盖核验失败或发信失败。 */
   draftStage: OutreachDraftStage;
   draftReady: boolean;
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
+  draftAuditDetail?: OutreachDraftAuditDetail;
+  sendGateDetail?: OutreachSendGateDetail;
+  pausedReadyToResume?: boolean;
+  deliveryError?: string;
+  failedLetterId?: string;
+  isRuleStopped?: boolean;
+  errorHistory?: { at: string; step?: number; message: string; resolvedAt?: string; resolvedReason?: string }[];
   draftUpdatedAt?: string;
   taskId?: string;
   taskStatus?: string;
@@ -346,14 +586,22 @@ export interface OutreachAutomationOverview {
     paused: number;
     completed: number;
     blocked: number;
+    ruleStopped: number;
     failed: number;
     circuitFailed: number;
     aiFailed: number;
     unverifiedDrafts: number;
+    rebuildableUnverifiedDrafts: number;
+    sendGateBlockedDrafts: number;
+    pausedReadyCount: number;
+    deliveryFailedCount: number;
     exceptionQueueCount: number;
     approvedProofBlocksCount: number;
     queuedTasks: number;
     runningTasks: number;
+    retryingTasks: number;
+    activeFailedTasks: number;
+    historicalFailedTasks: number;
     failedTasks: number;
     sentToday: number;
     remainingToday: number;
@@ -684,7 +932,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     .map((id) => new Types.ObjectId(id));
   const customers = customerIds.length
     ? await Customer.find({ _id: { $in: customerIds }, projectId: config.projectId })
-      .select('name company email status letterCount outreachStep nextFollowUpAt timezone country address phone')
+      .select('name company email status ownerId outreachAbandonedAt outreachRepliedAt outreachLastAt letterCount outreachStep nextFollowUpAt timezone country address phone')
       .lean()
     : [];
   const customerMap = new Map(customers.map((customer) => [String(customer._id), customer]));
@@ -707,10 +955,10 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
         projectId: config.projectId,
         customerId: { $in: queueCustomerIds },
         outreachStep: { $in: queueNextSteps },
-        status: { $in: ['draft', 'queued', 'scheduled', 'sending', 'retrying'] },
+        status: { $in: ['draft', 'queued', 'scheduled', 'sending', 'retrying', 'failed'] },
       })
         .sort({ createdAt: -1 })
-        .select('_id customerId outreachStep status subject contentText needsReview review knowledgeReview updatedAt createdAt')
+        .select('_id customerId outreachStep status subject contentText error needsReview review knowledgeReview updatedAt createdAt')
         .lean()
       : Promise.resolve([]),
     queueCustomerIds.length
@@ -744,7 +992,12 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   const queueLetterMap = new Map<string, (typeof queueLetters)[number]>();
   for (const letter of queueLetters) {
     const key = `${String(letter.customerId)}:${Number(letter.outreachStep)}`;
-    if (!queueLetterMap.has(key)) queueLetterMap.set(key, letter);
+    const existing = queueLetterMap.get(key);
+    if (!existing) {
+      queueLetterMap.set(key, letter);
+    } else if (existing.status === 'failed' && letter.status !== 'failed') {
+      queueLetterMap.set(key, letter);
+    }
   }
   const queueTaskMap = new Map<string, (typeof queueTasks)[number]>();
   for (const task of queueTasks) {
@@ -788,6 +1041,16 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
   const projectApprovedOffers = projectDoc?.brandProfile?.approvedOffers;
 
   let unverifiedDrafts = 0;
+  let rebuildableUnverifiedDrafts = 0;
+  let sendGateBlockedDrafts = 0;
+  let pausedReadyCount = 0;
+  let deliveryFailedCount = 0;
+  let activeFailedTasks = 0;
+  let retryingTasks = 0;
+  let ruleStoppedCount = 0;
+  let exceptionQueueCount = 0;
+  const staleErrorOps: Array<{ updateOne: { filter: Record<string, unknown>; update: Record<string, unknown> } }> = [];
+
   const queueRows: OutreachAutomationQueueRow[] = rows.map((row) => {
     const customer = customerMap.get(String(row.customerId));
     const actualStep = Math.min(
@@ -802,10 +1065,13 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const key = `${String(row.customerId)}:${nextStep}`;
     const nextLetter = queueLetterMap.get(key);
     const nextLetterStatus = nextLetter ? String(nextLetter.status) : undefined;
-    const audit = row.status !== 'completed' && actualStep < MAX_AUTO_STEPS
+    const isRuleStopped = row.status === 'blocked' && !isVerificationBlockedReason(row.lastError);
+    if (isRuleStopped) ruleStoppedCount += 1;
+
+    const audit = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'draft'
       ? inspectOutreachDraftAudit(nextLetter)
       : { needsReverify: false };
-    const rowSendGateIssue = row.status !== 'completed' && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'draft' && !audit.needsReverify
+    const rowSendGateIssue = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'draft' && !audit.needsReverify
       ? automatedReviewIssue(nextLetter?.knowledgeReview, nextLetter?.outreachStep, {
         bodyText: nextLetter?.contentText,
         subject: nextLetter?.subject,
@@ -818,7 +1084,122 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const latestTask = queueTaskMap.get(key);
     const taskStatus = latestTask ? String(latestTask.status) : undefined;
     const taskInFlight = taskStatus === 'queued' || taskStatus === 'running';
-    if (draftBlockedFromAutoSend && !taskInFlight) unverifiedDrafts += 1;
+    const isDeliveryFailed = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'failed' && !taskInFlight;
+
+    const rawErrorHistory = Array.isArray((row as { errorHistory?: unknown[] }).errorHistory)
+      ? ((row as { errorHistory?: Array<{ at: Date; step?: number; message: string; resolvedAt?: Date; resolvedReason?: string }> }).errorHistory ?? [])
+      : [];
+    const errorHistoryDto = rawErrorHistory.slice(-5).map((item) => ({
+      at: new Date(item.at).toISOString(),
+      ...(item.step ? { step: Number(item.step) } : {}),
+      message: String(item.message),
+      ...(item.resolvedAt ? { resolvedAt: new Date(item.resolvedAt).toISOString() } : {}),
+      ...(item.resolvedReason ? { resolvedReason: String(item.resolvedReason) } : {}),
+    }));
+
+    const sendGateDetail = rowSendGateIssue
+      ? classifySendGateDetail(rowSendGateIssue, nextLetter, projectSignature, projectApprovedOffers)
+      : undefined;
+    const draftAuditDetail = audit.needsReverify && !taskInFlight
+      ? buildDraftAuditDetail(nextLetter, audit.reason, rawErrorHistory, row.lastError)
+      : undefined;
+    const draftAuditReason = audit.needsReverify
+      ? (draftAuditDetail?.summary || audit.reason)
+      : rowSendGateIssue;
+
+    // Reconcile stale enrollment.lastError so resolved old errors (like old 95/103 word-count errors
+    // after a new draft or updated rule passes) move cleanly to errorHistory without touching paused status!
+    let effectiveLastError = row.lastError;
+    if (!isRuleStopped && row.lastError && !taskInFlight) {
+      if (draftReady || ['queued', 'scheduled', 'sending', 'retrying', 'sent', 'opened'].includes(nextLetterStatus ?? '')) {
+        staleErrorOps.push({
+          updateOne: {
+            filter: { _id: row._id, lastError: row.lastError },
+            update: {
+              $unset: { lastError: 1 },
+              $push: {
+                errorHistory: {
+                  $each: [{
+                    at: new Date(row.updatedAt ?? now),
+                    step: nextStep,
+                    message: String(row.lastError),
+                    resolvedAt: now,
+                    resolvedReason: '当前草稿已通过核验与发送检查',
+                  }],
+                  $slice: -20,
+                },
+              },
+            },
+          },
+        });
+        errorHistoryDto.push({
+          at: new Date(row.updatedAt ?? now).toISOString(),
+          step: nextStep,
+          message: String(row.lastError),
+          resolvedAt: now.toISOString(),
+          resolvedReason: '当前草稿已通过核验与发送检查',
+        });
+        effectiveLastError = undefined;
+      } else if (nextLetterStatus === 'draft' && draftAuditReason && row.lastError !== draftAuditReason && row.lastError !== '已提交重新生成并核验（正式发送仍保持暂停）') {
+        staleErrorOps.push({
+          updateOne: {
+            filter: { _id: row._id, lastError: row.lastError },
+            update: {
+              $set: { lastError: draftAuditReason.slice(0, 500) },
+              $push: {
+                errorHistory: {
+                  $each: [{
+                    at: new Date(row.updatedAt ?? now),
+                    step: nextStep,
+                    message: String(row.lastError),
+                    resolvedAt: now,
+                    resolvedReason: '当前草稿已更新拦截原因',
+                  }],
+                  $slice: -20,
+                },
+              },
+            },
+          },
+        });
+        errorHistoryDto.push({
+          at: new Date(row.updatedAt ?? now).toISOString(),
+          step: nextStep,
+          message: String(row.lastError),
+          resolvedAt: now.toISOString(),
+          resolvedReason: '当前草稿已更新拦截原因',
+        });
+        effectiveLastError = draftAuditReason;
+      }
+    }
+
+    const canRebuildRow = Boolean(
+      audit.needsReverify
+      && !taskInFlight
+      && nextLetterStatus === 'draft'
+      && nextLetter?.review?.decision !== 'approved'
+      && customer
+      && customer.email
+      && String(customer.ownerId ?? '') === String(config.userId)
+      && AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number])
+      && !customer.outreachAbandonedAt
+      && !customer.outreachRepliedAt
+      && !isRuleStopped,
+    );
+    if (audit.needsReverify && !taskInFlight) {
+      unverifiedDrafts += 1;
+      if (canRebuildRow) rebuildableUnverifiedDrafts += 1;
+    } else if (!audit.needsReverify && Boolean(rowSendGateIssue) && !taskInFlight) {
+      sendGateBlockedDrafts += 1;
+    }
+    if (isDeliveryFailed) deliveryFailedCount += 1;
+
+    const pausedReadyToResume = Boolean(
+      row.status === 'paused'
+      && draftReady
+      && !taskInFlight
+      && !isRuleStopped,
+    );
+    if (pausedReadyToResume) pausedReadyCount += 1;
 
     const buyerSchedule = config.useBuyerTimezone || customer?.timezone
       ? resolveBuyerTimezone({
@@ -839,19 +1220,22 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const effectiveAt = nextSendWindow(recipientWindow, nextRunAt.getTime() > now.getTime() ? nextRunAt : now);
 
     let draftStage: OutreachDraftStage = 'none';
-    if (row.status !== 'completed' && actualStep < MAX_AUTO_STEPS) {
+    if (row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS) {
       if (taskStatus === 'running') draftStage = 'waiting_model';
       else if (taskStatus === 'queued') draftStage = 'reverify_queued';
       else if (nextLetterStatus === 'draft' && !draftBlockedFromAutoSend) draftStage = 'draft_saved_verified';
       else if (nextLetterStatus === 'draft' && draftBlockedFromAutoSend) draftStage = 'draft_audit_failed';
+      else if (nextLetterStatus === 'failed') draftStage = 'delivery_failed';
       else if (!nextLetter && taskStatus === 'failed') draftStage = 'task_failed';
     }
+    if (draftStage === 'task_failed') activeFailedTasks += 1;
 
     let phase: OutreachAutomationQueueRow['phase'];
     if (row.status === 'completed' || actualStep >= MAX_AUTO_STEPS) phase = 'completed';
     else if (taskInFlight) phase = 'generating';
+    else if (isRuleStopped || row.status === 'blocked') phase = 'blocked';
+    else if (isDeliveryFailed) phase = 'failed';
     else if (row.status === 'paused') phase = 'paused';
-    else if (row.status === 'blocked') phase = 'blocked';
     else if (row.status === 'failed') phase = 'failed';
     else if (nextLetterStatus === 'draft' && draftBlockedFromAutoSend) phase = 'failed';
     else if (nextRunAt.getTime() > now.getTime()) phase = 'waiting';
@@ -861,7 +1245,19 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     else if (taskStatus && taskStatus !== 'failed') phase = 'generating';
     else phase = 'due';
 
-    const draftAuditReason = audit.reason || rowSendGateIssue;
+    const rowNeedsAttention = Boolean(
+      !isRuleStopped
+      && row.status !== 'completed'
+      && !taskInFlight
+      && (
+        draftStage === 'draft_audit_failed'
+        || draftStage === 'task_failed'
+        || draftStage === 'delivery_failed'
+        || row.status === 'failed'
+        || (row.status === 'paused' && !pausedReadyToResume)
+      ),
+    );
+    if (rowNeedsAttention) exceptionQueueCount += 1;
 
     const taskStep = latestTask?.currentStep ? String(latestTask.currentStep) : undefined;
     const taskErrorCode = latestTask?.status === 'failed' && latestTask.error?.code ? String(latestTask.error.code) : undefined;
@@ -869,6 +1265,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
     const taskRetryAt = draftStage === 'task_failed' && nextRunAt.getTime() > now.getTime()
       ? nextRunAt.toISOString()
       : undefined;
+    if (taskRetryAt) retryingTasks += 1;
 
     return {
       id: String(row._id),
@@ -886,6 +1283,15 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       draftReady,
       ...(nextLetter?._id ? { draftId: String(nextLetter._id) } : {}),
       ...(draftBlockedFromAutoSend && !taskInFlight ? { draftNeedsReverify: true, draftAuditReason } : {}),
+      ...(draftAuditDetail ? { draftAuditDetail } : {}),
+      ...(sendGateDetail && !taskInFlight ? { sendGateDetail } : {}),
+      ...(pausedReadyToResume ? { pausedReadyToResume: true } : {}),
+      ...(isDeliveryFailed ? {
+        failedLetterId: String(nextLetter?._id),
+        deliveryError: String(nextLetter?.error || 'SMTP 投递失败'),
+      } : {}),
+      ...(isRuleStopped ? { isRuleStopped: true } : {}),
+      ...(errorHistoryDto.length ? { errorHistory: errorHistoryDto.slice(-5) } : {}),
       ...(nextLetter?.updatedAt ? { draftUpdatedAt: new Date(nextLetter.updatedAt).toISOString() } : {}),
       ...(latestTask?._id ? { taskId: String(latestTask._id), taskStatus } : {}),
       ...(taskStep ? { taskStep, taskStepLabel: TASK_STEP_LABELS[taskStep] ?? taskStep } : {}),
@@ -897,10 +1303,14 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       timezoneSource: buyerSchedule.source,
       recipientWindowOpen,
       nextRunAt: effectiveAt.toISOString(),
-      ...(row.lastError ? { lastError: row.lastError } : {}),
+      ...(effectiveLastError ? { lastError: effectiveLastError } : {}),
       ...(row.lastSentAt ? { lastSentAt: new Date(row.lastSentAt).toISOString() } : {}),
     };
   });
+
+  if (staleErrorOps.length > 0) {
+    await OutreachAutomationEnrollment.bulkWrite(staleErrorOps as never, { ordered: false }).catch(() => undefined);
+  }
 
   return {
     config: cfgDto,
@@ -923,15 +1333,23 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       paused: counts.paused ?? 0,
       completed: counts.completed ?? 0,
       blocked: counts.blocked ?? 0,
+      ruleStopped: ruleStoppedCount,
       failed: counts.failed ?? 0,
       circuitFailed: circuitFailedCount,
       aiFailed: aiFailedCount,
       unverifiedDrafts,
-      exceptionQueueCount: unverifiedDrafts,
+      rebuildableUnverifiedDrafts,
+      sendGateBlockedDrafts,
+      pausedReadyCount,
+      deliveryFailedCount,
+      exceptionQueueCount,
       approvedProofBlocksCount,
       queuedTasks: taskTotals.queued ?? 0,
       runningTasks: taskTotals.running ?? 0,
-      failedTasks: taskTotals.failed ?? 0,
+      retryingTasks,
+      activeFailedTasks,
+      historicalFailedTasks: taskTotals.failed ?? 0,
+      failedTasks: activeFailedTasks,
       sentToday,
       remainingToday: Math.max(0, effectiveDailyLimit(config) - sentToday),
     },
@@ -1293,7 +1711,7 @@ async function supersedeUnverifiedDraftAndRequeue(
     }
     const audit = inspectOutreachDraftAudit(draft);
     if (options.onlyIfUnverified && !audit.needsReverify) {
-      return { queued: false, skippedReason: '当前草稿已完成核验' };
+      return { queued: false, skippedReason: '正文核验已完成（如有其他发送拦截请按对应入口处理）' };
     }
     // Archive the stale/unverified draft as cancelled (never hard-delete) so audit history is preserved
     // and queueOutreachStep / findDraft treat this step as cleanly ready for fresh generation.
@@ -1382,6 +1800,8 @@ export async function reverifyUnverifiedOutreachDrafts(
   queued: number;
   skipped: number;
   taskIds: string[];
+  skippedDetails: { customerId: string; customerName: string; reason: string }[];
+  skippedReasons: { reason: string; count: number }[];
   overview: OutreachAutomationOverview;
 }> {
   const target = await resolveTargetUser(actor, targetUserId);
@@ -1402,25 +1822,61 @@ export async function reverifyUnverifiedOutreachDrafts(
   }
 
   const enrollments = await OutreachAutomationEnrollment.find(filter).limit(MAX_QUEUE_ROWS);
+  const customerDocs = enrollments.length
+    ? await Customer.find({ _id: { $in: enrollments.map((e) => e.customerId) }, projectId: config.projectId })
+      .select('_id name')
+      .lean()
+    : [];
+  const customerNameMap = new Map(customerDocs.map((c) => [String(c._id), c.name]));
+
   let queuedCount = 0;
   let skippedCount = 0;
+  let scannedCount = 0;
   const taskIds: string[] = [];
+  const skippedDetails: { customerId: string; customerName: string; reason: string }[] = [];
+  const reasonCounts = new Map<string, number>();
+
+  const recordSkip = (customerId: string, reason: string) => {
+    skippedCount += 1;
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    skippedDetails.push({
+      customerId,
+      customerName: customerNameMap.get(customerId) ?? '未知客户',
+      reason,
+    });
+  };
 
   for (const enrollment of enrollments) {
     if (enrollment.status === 'blocked' && !isVerificationBlockedReason(enrollment.lastError)) {
-      skippedCount += 1;
       continue;
     }
+    const custIdStr = String(enrollment.customerId);
+    // Only consider rows whose next-step draft actually exists and fails fact audit,
+    // unless caller explicitly passed specific enrollmentIds.
+    if (!options?.enrollmentIds?.length) {
+      const cust = await Customer.findOne({ _id: enrollment.customerId, projectId: config.projectId }).select('outreachStep letterCount').lean();
+      const step = Math.min(
+        MAX_AUTO_STEPS,
+        Math.max(Number(cust?.outreachStep ?? 0), Math.min(MAX_AUTO_STEPS, Number(cust?.letterCount ?? 0)), Number(enrollment.currentStep ?? 0)),
+      );
+      if (step >= MAX_AUTO_STEPS) continue;
+      const draft = await findDraft(config.projectId, enrollment.customerId, step + 1);
+      if (!draft || draft.status !== 'draft') continue;
+      const audit = inspectOutreachDraftAudit(draft);
+      if (!audit.needsReverify) continue;
+    }
+
+    scannedCount += 1;
     try {
       const res = await supersedeUnverifiedDraftAndRequeue(config, enrollment, targetActor, now, { onlyIfUnverified: true });
       if (res.queued) {
         queuedCount += 1;
         if (res.taskId) taskIds.push(res.taskId);
       } else {
-        skippedCount += 1;
+        recordSkip(custIdStr, res.skippedReason || '不符合重建条件');
       }
     } catch (error) {
-      skippedCount += 1;
+      recordSkip(custIdStr, error instanceof Error ? error.message : '重建触发失败');
       logger.warn('自动开发草稿重建单条失败，已跳过继续', {
         error: error instanceof Error ? error.message : 'unknown',
       });
@@ -1428,13 +1884,300 @@ export async function reverifyUnverifiedOutreachDrafts(
   }
 
   const overview = await getOutreachAutomationOverview(actor, target.id);
+  const skippedReasons = [...reasonCounts.entries()].map(([reason, count]) => ({ reason, count }));
   return {
-    scanned: enrollments.length,
+    scanned: scannedCount,
     queued: queuedCount,
     skipped: skippedCount,
     taskIds,
+    skippedDetails: skippedDetails.slice(0, 30),
+    skippedReasons,
     overview,
   };
+}
+
+export type OutreachSendGateFixAction = 'recheck' | 'strip_offer' | 'split_paragraphs';
+
+/**
+ * 针对「正文核验已通过、但卡在其他发送检查」的草稿提供精确修复与重检入口：
+ * - recheck: 按当前最新项目设置（如已开启寄样/色卡授权、已批准证据块）重新执行发送检查并归档旧错误
+ * - strip_offer: 安全删除未获授权或条件不满足的寄样/色卡/免费/运费提议句并立即重检
+ * - split_paragraphs: 按句界拆分为移动端友好短段并保留全部逐项核验句文字不变后立即重检
+ * 注意：绝不减弱人工审批边界，也绝不自动解除总开关或队列暂停状态。
+ */
+export async function fixEnrollmentSendGate(
+  actor: AuthUser,
+  enrollmentId: string,
+  action: OutreachSendGateFixAction,
+  targetUserId?: string,
+): Promise<{
+  fixed: boolean;
+  action: OutreachSendGateFixAction;
+  remainingIssue?: string;
+  summary: string;
+  overview: OutreachAutomationOverview;
+}> {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const enrollment = await OutreachAutomationEnrollment.findOne({
+    _id: enrollmentId,
+    ...scope(actor, target.id),
+    campaignId: config._id,
+  });
+  if (!enrollment) throw ApiError.notFound('自动开发队列项不存在');
+  if (enrollment.status === 'completed') throw ApiError.conflict('该客户已完成三封开发信');
+  if (enrollment.status === 'blocked' && !isVerificationBlockedReason(enrollment.lastError)) {
+    throw ApiError.conflict('该客户已按规则停止，不能修改草稿');
+  }
+
+  const customer = await Customer.findOne({ _id: enrollment.customerId, projectId: config.projectId }).lean();
+  if (!customer) throw ApiError.notFound('客户不存在或已删除');
+  const actualStep = Math.min(
+    MAX_AUTO_STEPS,
+    Math.max(
+      Number(customer.outreachStep ?? 0),
+      Math.min(MAX_AUTO_STEPS, Number(customer.letterCount ?? 0)),
+      Number(enrollment.currentStep ?? 0),
+    ),
+  );
+  if (actualStep >= MAX_AUTO_STEPS) throw ApiError.conflict('该客户已完成三封开发信');
+  const nextStep = actualStep + 1;
+
+  const draft = await findDraft(config.projectId, customer._id, nextStep);
+  if (!draft || draft.status !== 'draft') {
+    throw ApiError.conflict(`第 ${nextStep} 封当前没有可检查的草稿`);
+  }
+  if (draft.review?.decision === 'approved') {
+    throw ApiError.conflict('草稿已人工审核通过，请勿覆盖');
+  }
+
+  const project = await Project.findById(config.projectId)
+    .select('code slug name companyName industry website mailFrom senderName brandProfile')
+    .lean();
+  const signature = resolveProjectSalesProfile(project).signature;
+  const approvedOffers = project?.brandProfile?.approvedOffers;
+  const targetActor = await getActorForConfig(config);
+  const now = new Date();
+
+  let workingSubject = draft.subject;
+  let workingHtml = draft.content;
+  let workingText = draft.contentText;
+  let workingTemplate = draft.template;
+  let workingReview = draft.knowledgeReview;
+
+  if (action === 'strip_offer') {
+    const bodyWithoutSig = splitSignatureText(draft.contentText, signature).body;
+    const { cleanedBody, removedSentences } = stripUnauthorizedOfferSentences(bodyWithoutSig);
+    if (removedSentences.length === 0) {
+      throw ApiError.conflict('当前草稿未检测到可移除的寄样/色卡/免费/运费提议句');
+    }
+    let nextBody = cleanedBody;
+    let appendedNeutralCta = false;
+    if (nextStep < 3 && extractQuestions(stripSalutationAndSignoff(nextBody)).length === 0) {
+      nextBody = `${nextBody}\n\nWould this be relevant for your current range?`;
+      appendedNeutralCta = true;
+    }
+    const pureWords = countEnglishWords(stripSalutationAndSignoff(nextBody));
+    if (pureWords < 12) {
+      throw ApiError.conflict('删除该提议后剩余正文过短，请点击「单条重建」由 AI 重新撰写');
+    }
+    const signerName = await resolveSignerName({
+      projectId: config.projectId,
+      ownerId: customer.ownerId,
+      actorId: targetActor.id,
+    });
+    const rendered = await renderLetter(customer, draft.subject, nextBody, draft.recipientEmail, signerName, {
+      mailKind: 'outreach',
+    });
+    workingSubject = rendered.subject;
+    workingHtml = rendered.html;
+    workingText = rendered.text;
+    workingTemplate = nextBody;
+
+    if (workingReview) {
+      const removedSet = new Set(removedSentences.map((s) => s.trim().toLowerCase()));
+      const isOfferText = (text: string) =>
+        removedSet.has(text.trim().toLowerCase())
+        || SAMPLE_PATTERN.test(text)
+        || FREE_PATTERN.test(text)
+        || SHIPPING_PATTERN.test(text);
+      const nextChecks = (workingReview.factAudit?.checks ?? []).filter((c) => !isOfferText(c.text));
+      if (appendedNeutralCta) {
+        nextChecks.push({
+          id: `s${nextChecks.length}`,
+          text: 'Would this be relevant for your current range?',
+          status: 'non_claim',
+          sourceIds: [],
+          reason: '礼貌语或不含交易承诺的询问',
+        });
+      }
+      const nextClaims = (workingReview.claims ?? []).filter((c) => !isOfferText(c.text));
+      const cleanBodyForQuality = splitSignatureText(rendered.text, signature).body;
+      const quality = evaluateOutreachDraftQuality({
+        bodyText: cleanBodyForQuality,
+        subject: rendered.subject,
+        step: nextStep,
+        review: { ...workingReview, claims: nextClaims },
+        approvedOffers,
+      });
+      workingReview = {
+        ...workingReview,
+        claims: nextClaims,
+        bodyHash: draftHash(rendered.text),
+        context: { ...workingReview.context, qualityReport: quality },
+        ...(workingReview.factAudit ? {
+          factAudit: { ...workingReview.factAudit, checks: nextChecks },
+        } : {}),
+      };
+      await DevelopmentLetter.updateOne(
+        { _id: draft._id, projectId: config.projectId, status: 'draft' },
+        {
+          $set: {
+            subject: workingSubject,
+            content: workingHtml,
+            contentText: workingText,
+            template: workingTemplate,
+            knowledgeReview: workingReview,
+          },
+          $unset: { review: 1 },
+        },
+      );
+    }
+  } else if (action === 'split_paragraphs') {
+    const bodyWithoutSig = splitSignatureText(draft.contentText, signature).body;
+    const { splitBody, changed } = splitLongParagraphsText(bodyWithoutSig);
+    if (!changed) {
+      throw ApiError.conflict('当前草稿不存在可自动拆分的超长多句段落，请手动改写或点「单条重建」');
+    }
+    const signerName = await resolveSignerName({
+      projectId: config.projectId,
+      ownerId: customer.ownerId,
+      actorId: targetActor.id,
+    });
+    const rendered = await renderLetter(customer, draft.subject, splitBody, draft.recipientEmail, signerName, {
+      mailKind: 'outreach',
+    });
+    workingSubject = rendered.subject;
+    workingHtml = rendered.html;
+    workingText = rendered.text;
+    workingTemplate = splitBody;
+
+    if (workingReview) {
+      const cleanBodyForQuality = splitSignatureText(rendered.text, signature).body;
+      const quality = evaluateOutreachDraftQuality({
+        bodyText: cleanBodyForQuality,
+        subject: rendered.subject,
+        step: nextStep,
+        review: workingReview,
+        approvedOffers,
+      });
+      workingReview = {
+        ...workingReview,
+        bodyHash: draftHash(rendered.text),
+        context: { ...workingReview.context, qualityReport: quality },
+      };
+      await DevelopmentLetter.updateOne(
+        { _id: draft._id, projectId: config.projectId, status: 'draft' },
+        {
+          $set: {
+            subject: workingSubject,
+            content: workingHtml,
+            contentText: workingText,
+            template: workingTemplate,
+            knowledgeReview: workingReview,
+          },
+          $unset: { review: 1 },
+        },
+      );
+    }
+  }
+
+  const updatedAudit = inspectOutreachDraftAudit({
+    status: draft.status,
+    needsReview: draft.needsReview,
+    review: draft.review,
+    knowledgeReview: workingReview,
+  });
+  let remainingIssue = updatedAudit.needsReverify
+    ? updatedAudit.reason
+    : automatedReviewIssue(workingReview, nextStep, {
+      bodyText: workingText,
+      subject: workingSubject,
+      approvedOffers,
+      signature,
+    });
+  if (!remainingIssue && workingReview?.bodyHash !== draftHash(workingText)) {
+    remainingIssue = '草稿正文在核验后发生变化（bodyHash 不匹配），需重新核验';
+  }
+  if (!remainingIssue && workingReview) {
+    try {
+      const freshness = await knowledgeFreshness(workingReview, targetActor);
+      if (freshness.failed || freshness.changed.length > 0) {
+        remainingIssue = freshness.failed
+          ? '知识库依据新鲜度校验失败，请重新核验'
+          : `草稿引用的 ${freshness.changed.length} 条知识库依据已更新或过期，请重新核验`;
+      }
+    } catch {
+      remainingIssue = '发信前未能确认依据仍有效';
+    }
+  }
+
+  const fixed = !remainingIssue;
+  if (enrollment.lastError) {
+    if (fixed) {
+      await OutreachAutomationEnrollment.updateOne(
+        { _id: enrollment._id, lastError: enrollment.lastError },
+        {
+          $unset: { lastError: 1 },
+          $push: {
+            errorHistory: {
+              $each: [{
+                at: enrollment.updatedAt ?? now,
+                step: nextStep,
+                message: enrollment.lastError,
+                resolvedAt: now,
+                resolvedReason: action === 'strip_offer'
+                  ? '已删除未授权/不满足条件提议并重检通过'
+                  : action === 'split_paragraphs'
+                    ? '已拆分为短段落并重检通过'
+                    : '重检当前草稿已通过发送检查',
+              }],
+              $slice: -20,
+            },
+          },
+        },
+      );
+    } else if (remainingIssue && enrollment.lastError !== remainingIssue) {
+      await OutreachAutomationEnrollment.updateOne(
+        { _id: enrollment._id, lastError: enrollment.lastError },
+        {
+          $set: { lastError: remainingIssue.slice(0, 500) },
+          $push: {
+            errorHistory: {
+              $each: [{
+                at: enrollment.updatedAt ?? now,
+                step: nextStep,
+                message: enrollment.lastError,
+                resolvedAt: now,
+                resolvedReason: '重检后更新为新拦截原因',
+              }],
+              $slice: -20,
+            },
+          },
+        },
+      );
+    }
+  }
+
+  const overview = await getOutreachAutomationOverview(actor, target.id);
+  const summary = fixed
+    ? (action === 'strip_offer'
+      ? '已移除未授权/不满足条件的提议并重检通过'
+      : action === 'split_paragraphs'
+        ? '已拆分为短段落并重检通过'
+        : '当前草稿已重检通过全部发送检查')
+    : `重检完成，仍有拦截项：${remainingIssue}`;
+  return { fixed, action, ...(remainingIssue ? { remainingIssue } : {}), summary, overview };
 }
 
 /** 单条重建草稿（支持管理员代业务员触发，且在暂停状态下也可安全使用，不触发发送）。 */
@@ -1622,9 +2365,11 @@ export async function recoverCircuitFailedEnrollments(
 
 export type OutreachSendReadinessStatus =
   | 'ready_to_send'
+  | 'paused_ready_to_resume'
   | 'waiting_buyer_window'
   | 'blocked_by_send_gate'
   | 'blocked_by_audit'
+  | 'delivery_failed'
   | 'task_in_progress'
   | 'task_failed'
   | 'completed'
@@ -1641,6 +2386,8 @@ export interface OutreachEnrollmentDiagnostics {
   currentStep: number;
   nextStep: number;
   lastError?: string;
+  pausedReadyToResume?: boolean;
+  errorHistory?: { at: string; step?: number; message: string; resolvedAt?: string; resolvedReason?: string }[];
   sendReadiness: {
     status: OutreachSendReadinessStatus;
     label: string;
@@ -1648,6 +2395,7 @@ export interface OutreachEnrollmentDiagnostics {
     auditPassed: boolean;
     sendGatePassed: boolean;
     sendGateIssues: string[];
+    sendGateDetail?: OutreachSendGateDetail;
     bodyHashValid?: boolean;
     knowledgeFresh?: boolean;
     staleSources?: { sourceId: string; title: string; reason: string }[];
@@ -1886,6 +2634,27 @@ export async function getOutreachEnrollmentDiagnostics(
   const auditPassed = Boolean(latestDraft?.status === 'draft' && !audit.needsReverify);
   const sendGatePassed = auditPassed && sendGateIssues.length === 0;
   const taskInFlight = latestTask ? ['queued', 'running'].includes(String(latestTask.status)) : false;
+  const projectSig = resolveProjectSalesProfile(project).signature;
+  const primarySendGateIssue = sendGateIssue || sendGateIssues[0];
+  const diagSendGateDetail = auditPassed && !sendGatePassed && primarySendGateIssue
+    ? classifySendGateDetail(primarySendGateIssue, latestDraft, projectSig, project?.brandProfile?.approvedOffers)
+    : undefined;
+  const pausedReadyToResume = Boolean(
+    enrollment.status === 'paused'
+    && latestDraft?.status === 'draft'
+    && sendGatePassed
+    && !taskInFlight,
+  );
+  const rawDiagHistory = Array.isArray((enrollment as { errorHistory?: unknown[] }).errorHistory)
+    ? ((enrollment as { errorHistory?: Array<{ at: Date; step?: number; message: string; resolvedAt?: Date; resolvedReason?: string }> }).errorHistory ?? [])
+    : [];
+  const diagErrorHistory = rawDiagHistory.slice(-10).map((item) => ({
+    at: new Date(item.at).toISOString(),
+    ...(item.step ? { step: Number(item.step) } : {}),
+    message: String(item.message),
+    ...(item.resolvedAt ? { resolvedAt: new Date(item.resolvedAt).toISOString() } : {}),
+    ...(item.resolvedReason ? { resolvedReason: String(item.resolvedReason) } : {}),
+  }));
 
   let sendReadiness: OutreachEnrollmentDiagnostics['sendReadiness'];
   if (enrollment.status === 'completed' || actualStep >= MAX_AUTO_STEPS) {
@@ -1902,8 +2671,8 @@ export async function getOutreachEnrollmentDiagnostics(
   } else if (enrollment.status === 'blocked' && !isVerificationBlockedReason(enrollment.lastError)) {
     sendReadiness = {
       status: 'stopped',
-      label: '已按业务规则停止',
-      detail: enrollment.lastError || '客户已回复、退订或不在可开发状态，继续保持停止。',
+      label: '按规则停止（非系统故障）',
+      detail: enrollment.lastError || '客户已回复、退订或不在可开发状态，按业务规则保持停止。',
       auditPassed,
       sendGatePassed: false,
       sendGateIssues,
@@ -1921,6 +2690,17 @@ export async function getOutreachEnrollmentDiagnostics(
       auditPassed: false,
       sendGatePassed: false,
       sendGateIssues,
+      waitingForWindow: !windowOpen,
+      waitingForSchedule,
+    };
+  } else if (latestDraft?.status === 'failed') {
+    sendReadiness = {
+      status: 'delivery_failed',
+      label: `第 ${nextStep} 封邮件投递失败（SMTP）`,
+      detail: String(latestDraft.error || '邮件投递失败（SMTP 拒绝或发送异常）；此项属于投递失败，不是草稿核验失败，请到开发信/邮件记录排查邮箱后处理。'),
+      auditPassed: true,
+      sendGatePassed: false,
+      sendGateIssues: [],
       waitingForWindow: !windowOpen,
       waitingForSchedule,
     };
@@ -1942,14 +2722,28 @@ export async function getOutreachEnrollmentDiagnostics(
     } else if (!sendGatePassed) {
       sendReadiness = {
         status: 'blocked_by_send_gate',
-        label: '正文核验通过，但其他发送检查未通过',
+        label: diagSendGateDetail?.label || '正文核验通过，但其他发送检查未通过',
         detail: sendGateIssues.join('；'),
         auditPassed: true,
         sendGatePassed: false,
         sendGateIssues,
+        ...(diagSendGateDetail ? { sendGateDetail: diagSendGateDetail } : {}),
         ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
         ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
         ...(staleSources?.length ? { staleSources } : {}),
+        waitingForWindow: !windowOpen,
+        waitingForSchedule,
+      };
+    } else if (pausedReadyToResume) {
+      sendReadiness = {
+        status: 'paused_ready_to_resume',
+        label: '当前草稿检查已通过，队列仍暂停，待恢复',
+        detail: '当前最新草稿已通过正文逐项核验与全部发送检查（旧拦截记录已归档至历史）。该客户队列当前仍为暂停状态，系统不会自动恢复正式发送，确认后请手动点击「恢复」。',
+        auditPassed: true,
+        sendGatePassed: true,
+        sendGateIssues: [],
+        ...(bodyHashValid !== undefined ? { bodyHashValid } : {}),
+        ...(knowledgeFresh !== undefined ? { knowledgeFresh } : {}),
         waitingForWindow: !windowOpen,
         waitingForSchedule,
       };
@@ -2022,7 +2816,9 @@ export async function getOutreachEnrollmentDiagnostics(
     enrollmentStatus: enrollment.status,
     currentStep: actualStep,
     nextStep,
-    ...(enrollment.lastError ? { lastError: enrollment.lastError } : {}),
+    ...(enrollment.lastError && !pausedReadyToResume ? { lastError: enrollment.lastError } : {}),
+    ...(pausedReadyToResume ? { pausedReadyToResume: true } : {}),
+    ...(diagErrorHistory.length ? { errorHistory: diagErrorHistory } : {}),
     sendReadiness,
     timezone: {
       effectiveTimezone: buyerSchedule.timezone,

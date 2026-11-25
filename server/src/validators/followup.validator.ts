@@ -63,6 +63,13 @@ export const followUpIdParamsSchema = z.object({
   followUpId: objectIdSchema,
 });
 
+/** 路径参数：客户 id + 回复邮件 id + 附件 id */
+export const replyMailAttachmentParamsSchema = z.object({
+  id: objectIdSchema,
+  mailId: objectIdSchema,
+  attachmentId: objectIdSchema,
+});
+
 /** 列表查询：单个客户的跟进记录通常不多，给一个宽松的默认上限即可 */
 export const listFollowUpsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(200),
