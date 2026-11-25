@@ -223,15 +223,21 @@ export function verifyOfferAuthorization(
     }
   }
   if (mentionsSample) {
+    const configuredSamples = (approvedOffers ?? []).filter((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
     const enabledSamples = enabledOffers.filter((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
     const allowed = enabledSamples.find((o) => !o.requiresEvidence || hasKnowledgeEvidence);
-    if (!allowed && (approvedOffers !== undefined || mentionsFree || mentionsShipping)) {
+    // Ordinary non-free, non-shipping sample/swatch inquiry is standard B2B outreach and allowed by default.
+    // Block ONLY when paired with unauthorized free/shipping, when project explicitly disabled sample offers,
+    // or when project explicitly enabled sample offers with requiresEvidence=true but no knowledge evidence was cited.
+    if (!allowed && (mentionsFree || mentionsShipping || configuredSamples.length > 0)) {
       issues.push({
         code: 'unauthorized_offer',
         severity: 'block',
         message: enabledSamples.length > 0
           ? '寄样/色卡授权条件不满足：项目已启用寄样/色卡授权，但要求附带已发布知识依据（当前草稿缺少依据）'
-          : '寄样/色卡提议未获授权：正文包含寄样/色卡提议，但当前项目尚未开启并启用寄样/色卡授权',
+          : configuredSamples.length > 0
+            ? '寄样/色卡提议已关闭：当前项目已显式停用寄样/色卡授权'
+            : '寄样/色卡伴随免费或运费承诺未获授权：正文包含免费寄样或包邮提议，但项目尚未启用对应授权',
       });
     }
   }
@@ -304,8 +310,11 @@ export function buildOfferAuthorizationPromptRules(approvedOffers?: ProjectAppro
   shippingAllowed: boolean;
   lines: string[];
 } {
+  const configuredSamples = (approvedOffers ?? []).filter((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
   const enabledOffers = (approvedOffers ?? []).filter((o) => o.enabled);
-  const sampleAllowed = enabledOffers.some((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
+  const enabledSamples = enabledOffers.filter((o) => o.allowsSample || o.category === 'sample' || o.category === 'swatch');
+  const sampleExplicitlyDisabled = configuredSamples.length > 0 && enabledSamples.length === 0;
+  const sampleAllowed = !sampleExplicitlyDisabled;
   const freeAllowed = enabledOffers.some((o) => o.allowsFree);
   const shippingAllowed = enabledOffers.some((o) => o.allowsShipping);
   const lines: string[] = [];
@@ -316,12 +325,12 @@ export function buildOfferAuthorizationPromptRules(approvedOffers?: ProjectAppro
     );
   }
   const forbidden: string[] = [];
-  if (!sampleAllowed) forbidden.push('寄样/色卡/打样（严禁出现 sample、swatch、color card、寄样、色卡、样品、打样）');
+  if (sampleExplicitlyDisabled) forbidden.push('寄样/色卡/打样（项目已停用，严禁出现 sample、swatch、color card、寄样、色卡、样品、打样）');
   if (!freeAllowed) forbidden.push('免费承诺（严禁出现 free、complimentary、at no cost、免费）');
   if (!shippingAllowed) forbidden.push('运费/快递/贸易术语承诺（严禁出现 shipping、freight、courier、DDP、CIF、FOB、运费、包邮）');
   if (forbidden.length > 0) {
     lines.push(
-      `【授权禁区（写稿与改写前必须遵守）】当前项目未授权：${forbidden.join('；')}。请勿写入任何未授权提议；结尾请改为询问客户的产品方向、规格需求或对应采购负责人；没有已确认报价就不报任何数字。`,
+      `【授权禁区（写稿与改写前必须遵守）】当前项目未授权：${forbidden.join('；')}。请勿写入未授权的免费/包邮承诺；可正常询问产品方向、规格、付费/评估样品需求或采购负责人；没有已确认报价就不报任何数字。`,
     );
   } else {
     lines.push('没有已确认报价就不报任何价格数字。');

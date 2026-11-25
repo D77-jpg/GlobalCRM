@@ -334,19 +334,19 @@ function classifySendGateDetail(
       code: 'missing_supplier_evidence',
       label: '首封缺少已发布我方能力依据',
       detail: issueMessage,
-      guidance: '首封需至少引用 1 条已发布的公司产能、资质认证（如 ISO/CE）、产品规格或 OEM/ODM 交付依据。可在下方添加/启用英文「已批准证据块」，或在知识库发布对应文档后点「单条重建」。',
+      guidance: '首封需至少引用 1 条已发布的公司产能、资质认证、产品规格或 OEM/ODM 交付依据。请点「重新生成」（系统会自动引用已发布知识或标准卖点），如项目尚未发布此类资料请先在下方补充。',
       canRecheck: true,
     };
   }
-  if (/寄样\/色卡|免费承诺|运费\/快递|未授权|授权条件不满足|未获授权/.test(issueMessage)) {
+  if (/寄样\/色卡|免费承诺|运费\/快递|未授权|授权条件不满足|未获授权|已关闭/.test(issueMessage)) {
     const conditionUnmet = /条件不满足|requiresEvidence|缺少依据/.test(issueMessage);
     return {
       code: conditionUnmet ? 'offer_condition_unmet' : 'offer_unauthorized',
-      label: conditionUnmet ? '寄样/色卡或优惠授权条件不满足' : '寄样/色卡或优惠提议未获授权',
+      label: conditionUnmet ? '寄样/色卡授权条件不满足' : '免费/运费或停用提议未获授权',
       detail: issueMessage,
       guidance: conditionUnmet
-        ? '项目已启用对应授权，但要求附带已发布知识依据而当前草稿未匹配到依据。可直接点「删除提议后重检」移除该句，或补充依据后重建。'
-        : '当前项目未开启该寄样/色卡/免费/运费授权。可直接点「删除提议后重检」移除该句并立即重检，或先在项目设置开启授权后点「重检」。',
+        ? '当前项目启用了对应授权但要求附带已发布知识依据。可直接点「删除提议后重检」移除该句，或补充依据后重新生成。'
+        : '正文包含未授权的免费/包邮/运费承诺或已停用的提议。可直接点「删除提议后重检」移除该句并立即重检。',
       canStripOffer: true,
       canRecheck: true,
     };
@@ -358,7 +358,7 @@ function classifySendGateDetail(
         ? `存在过长段落（单段 ${quality.maxParagraphWords} 词，共 ${quality.paragraphCount} 段）`
         : '存在过长段落',
       detail: issueMessage,
-      guidance: '建议将正文改写拆分为 2–3 个短段落（单段建议 ≤ 52 词、硬上限 68 词），可直接点「拆段并重检」或去编辑分段后重检。',
+      guidance: '可将正文按句拆分为 2–3 个短段落（不改变任何内容与承诺），可直接点「拆段并重检」或顶部一键自动修复。',
       wordCount: quality?.wordCount,
       paragraphCount: quality?.paragraphCount,
       maxParagraphWords: quality?.maxParagraphWords,
@@ -371,7 +371,7 @@ function classifySendGateDetail(
       code: 'word_count',
       label: quality ? `正文字数超界（${quality.wordCount} 词）` : '正文字数超界',
       detail: issueMessage,
-      guidance: '请精简或补充正文至对应步骤建议词数后点「重检」，或点「单条重建」由模型重新生成。',
+      guidance: '请精简或补充正文至对应步骤建议词数后点「重检」，或点「重新生成」。',
       wordCount: quality?.wordCount,
       paragraphCount: quality?.paragraphCount,
       canRecheck: true,
@@ -380,18 +380,18 @@ function classifySendGateDetail(
   if (/回复问题|CTA|提问负担/.test(issueMessage)) {
     return {
       code: 'cta_count',
-      label: '回复提问（CTA）不符合规则',
+      label: '回复提问不符合规则',
       detail: issueMessage,
-      guidance: '第 1、2 封应保留 1 个轻量明确的回复问题；请调整后点「重检」或「单条重建」。',
+      guidance: '第 1、2 封应保留 1 个轻量明确的回复问题；请调整后点「重检」或「重新生成」。',
       canRecheck: true,
     };
   }
   if (/bodyHash|正文核验指纹|发生变化/.test(issueMessage)) {
     return {
       code: 'body_changed',
-      label: '正文在核验后发生修改',
+      label: '正文在核对后发生修改',
       detail: issueMessage,
-      guidance: '草稿修改后与核验指纹不一致，请点「单条重建」或重新完成核验。',
+      guidance: '草稿修改后与原核对内容不一致，请点「重新生成」或在草稿页重新核对。',
       canRecheck: true,
     };
   }
@@ -400,15 +400,15 @@ function classifySendGateDetail(
       code: 'stale_knowledge',
       label: '引用的知识依据已更新',
       detail: issueMessage,
-      guidance: '草稿引用的知识条目在生成后有更新，请点「单条重建」按最新知识依据重核。',
+      guidance: '草稿引用的知识条目在生成后有更新，请点「重新生成」按最新资料重新核对。',
       canRecheck: true,
     };
   }
   return {
     code: 'other_send_gate',
-    label: '其他发送检查未通过',
+    label: '发送前待调整',
     detail: issueMessage,
-    guidance: '请对照具体拦截原因处理后点击「重检」或「单条重建」。',
+    guidance: '请对照提示处理后点击「重检」或「重新生成」。',
     canRecheck: true,
   };
 }
@@ -509,6 +509,7 @@ export type OutreachDraftStage =
   | 'waiting_model'
   | 'draft_saved_verified'
   | 'draft_audit_failed'
+  | 'send_gate_blocked'
   | 'waiting_delivery'
   | 'delivery_cancelled'
   | 'task_failed'
@@ -1341,7 +1342,8 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       if (taskStatus === 'running') draftStage = 'waiting_model';
       else if (taskStatus === 'queued') draftStage = 'reverify_queued';
       else if (nextLetterStatus === 'draft' && !draftBlockedFromAutoSend) draftStage = 'draft_saved_verified';
-      else if (nextLetterStatus === 'draft' && draftBlockedFromAutoSend) draftStage = 'draft_audit_failed';
+      else if (nextLetterStatus === 'draft' && audit.needsReverify) draftStage = 'draft_audit_failed';
+      else if (nextLetterStatus === 'draft' && Boolean(rowSendGateIssue)) draftStage = 'send_gate_blocked';
       else if (isWaitingDelivery) draftStage = 'waiting_delivery';
       else if (isDeliveryCancelled) draftStage = 'delivery_cancelled';
       else if (isDeliveryFailed) draftStage = 'delivery_failed';
@@ -1372,6 +1374,7 @@ export async function getOutreachAutomationOverview(actor: AuthUser, targetUserI
       && !taskInFlight
       && (
         draftStage === 'draft_audit_failed'
+        || draftStage === 'send_gate_blocked'
         || draftStage === 'task_failed'
         || draftStage === 'delivery_failed'
         || draftStage === 'delivery_cancelled'
@@ -2039,7 +2042,7 @@ export async function reverifyUnverifiedOutreachDrafts(
   const overview = await getOutreachAutomationOverview(actor, target.id);
   const skippedReasons = [...reasonCounts.entries()].map(([reason, count]) => ({ reason, count }));
   const remainingDetails = overview.queue
-    .filter((row) => row.draftStage === 'draft_audit_failed')
+    .filter((row) => row.draftStage === 'draft_audit_failed' || row.draftStage === 'send_gate_blocked')
     .slice(0, 30)
     .map((row) => ({
       customerId: row.customerId,
@@ -2346,6 +2349,136 @@ export async function fixEnrollmentSendGate(
         : '当前草稿已重检通过全部发送检查')
     : `重检完成，仍有拦截项：${remainingIssue}`;
   return { fixed, action, ...(remainingIssue ? { remainingIssue } : {}), summary, overview };
+}
+
+/**
+ * 批量自动修复「正文核对已通过、仅卡发送前规则」的草稿：
+ * - 单段过长：按句界自动拆为短段并重检（不改任何字词与承诺）
+ * - 未授权/不满足条件的提议：自动移除该提议句并重检
+ * - 首封缺少我方能力依据：当项目已有已发布能力知识或标准卖点库时，自动提交重新生成（暂停队列仍保持暂停，不自动发信）
+ */
+export async function autoFixOutreachSendGates(
+  actor: AuthUser,
+  targetUserId?: string,
+): Promise<{
+  scanned: number;
+  fixed: number;
+  requeued: number;
+  skipped: number;
+  details: {
+    customerId: string;
+    customerName: string;
+    action: 'split_paragraphs' | 'strip_offer' | 'regenerate' | 'recheck' | 'skip';
+    outcome: 'fixed' | 'requeued' | 'skipped';
+    message: string;
+  }[];
+  overview: OutreachAutomationOverview;
+}> {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  const initialOverview = await getOutreachAutomationOverview(actor, target.id);
+  const targets = initialOverview.queue.filter(
+    (row) => row.draftStage === 'send_gate_blocked' && Boolean(row.sendGateDetail),
+  );
+
+  let fixed = 0;
+  let requeued = 0;
+  let skipped = 0;
+  const details: {
+    customerId: string;
+    customerName: string;
+    action: 'split_paragraphs' | 'strip_offer' | 'regenerate' | 'recheck' | 'skip';
+    outcome: 'fixed' | 'requeued' | 'skipped';
+    message: string;
+  }[] = [];
+
+  const hasStep1Evidence = targets.some((t) => t.sendGateDetail?.code === 'missing_supplier_evidence')
+    ? await hasProjectStep1CapabilityEvidence(config.projectId)
+    : false;
+  const targetActor = await getActorForConfig(config);
+
+  for (const row of targets) {
+    const code = row.sendGateDetail!.code;
+    try {
+      if (code === 'paragraph_too_long') {
+        const res = await fixEnrollmentSendGate(actor, row.id, 'split_paragraphs', target.id);
+        if (res.fixed) {
+          fixed += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'split_paragraphs', outcome: 'fixed', message: '已自动按句拆分为短段并通过检查' });
+        } else {
+          skipped += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'split_paragraphs', outcome: 'skipped', message: res.remainingIssue || res.summary });
+        }
+      } else if (code === 'offer_unauthorized' || code === 'offer_condition_unmet') {
+        const res = await fixEnrollmentSendGate(actor, row.id, 'strip_offer', target.id);
+        if (res.fixed) {
+          fixed += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'strip_offer', outcome: 'fixed', message: '已移除未授权提议句并通过检查' });
+        } else {
+          skipped += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'strip_offer', outcome: 'skipped', message: res.remainingIssue || res.summary });
+        }
+      } else if (code === 'missing_supplier_evidence') {
+        if (!hasStep1Evidence) {
+          skipped += 1;
+          details.push({
+            customerId: row.customerId,
+            customerName: row.customerName,
+            action: 'skip',
+            outcome: 'skipped',
+            message: '项目尚未发布公司简介/产品规格知识或启用标准英文卖点库，请先补充后再重新生成',
+          });
+          continue;
+        }
+        const enrollment = await OutreachAutomationEnrollment.findOne({
+          _id: row.id,
+          ...scope(actor, target.id),
+          campaignId: config._id,
+        });
+        if (!enrollment) {
+          skipped += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'skip', outcome: 'skipped', message: '队列项不存在' });
+          continue;
+        }
+        const regen = await supersedeUnverifiedDraftAndRequeue(config, enrollment, targetActor, new Date(), { onlyIfUnverified: false });
+        if (regen.queued) {
+          requeued += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'regenerate', outcome: 'requeued', message: '已按新规则提交重新生成首封（自动引入我方能力依据）' });
+        } else {
+          skipped += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'regenerate', outcome: 'skipped', message: regen.skippedReason || '未能重新生成' });
+        }
+      } else {
+        const res = await fixEnrollmentSendGate(actor, row.id, 'recheck', target.id);
+        if (res.fixed) {
+          fixed += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'recheck', outcome: 'fixed', message: '重检已通过全部发送检查' });
+        } else {
+          skipped += 1;
+          details.push({ customerId: row.customerId, customerName: row.customerName, action: 'recheck', outcome: 'skipped', message: res.remainingIssue || res.summary });
+        }
+      }
+    } catch (error) {
+      skipped += 1;
+      details.push({
+        customerId: row.customerId,
+        customerName: row.customerName,
+        action: 'skip',
+        outcome: 'skipped',
+        message: error instanceof Error ? error.message : '自动修复失败',
+      });
+    }
+  }
+
+  const overview = await getOutreachAutomationOverview(actor, target.id);
+  return {
+    scanned: targets.length,
+    fixed,
+    requeued,
+    skipped,
+    details: details.slice(0, 30),
+    overview,
+  };
 }
 
 /** 单条重建草稿（支持管理员代业务员触发，且在暂停状态下也可安全使用，不触发发送）。 */
@@ -3310,6 +3443,63 @@ async function processEnrollment(
   if (!draft.subject?.trim() || !draft.contentText?.trim() || /\{\{[^}]+\}\}/.test(draft.contentText)) {
     await markEnrollment(enrollment._id, { status: 'failed', lastError: '草稿内容不完整或仍有未替换的占位符' });
     return { sent: false };
+  }
+  // Auto-heal pure paragraph sprawl (without altering any words, facts, or commitments) before sending.
+  if (draft.review?.decision !== 'approved' && !inspectOutreachDraftAudit(draft).needsReverify) {
+    const projectForAutoSplit = await Project.findById(config.projectId)
+      .select('code slug name companyName industry website mailFrom senderName brandProfile')
+      .lean();
+    const sigForAutoSplit = resolveProjectSalesProfile(projectForAutoSplit).signature;
+    const preSendIssue = automatedReviewIssue(draft.knowledgeReview, nextStep, {
+      bodyText: draft.contentText,
+      subject: draft.subject,
+      approvedOffers: projectForAutoSplit?.brandProfile?.approvedOffers,
+      signature: sigForAutoSplit,
+    });
+    if (preSendIssue && /存在过长段落/.test(preSendIssue)) {
+      const bodyWithoutSig = splitSignatureText(draft.contentText, sigForAutoSplit).body;
+      const { splitBody, changed } = splitLongParagraphsText(bodyWithoutSig);
+      if (changed) {
+        const signerName = await resolveSignerName({
+          projectId: config.projectId,
+          ownerId: customer.ownerId,
+          actorId: actor.id,
+        });
+        const rendered = await renderLetter(customer, draft.subject, splitBody, draft.recipientEmail, signerName, {
+          mailKind: 'outreach',
+        });
+        const cleanAfterSplit = splitSignatureText(rendered.text, sigForAutoSplit).body;
+        const qualityAfterSplit = evaluateOutreachDraftQuality({
+          bodyText: cleanAfterSplit,
+          subject: rendered.subject,
+          step: nextStep,
+          review: draft.knowledgeReview,
+          approvedOffers: projectForAutoSplit?.brandProfile?.approvedOffers,
+        });
+        const nextReview = {
+          ...draft.knowledgeReview,
+          bodyHash: draftHash(rendered.text),
+          context: { ...draft.knowledgeReview.context, qualityReport: qualityAfterSplit },
+        };
+        await DevelopmentLetter.updateOne(
+          { _id: draft._id, projectId: config.projectId, status: 'draft' },
+          {
+            $set: {
+              subject: rendered.subject,
+              content: rendered.html,
+              contentText: rendered.text,
+              template: splitBody,
+              knowledgeReview: nextReview,
+            },
+          },
+        );
+        draft.subject = rendered.subject;
+        draft.content = rendered.html;
+        draft.contentText = rendered.text;
+        draft.template = splitBody;
+        draft.knowledgeReview = nextReview;
+      }
+    }
   }
   if (config.rolloutMode === 'shadow') {
     try {

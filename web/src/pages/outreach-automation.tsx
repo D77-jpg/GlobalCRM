@@ -58,10 +58,25 @@ interface ReverifyBatchResult {
   remainingDetails?: { customerId: string; customerName: string; category: 'audit_failed' | 'send_gate'; reason: string }[];
 }
 
+interface AutoFixSendGatesResult {
+  scanned: number;
+  fixed: number;
+  requeued: number;
+  skipped: number;
+  details: {
+    customerId: string;
+    customerName: string;
+    action: 'split_paragraphs' | 'strip_offer' | 'regenerate' | 'recheck' | 'skip';
+    outcome: 'fixed' | 'requeued' | 'skipped';
+    message: string;
+  }[];
+}
+
 function isExceptionQueueRow(row: OutreachAutomationQueueRow): boolean {
   return Boolean(
     row.draftNeedsReverify
     || row.draftStage === 'draft_audit_failed'
+    || row.draftStage === 'send_gate_blocked'
     || row.draftStage === 'task_failed'
     || row.draftStage === 'delivery_failed'
     || row.draftStage === 'delivery_cancelled'
@@ -198,6 +213,7 @@ const DRAFT_STAGE_META: Record<
   waiting_model: { label: '正在生成草稿', variant: 'warning' },
   draft_saved_verified: { label: '核对通过', variant: 'developed' },
   draft_audit_failed: { label: '内容待核对', variant: 'failed' },
+  send_gate_blocked: { label: '发送前待调整', variant: 'warning' },
   waiting_delivery: { label: '等待投递', variant: 'outline' },
   delivery_cancelled: { label: '已取消（未发送）', variant: 'warning' },
   task_failed: { label: '生成未完成', variant: 'failed' },
@@ -273,9 +289,12 @@ function phaseBadge(
   if (row.pausedReadyToResume) {
     return { label: '队列暂停 · 待恢复', variant: 'warning' };
   }
+  if (row.draftStage === 'send_gate_blocked') {
+    return { label: '发送前待调整', variant: 'warning' };
+  }
   if (row.draftStage === 'draft_audit_failed') {
     if (row.sendGateDetail) {
-      return { label: '发送前待调整', variant: 'failed' };
+      return { label: '发送前待调整', variant: 'warning' };
     }
     return { label: '内容待核对', variant: 'failed' };
   }
@@ -314,6 +333,9 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
   }
   if (row.pausedReadyToResume) {
     return '当前草稿已通过检查，队列仍暂停，确认后请手动恢复';
+  }
+  if (row.draftStage === 'send_gate_blocked') {
+    return row.sendGateDetail?.guidance || '正文已核对通过，请按提示微调后重检';
   }
   if (row.draftStage === 'draft_audit_failed') {
     if (row.sendGateDetail) {
@@ -406,6 +428,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const [diagRowId, setDiagRowId] = React.useState('');
   const [queueFilter, setQueueFilter] = React.useState<'all' | 'exceptions' | 'paused_ready'>('all');
   const [lastReverifyResult, setLastReverifyResult] = React.useState<ReverifyBatchResult | null>(null);
+  const [lastAutoFixResult, setLastAutoFixResult] = React.useState<AutoFixSendGatesResult | null>(null);
   const [error, setError] = React.useState('');
   const dirtyRef = React.useRef(false);
   const ownerTouchedRef = React.useRef(false);
@@ -461,6 +484,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
     setForm(null);
     setOverview(null);
     setLastReverifyResult(null);
+    setLastAutoFixResult(null);
   }, [ownerId]);
 
   const patch = (value: Partial<OutreachAutomationConfig>): void => {
@@ -646,6 +670,39 @@ export function OutreachAutomationPage(): React.JSX.Element {
     }
   };
 
+  const autoFixAllSendGates = async (): Promise<void> => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await apiPost<AutoFixSendGatesResult & { overview: OutreachAutomationOverview }>(
+        scoped('/outreach-automation/auto-fix-send-gates'),
+        {},
+      );
+      setOverview(res.overview);
+      setForm(res.overview.config);
+      setLastAutoFixResult({
+        scanned: res.scanned,
+        fixed: res.fixed,
+        requeued: res.requeued,
+        skipped: res.skipped,
+        details: res.details,
+      });
+      if (res.fixed > 0 || res.requeued > 0) {
+        toast.success(`已处理 ${res.fixed + res.requeued} 封：直接修复 ${res.fixed} 封，重新生成 ${res.requeued} 封`, {
+          description: res.overview.config.enabled
+            ? '通过检查的草稿将按客户当地时段发送。'
+            : '自动发送仍保持暂停，确认无误后再手动恢复。',
+        });
+      } else {
+        toast.info('当前没有可自动修复的草稿，请查看下方跳过说明');
+      }
+    } catch (caught) {
+      toast.error(toErrorMessage(caught, '批量修复失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const regenerateRow = async (row: OutreachAutomationQueueRow): Promise<void> => {
     setBusy(true);
     setError('');
@@ -757,7 +814,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const failedTasksCount = overview?.stats.failedTasks ?? 0;
   const historicalFailedTasksCount = overview?.stats.historicalFailedTasks ?? 0;
   const sendGateCounts = React.useMemo(() => {
-    const rows = (overview?.queue ?? []).filter((r) => r.draftStage === 'draft_audit_failed' && r.sendGateDetail);
+    const rows = (overview?.queue ?? []).filter(
+      (r) => (r.draftStage === 'send_gate_blocked' || r.draftStage === 'draft_audit_failed') && r.sendGateDetail,
+    );
     return {
       missingEvidence: rows.filter((r) => r.sendGateDetail?.code === 'missing_supplier_evidence').length,
       offerMismatch: rows.filter((r) => r.sendGateDetail?.code === 'offer_unauthorized' || r.sendGateDetail?.code === 'offer_condition_unmet').length,
@@ -1017,17 +1076,48 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     ].filter(Boolean).join(' · ') || '请在下方队列按每行提示处理。'}
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0 bg-background"
-                  onClick={() => {
-                    setQueueFilter('exceptions');
-                    queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}
-                >
-                  查看并处理（{sendGateBlockedCount}）
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 border-sky-400/70 bg-background text-sky-900 hover:bg-sky-100 dark:text-sky-200 dark:hover:bg-sky-500/20"
+                    disabled={busy}
+                    onClick={() => void autoFixAllSendGates()}
+                  >
+                    {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                    一键自动修复（{sendGateBlockedCount}）
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0"
+                    onClick={() => {
+                      setQueueFilter('exceptions');
+                      queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                  >
+                    定位列表
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {lastAutoFixResult ? (
+              <div className="mt-2.5 flex flex-wrap items-start justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs">
+                <div className="space-y-1">
+                  <p className="font-medium text-foreground">
+                    本次自动修复结果：已处理 {lastAutoFixResult.scanned} 封 · 直接通过 <strong className="text-emerald-600 dark:text-emerald-400">{lastAutoFixResult.fixed}</strong> 封 · 提交重新生成 <strong>{lastAutoFixResult.requeued}</strong> 封 · 跳过 <strong>{lastAutoFixResult.skipped}</strong> 封
+                  </p>
+                  {lastAutoFixResult.details.length > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      明细：{lastAutoFixResult.details.slice(0, 8).map((d) => `${d.customerName}（${d.message}）`).join('；')}
+                      {lastAutoFixResult.details.length > 8 ? ` 等共 ${lastAutoFixResult.details.length} 条` : ''}
+                    </p>
+                  ) : null}
+                </div>
+                <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setLastAutoFixResult(null)}>
+                  收起
                 </Button>
               </div>
             ) : null}
@@ -1290,7 +1380,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                           const canSingleTestRun = row.status !== 'completed'
                             && !complianceBlocked
                             && row.draftStage !== 'waiting_model'
-                            && !sendGate;
+                            && (!sendGate || sendGate.code === 'missing_supplier_evidence');
                           const stageMeta = row.draftStage && row.draftStage !== 'none' ? DRAFT_STAGE_META[row.draftStage] : undefined;
                           const showStageMeta = Boolean(stageMeta && stageMeta.label !== status.label);
                           const lastArchivedError = row.errorHistory?.length ? row.errorHistory[row.errorHistory.length - 1] : undefined;
@@ -1308,6 +1398,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
                               <TableCell>
                                 <div className="flex flex-wrap items-center gap-1">
                                   <Badge variant={status.variant}>{status.label}</Badge>
+                                  {row.draftStage === 'send_gate_blocked' ? (
+                                    <Badge variant="developed" className="text-[10px]">核对已通过</Badge>
+                                  ) : null}
                                   {showStageMeta && stageMeta ? <Badge variant={stageMeta.variant}>{stageMeta.label}</Badge> : null}
                                   {row.draftAuditDetail?.rebuiltAndFailedAgain ? (
                                     <Badge variant="warning" className="text-[10px]">新稿仍待处理</Badge>
@@ -1443,7 +1536,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                         className="h-8 px-2 text-xs"
                                         onClick={() => document.getElementById('approved-proof-blocks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                                       >
-                                        去补充证据块
+                                        去补充卖点库
                                       </Button>
                                     ) : (
                                       <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" asChild>

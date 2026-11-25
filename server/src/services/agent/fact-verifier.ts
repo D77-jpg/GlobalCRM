@@ -598,6 +598,52 @@ export async function verifyGroundedEmail(body:string,bundle:KnowledgeBundle,opt
    // Greetings and closed information requests are the only non-claim exemptions.
    checks=checks.map(c=>{const asking=/(?:could you|please (?:confirm|provide|share)|what|how many|请(?:确认|提供)|多少)[^\n]{0,240}[?？.]?/i.test(c.text);const known=options.knownRequirements;return asking&&((known?.quantity!==undefined&&/quantity|how many|数量/i.test(c.text))||(known?.destination&&/destination|ship to|目的地|收货地/i.test(c.text)))?{...c,status:'unsupported' as const,reason:'客户已提供该项需求，请勿重复询问；只集中询问仍缺失的信息'}:c;});
    if(checks.every(c=>c.status==='supported'||c.status==='non_claim')){
+    // Step-1 self-healing guarantee: if every sentence passed audit but the draft still lacks a
+    // published supplier capability claim, either inject an approved project proof block verbatim
+    // (0 LLM calls) or trigger round-0 rewrite grounded in a published knowledge source.
+    const hasKnowledgeClaim=checks.some(c=>c.status==='supported'&&c.sourceIds.some(id=>id.startsWith('knowledge:')||id.startsWith('proof-block:')));
+    if(options.outreachStep===1&&!hasKnowledgeClaim){
+     const blockCandidate=enabledProofBlocks.find(b=>b.slot==='proof')??enabledProofBlocks.find(b=>b.slot==='identity');
+     if(blockCandidate){
+      const sid=blockCandidate.sourceKnowledgeId&&bundle.sources.some(s=>s.knowledgeId===blockCandidate.sourceKnowledgeId)
+       ?bundle.sources.find(s=>s.knowledgeId===blockCandidate.sourceKnowledgeId)!.sourceId
+       :`proof-block:${blockCandidate.id}`;
+      const proofText=blockCandidate.text.trim();
+      const paras=candidate.replace(/\r\n/g,'\n').split(/\n{2,}/).map(p=>p.trim()).filter(Boolean);
+      const insertAt=paras.length>=2&&/[?？]\s*$/.test(paras[paras.length-1]!)?paras.length-1:paras.length;
+      paras.splice(insertAt,0,proofText);
+      candidate=paras.join('\n\n');
+      if(!lastUsedBlocks.some(b=>b.id===blockCandidate.id))lastUsedBlocks=[...lastUsedBlocks,blockCandidate];
+      checks=[
+       ...checks,
+       {
+        id:`proof_auto_${blockCandidate.id}`,
+        text:proofText,
+        status:'supported',
+        sourceIds:[sid],
+        quotes:[{sourceId:sid,quote:proofText,start:0,end:Array.from(proofText).length}],
+        reason:'首封自动补入项目已审核标准卖点依据',
+       },
+      ];
+     }else if(round===0&&verifier.rewrite){
+      const capSource=bundle.sources.find(s=>s.kind==='knowledge'&&['company','product','faq','reference'].includes(s.category)&&s.content.trim().length>0);
+      if(capSource){
+       currentStage='round0_rewrite';
+       candidate=await verifier.rewrite({
+        body:candidate,
+        allowed:evidence,
+        issues:[{
+         id:'step1_capability_missing',
+         text:candidate,
+         status:'unsupported',
+         sourceIds:[capSource.sourceId],
+         reason:`首封缺少已发布的我方能力依据：请在不编造任何新承诺的前提下，自然补入 1 句简洁具体的我方生产/产品能力介绍（必须严格依据已发布资料「${capSource.title}」），保持短段落和 1 个轻量结尾问句。`,
+        }],
+       });
+       continue;
+      }
+     }
+    }
     if(actor){const current=await knowledgeFreshness(baseline.review,actor);if(current.failed||current.changed.length)return fallback('核验期间依据发生变化或权限检查失败，请重新生成','unavailable',{failureCategory:'evidence_unavailable',failureCode:'INDEX_STALE',failureStage:currentStage,failureDetail:'核验期间知识库依据已变化或当前无权读取'});}
     const extraSources=syntheticProofBlockSources(lastUsedBlocks,baseline.review.sources);
     const bodyText=[ensureSalutation(candidate,options),signature].filter(Boolean).join('\n\n');

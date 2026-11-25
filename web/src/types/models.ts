@@ -1703,6 +1703,7 @@ export type OutreachDraftStage =
   | 'waiting_model'
   | 'draft_saved_verified'
   | 'draft_audit_failed'
+  | 'send_gate_blocked'
   | 'waiting_delivery'
   | 'delivery_cancelled'
   | 'task_failed'
