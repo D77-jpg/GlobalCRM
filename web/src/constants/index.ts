@@ -233,7 +233,7 @@ export const TEMPLATE_CATEGORY_FILTER_OPTIONS: { value: TemplateCategory | 'all'
 ];
 
 export const LETTER_STATUS_LABEL: Record<LetterStatus, string> = {
-  queued: '等待发送', scheduled: '定时发送', sending: '发送中', retrying: '等待重试', cancelled: '已取消',
+  queued: '等待发送', scheduled: '定时发送', sending: '发送中', retrying: '等待重试', cancelled: '已取消，未发送',
   draft: '草稿',
   sent: '已发送',
   opened: '已打开',
@@ -257,6 +257,9 @@ export const LETTER_STATUS_OPTIONS: { value: LetterStatus | 'all'; label: string
   { value: 'sent', label: '已发送' },
   { value: 'opened', label: '已打开' },
   { value: 'draft', label: '草稿' },
+  { value: 'scheduled', label: '定时发送' },
+  { value: 'queued', label: '等待发送' },
+  { value: 'cancelled', label: '已取消，未发送' },
   { value: 'failed', label: '发送失败' },
 ];
 

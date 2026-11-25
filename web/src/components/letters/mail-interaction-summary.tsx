@@ -19,9 +19,10 @@ export function MailInteractionSummary({
     const clickDisplay = tracking?.clicked
       ? `点击 ${tracking.dedupedClickCount ?? tracking.clickCount} 次`
       : '未记录点击';
+    const activeTracking = tracking && tracking.enabled !== false ? tracking : undefined;
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground" aria-label="邮件互动情况">
-        {tracking ? (
+        {activeTracking ? (
           <>
             <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" aria-hidden />{openDisplay}</span>
             <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" aria-hidden />{clickDisplay}</span>

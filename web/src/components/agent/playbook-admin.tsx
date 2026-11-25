@@ -270,8 +270,8 @@ function ProjectOfferAndRuleEditor(): React.JSX.Element | null {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="font-medium text-foreground">逐项授权沟通小提议（写信门禁实时校验免费/寄样/运费权限）</p>
-              <p className="text-muted-foreground">未授权「免费 / 寄样 / 运费」时，发信门禁会自动拦截含对应承诺的草稿。</p>
+              <p className="font-medium text-foreground">逐项授权沟通小提议（发信前自动检查免费/寄样/运费权限）</p>
+              <p className="text-muted-foreground">未授权「免费 / 运费」或显式关闭「寄样」时，发信前会自动拦截含对应承诺的草稿。</p>
             </div>
             <Button
               type="button"
@@ -344,8 +344,8 @@ function ProjectOfferAndRuleEditor(): React.JSX.Element | null {
         <div className="space-y-2 border-t pt-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="font-medium text-foreground">项目级行业判断规则（适配任意非包装/自定义品类）</p>
-              <p className="text-muted-foreground">按卡片编码绑定关键词与必选/排除正则，避免硬编码品类误选切入点。</p>
+              <p className="font-medium text-foreground">项目级行业判断规则（适配任意自定义品类）</p>
+              <p className="text-muted-foreground">按卡片编码绑定行业关键词规则，帮助系统准确选择切入角度。</p>
             </div>
             <Button
               type="button"

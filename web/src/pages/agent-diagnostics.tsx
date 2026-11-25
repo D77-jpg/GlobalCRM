@@ -124,7 +124,7 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
             <TableBody>
               {data.users.map((user) => (
                 <TableRow key={user.userId}>
-                  <TableCell><p className="font-medium">{user.displayName || user.username}</p><p className="text-xs text-muted-foreground">{user.role === 'admin' ? '管理员' : '业务员'} · {user.status === 'active' ? '启用' : '停用'}</p></TableCell>
+                  <TableCell><p className="font-medium">{user.displayName || user.username}</p><p className="text-xs text-muted-foreground">{{ admin: '系统管理员', project_admin: '项目管理员', viewer: '只读', user: '销售' }[user.role] ?? '销售'} · {user.status === 'active' ? '启用' : '停用'}</p></TableCell>
                   <TableCell><p className="tabular-nums">{user.runs} 次 · {percent(user.successRate)}</p><p className="text-xs text-muted-foreground">平均每次 {(user.averageDurationMs / 1000).toFixed(1)} 秒</p></TableCell>
                   <TableCell><p className="tabular-nums">{tokens(user.totalTokens)}</p><p className="text-xs text-muted-foreground">{money(user.estimatedCostUsd)}</p></TableCell>
                   <TableCell><span className="tabular-nums">{user.toolCalls} 次 · {percent(user.toolSuccessRate)}</span></TableCell>

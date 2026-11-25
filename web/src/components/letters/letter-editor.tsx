@@ -36,6 +36,8 @@ export interface LetterEditorHandle {
   focus: () => void;
   /** 纯文本长度，用于「正文是否为空」的即时判断 */
   getTextLength: () => number;
+  /** 在编辑器中定位并选中指定句子（仅高亮选区并滚动到视野，不写入 HTML 样式） */
+  locateText: (excerpt: string) => boolean;
 }
 
 export interface LetterEditorProps {
@@ -180,6 +182,36 @@ export const LetterEditor = React.forwardRef<LetterEditorHandle, LetterEditorPro
         quillRef.current?.focus();
       },
       getTextLength: () => (getEditor()?.getText() ?? '').trim().length,
+      locateText: (excerpt: string) => {
+        const editor = getEditor();
+        const needle = excerpt.replace(/\s+/g, ' ').trim();
+        if (!editor || !needle) return false;
+        const fullText = editor.getText();
+        const lowerFull = fullText.toLowerCase();
+        const lowerNeedle = needle.toLowerCase();
+        let startIndex = lowerFull.indexOf(lowerNeedle);
+        let matchLen = needle.length;
+        if (startIndex < 0) {
+          // Whitespace-tolerant regex match using first 60 chars to handle line-wraps
+          const probe = needle.slice(0, 60).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+          const match = new RegExp(probe, 'i').exec(fullText);
+          if (match) {
+            startIndex = match.index;
+            matchLen = Math.min(needle.length, fullText.length - startIndex);
+          }
+        }
+        if (startIndex < 0) return false;
+        quillRef.current?.focus();
+        editor.setSelection(startIndex, matchLen, 'user');
+        window.requestAnimationFrame(() => {
+          const sel = window.getSelection();
+          const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+          const node = range?.startContainer;
+          const el = node ? (node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement) : null;
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return true;
+      },
     }),
     [getEditor, onChange, value],
   );

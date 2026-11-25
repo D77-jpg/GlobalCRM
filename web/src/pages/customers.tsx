@@ -34,6 +34,7 @@ import { usePageTitle } from '@/hooks/use-ui';
 import { useMediaQuery } from '@/hooks/use-ui';
 import { selectHasActiveFilters, useCustomerStore } from '@/store/customer.store';
 import { selectIsAdmin, useAuthStore } from '@/store/auth.store';
+import { toErrorMessage } from '@/lib/api';
 import { downloadFile, stampedFilename } from '@/lib/download';
 import { cn } from '@/lib/utils';
 import type { Customer, SendLetterResult } from '@/types';
@@ -167,15 +168,20 @@ export function CustomersPage(): React.JSX.Element {
     setQuickSaving(true);
     try {
       const saved = await updateCustomer(customer.id, patch);
-      if (!saved) throw new Error('保存失败，请重试');
-      toast.success('负责人已更新');
+      if (!saved) throw new Error('未能更新负责人，原记录未改动，请重试');
+      const ownerLabel = patch.ownerId
+        ? owners.find((owner) => owner.id === patch.ownerId)?.name ?? '所选负责人'
+        : '未分配';
+      toast.success(`已将「${customer.company || customer.name}」转交至「${ownerLabel}」`, {
+        description: '如当前筛选了负责人，该行会自动从当前列表移出。',
+      });
       // Status/owner changes can move a row out of the current filter or change its sort position.
       await fetchList();
     } finally {
       quickSavingRef.current = false;
       setQuickSaving(false);
     }
-  }, [isAdmin, updateCustomer, fetchList]);
+  }, [isAdmin, owners, updateCustomer, fetchList]);
 
   const openCreate = React.useCallback(() => {
     setEditing(null);
@@ -232,16 +238,27 @@ export function CustomersPage(): React.JSX.Element {
 
   const confirmBulkDelete = React.useCallback(async () => {
     if (selectedIds.length === 0) return;
+    const requested = selectedIds.length;
     try {
       const result = await bulkDelete(selectedIds);
       if (result) {
-        toast.success(`已删除 ${result.deleted} 位客户`, {
-          description: result.deletedLetters > 0 ? `同时清理了 ${result.deletedLetters} 条开发信记录` : undefined,
-        });
+        const skipped = Math.max(0, (result.requested ?? requested) - result.deleted);
+        const parts: string[] = [];
+        if (result.deletedLetters > 0) parts.push(`同时清理了 ${result.deletedLetters} 条开发信记录`);
+        if (skipped > 0) parts.push(`另有 ${skipped} 位已跳过（可能已移除或无权限）`);
+        if (skipped > 0) {
+          toast.warning(`已删除 ${result.deleted} 位客户，跳过 ${skipped} 位`, {
+            description: parts.join('；'),
+          });
+        } else {
+          toast.success(`已删除 ${result.deleted} 位客户`, {
+            description: parts.join('；') || undefined,
+          });
+        }
       }
       setBulkDeleteOpen(false);
     } catch (caught) {
-      toast.error('批量删除失败', { description: caught instanceof Error ? caught.message : String(caught) });
+      toast.error('批量删除客户失败', { description: toErrorMessage(caught, '请稍后重试') });
     }
   }, [selectedIds, bulkDelete]);
 
@@ -249,28 +266,54 @@ export function CustomersPage(): React.JSX.Element {
   const handleBulkAction = React.useCallback(
     async (kind: BulkActionKind, payload: BulkActionPayload) => {
       if (selectedIds.length === 0) return;
+      const requested = selectedIds.length;
+      const summarize = (verb: string, result: { matched: number; modified?: number; notFound?: number }) => {
+        const modified = result.modified ?? result.matched;
+        const unchanged = Math.max(0, result.matched - modified);
+        const skipped = result.notFound ?? Math.max(0, requested - result.matched);
+        const details: string[] = [];
+        if (unchanged > 0) details.push(`${unchanged} 位本就符合无需改动`);
+        if (skipped > 0) details.push(`${skipped} 位已跳过（无权限或已移除）`);
+        if (skipped > 0) {
+          toast.warning(`${verb}：更新 ${modified} 位，跳过 ${skipped} 位`, {
+            description: details.join('；') || undefined,
+          });
+        } else {
+          toast.success(`${verb}：已更新 ${modified} 位客户`, {
+            description: details.join('；') || undefined,
+          });
+        }
+      };
       try {
-        let message = '';
         if (kind === 'addTags' && payload.tags) {
           const result = await bulkAddTags(selectedIds, payload.tags);
-          message = result ? `已为 ${result.matched} 位客户添加标签：${payload.tags.join('、')}` : '';
+          if (result) summarize(`批量添加标签（${payload.tags.join('、')}）`, result);
         } else if (kind === 'removeTags' && payload.tags) {
           const result = await bulkRemoveTags(selectedIds, payload.tags);
-          message = result ? `已从 ${result.matched} 位客户移除标签：${payload.tags.join('、')}` : '';
+          if (result) summarize(`批量移除标签（${payload.tags.join('、')}）`, result);
         } else if (kind === 'assignOwner') {
           const result = await bulkAssignOwner(selectedIds, payload.ownerId ?? null);
           const ownerName = payload.ownerId
             ? owners.find((owner) => owner.id === payload.ownerId)?.name ?? '所选负责人'
             : '未分配';
-          message = result ? `已将 ${result.matched} 位客户的负责人设为「${ownerName}」` : '';
+          if (result) summarize(`批量分配负责人为「${ownerName}」`, result);
         } else if (kind === 'setFollowUp') {
           const result = await bulkSetFollowUp(selectedIds, payload.nextFollowUpAt ?? null);
-          message = result ? `已为 ${result.matched} 位客户设置下一次跟进：${payload.nextFollowUpAt}` : '';
+          if (result) {
+            summarize(
+              payload.nextFollowUpAt ? `批量设置下次跟进（${payload.nextFollowUpAt}）` : '批量清除下次跟进时间',
+              result,
+            );
+          }
         }
-        if (message) toast.success(message);
         setBulkKind(null);
       } catch (caught) {
-        toast.error('批量操作失败', { description: caught instanceof Error ? caught.message : String(caught) });
+        const title = kind === 'assignOwner'
+          ? '批量分配负责人失败'
+          : kind === 'setFollowUp'
+            ? '批量设置跟进时间失败'
+            : '批量更新标签失败';
+        toast.error(title, { description: toErrorMessage(caught, '请稍后重试') });
       }
     },
     [selectedIds, owners, bulkAddTags, bulkRemoveTags, bulkAssignOwner, bulkSetFollowUp],

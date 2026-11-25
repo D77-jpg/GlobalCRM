@@ -47,9 +47,9 @@ const stateLabels: Record<string, string> = {
 };
 
 const statusActions: Record<string, string> = {
-  index_not_ready: '请管理员进入「知识库 → 检索准备」准备资料后再生成。',
-  index_stale: '请管理员更新检索资料，再按最新依据重新生成。',
-  no_match: '可以缩小产品或问题范围，或请管理员补充并发布相关资料。',
+  index_not_ready: '请联系管理员进入「知识库 → 资料管理」准备好公司资料后再重新生成。',
+  index_stale: '请联系管理员在「知识库 → 资料管理」更新资料后重新生成。',
+  no_match: '可以缩小产品或问题范围，或联系管理员补充并发布相关资料。',
   expired: '请业务负责人确认新政策，更新有效期后再用。',
   conflict: '先请业务负责人核对冲突来源，确认前不要对外承诺。',
   retrieval_failed: '稍后重试即可；当前草稿只保留了有依据的部分。',
@@ -235,7 +235,7 @@ export function KnowledgeReviewPanel({
   const freshnessFailed = Boolean(current?.failed);
   // 「请告诉我你们的起订量是？」这类问句不是承诺，不该混进「缺依据」清单里吓人
   const isQuestion = (text: string) => {
-    const value = text.trim().replace(/["'”』】）)]+\$/g, '');
+    const value = text.trim().replace(/["'”』】）)]+$/g, '');
     if (value.endsWith('?')) return true;
     return /^(could|can|would|will|do|does|did|is|are|may|shall|should|what|when|which|how|please|let me know|i'?d like|we'?d like)\b/i.test(value);
   };

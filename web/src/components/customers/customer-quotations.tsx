@@ -92,13 +92,13 @@ export function CustomerQuotations({ customerId, onCustomerChanged }: CustomerQu
     if (!deleteTarget) return;
     try {
       await deleteQuotation(customerId, deleteTarget.id);
-      toast.success('报价单已删除');
+      toast.success(`报价单 ${deleteTarget.quotationNo} 已删除`);
       setDeleteTarget(null);
       setViewOpen(false);
       setViewTarget(null);
       handleChanged();
     } catch (caught) {
-      toast.error('删除失败', { description: caught instanceof Error ? caught.message : String(caught) });
+      toast.error('删除报价单失败', { description: caught instanceof Error ? caught.message : '请稍后重试' });
     }
   }, [customerId, deleteQuotation, deleteTarget, handleChanged]);
 

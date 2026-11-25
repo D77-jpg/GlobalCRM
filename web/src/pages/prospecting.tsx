@@ -304,14 +304,15 @@ export function ProspectingPage(): React.JSX.Element {
     setBusy(id);
     try {
       await apiPost(`/prospecting/${id}/reject`, { reason: '人工跳过' });
+      toast.info('已跳过该线索，不再出现在待处理列表');
       await load();
     } catch (error) {
-      toast.error('操作失败', { description: toErrorMessage(error, '请稍后重试') });
+      toast.error('跳过线索失败', { description: toErrorMessage(error, '请稍后重试') });
     } finally { setBusy(null); }
   };
 
-  const sync = async(id:string)=>{setBusy(id);try{const result=await apiPost<{filledFields:string[]}>('/prospecting/'+id+'/sync-customer',{});toast.success(result.filledFields.length?'已补齐 '+result.filledFields.length+' 个空字段':'资料已核对',{description:'只补空白项，已有内容不动；来源和简介也能在线索资料里看到。'});await load();}catch(error){toast.error('补齐失败',{description:toErrorMessage(error)});}finally{setBusy(null);}};
-  const refreshContact=async(id:string)=>{setBusy(id);try{const result=await apiPost<{filledFields:string[]}>('/prospecting/'+id+'/refresh-contact',{},{timeout:600000});toast.success('官网资料已更新',{description:result.filledFields.length?'已补齐客户 '+result.filledFields.length+' 个空字段':'已保留可读取资料，客户已有内容未覆盖。'});await load();}catch(error){toast.error('重新采集失败',{description:toErrorMessage(error)});}finally{setBusy(null);}};
+  const sync = async(id:string)=>{setBusy(id);try{const result=await apiPost<{filledFields:string[]}>('/prospecting/'+id+'/sync-customer',{});toast.success(result.filledFields.length?'已补齐 '+result.filledFields.length+' 个空白字段':'无需补齐，已有客户资料未改动',{description:'只补充空白项，不会覆盖你已填写的客户信息。'});await load();}catch(error){toast.error('补齐客户资料失败',{description:toErrorMessage(error)});}finally{setBusy(null);}};
+  const refreshContact=async(id:string)=>{setBusy(id);try{const result=await apiPost<{filledFields:string[]}>('/prospecting/'+id+'/refresh-contact',{},{timeout:600000});toast.success(result.filledFields.length?'官网已更新并补齐 '+result.filledFields.length+' 个空白字段':'官网已重新读取，未发现新的空白项可补齐',{description:'客户原有资料保持不变。'});await load();}catch(error){toast.error('重新读取官网资料失败',{description:toErrorMessage(error)});}finally{setBusy(null);}};
   const openConfig = () => setConfigOpen(true);
 
   /** 勾中的候选 id（只对可转换的候选生效） */
@@ -352,15 +353,20 @@ export function ProspectingPage(): React.JSX.Element {
     if (!targets.length) return;
     setBatch({ total: targets.length, done: 0 });
     let ok = 0;
+    let okWithEmail = 0;
+    let okNoEmail = 0;
     let failed = 0;
     let draftErrors = 0;
-    const noEmailCount = targets.filter((prospect) => !prospect.emails.length).length;
+    let duplicateCount = 0;
     // 失败原因（含查重拦下的重复线索）逐条记下来，最后一起提示
     const failedReasons: string[] = [];
     for (const prospect of targets) {
       try {
-        const result = await apiPost<{ customer?: { id: string; name: string }; draftTaskId?: string; draftError?: string }>(`/prospecting/${prospect.id}/approve`, {});
+        const result = await apiPost<{ customer?: { id: string; name: string }; duplicates?: unknown[]; draftTaskId?: string; draftError?: string }>(`/prospecting/${prospect.id}/approve`, {});
         ok += 1;
+        if (prospect.emails.length > 0) okWithEmail += 1;
+        else okNoEmail += 1;
+        if (result?.duplicates?.length) duplicateCount += 1;
         if (result?.draftError) draftErrors += 1;
       } catch (error) {
         failed += 1;
@@ -373,15 +379,21 @@ export function ProspectingPage(): React.JSX.Element {
     setSelected(new Set());
     setPendingTargets([]);
     await load();
-    toast.success(`已转换 ${ok} 个客户`, {
-      description: [
-        failed ? `${failed} 个没转成：${failedReasons.slice(0, 3).join('；')}${failedReasons.length > 3 ? '…' : ''}` : '',
-        noEmailCount ? `${noEmailCount} 个没有邮箱，已先转为客户；补邮箱后可生成开发信` : '',
-        draftErrors
-          ? `${draftErrors} 个客户的三封草稿未创建`
-          : (ok > noEmailCount ? '有邮箱的客户三封开发信草稿在后台依次生成，完成后在“查看草稿”里审核' : ''),
-      ].filter(Boolean).join('；'),
-    });
+    const summaryParts = [
+      failed ? `跳过/失败 ${failed} 条：${failedReasons.slice(0, 3).join('；')}${failedReasons.length > 3 ? ` 等共 ${failedReasons.length} 条` : ''}` : '',
+      okNoEmail ? `其中 ${okNoEmail} 位暂无邮箱，需补充邮箱后再生成开发信` : '',
+      duplicateCount ? `${duplicateCount} 位与现有客户疑似重复，请在客户管理中核对` : '',
+      draftErrors
+        ? `${draftErrors} 位客户的开发信草稿未创建，可在客户页手动生成`
+        : (okWithEmail > 0 ? `有邮箱的 ${okWithEmail} 位客户将在后台准备开发信草稿` : ''),
+    ].filter(Boolean).join('；');
+    if (ok === 0) {
+      toast.error(`本次未转换任何客户（失败 ${failed} 条）`, { description: summaryParts || '请检查线索状态或重复记录' });
+    } else if (failed > 0 || duplicateCount > 0 || draftErrors > 0) {
+      toast.warning(`已转换 ${ok} 位客户，跳过/失败 ${failed} 条`, { description: summaryParts });
+    } else {
+      toast.success(`已转换 ${ok} 位客户`, { description: summaryParts || undefined });
+    }
   };
 
   const run = data?.run;

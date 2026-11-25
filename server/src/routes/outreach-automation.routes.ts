@@ -16,6 +16,7 @@ import {
   getProjectProofBlocks,
   migrateLegacyOutreachModes,
   pauseOutreachAutomation,
+  reconcileOutreachCampaign,
   recoverCircuitFailedEnrollments,
   regenerateOutreachEnrollmentDraft,
   resumeOutreachAutomation,
@@ -131,6 +132,10 @@ router.post('/reverify-unverified', validate({
 
 router.post('/auto-fix-send-gates', asyncHandler(async (req, res) => {
   sendSuccess(res, await autoFixOutreachSendGates(req.user!, targetUserId(req)));
+}));
+
+router.post('/reconcile', asyncHandler(async (req, res) => {
+  sendSuccess(res, await reconcileOutreachCampaign(req.user!, targetUserId(req)));
 }));
 
 router.post('/drain-queued-tasks', asyncHandler(async (req, res) => {

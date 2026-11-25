@@ -64,26 +64,49 @@ export function BulkActionsBar({
       aria-label="批量操作"
     >
       <span className="flex items-center gap-1.5 text-sm font-medium">
-        已选
+        当前页已选
         <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary px-2 text-xs font-semibold tabular-nums text-primary-foreground">
           {selectedCount}
         </span>
-        项
+        位
       </span>
+      {selectedCount > 20 ? (
+        <span className="text-xs text-amber-700 dark:text-amber-300">
+          AI 批量生成类操作单次最多支持 20 位客户
+        </span>
+      ) : null}
 
       {onPrepareDrafts ? (
-        <Button variant="outline" className="min-h-11" disabled={busyOrDisabled || selectedCount > 20} onClick={onPrepareDrafts}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busyOrDisabled || selectedCount > 20}
+          title={selectedCount > 20 ? '该操作单次最多支持 20 位客户，请减少勾选数量' : undefined}
+          onClick={onPrepareDrafts}
+        >
           批量生成首封草稿
         </Button>
       ) : null}
       {onBackfillSequences ? (
-        <Button variant="outline" className="min-h-11" disabled={busyOrDisabled || selectedCount > 20} onClick={onBackfillSequences}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busyOrDisabled || selectedCount > 20}
+          title={selectedCount > 20 ? '该操作单次最多支持 20 位客户，请减少勾选数量' : undefined}
+          onClick={onBackfillSequences}
+        >
           <Sparkles className="h-3.5 w-3.5" aria-hidden />
           补齐三封开发信
         </Button>
       ) : null}
       {onCleanupDrafts ? (
-        <Button variant="outline" className="min-h-11" disabled={busyOrDisabled || selectedCount > 20} onClick={onCleanupDrafts}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busyOrDisabled || selectedCount > 20}
+          title={selectedCount > 20 ? '该操作单次最多支持 20 位客户，请减少勾选数量' : undefined}
+          onClick={onCleanupDrafts}
+        >
           <Eraser className="h-3.5 w-3.5" aria-hidden />
           整理重复草稿
         </Button>

@@ -525,6 +525,12 @@ export interface DevelopmentLetter {
   template: string;
   status: LetterStatus;
   channel: MailChannel;
+  /** 投递结果不确定（需人工核实发件邮箱，确认前不会自动重发） */
+  needsReview?: boolean;
+  /** 取消来源（manual / system_transient / rule_stop / permission / superseded） */
+  cancelOrigin?: string;
+  scheduledAt?: string | Date;
+  nextAttemptAt?: string | Date;
   /** 同一客户三封开发信序列中的位置（1/2/3） */
   outreachStep?: number;
   sentAt?: string | Date;
@@ -1706,6 +1712,7 @@ export type OutreachDraftStage =
   | 'send_gate_blocked'
   | 'waiting_delivery'
   | 'delivery_cancelled'
+  | 'delivery_uncertain'
   | 'task_failed'
   | 'delivery_failed'
   | 'none';
@@ -1767,24 +1774,28 @@ export interface OutreachAutomationQueueRow {
   email?: string;
   customerStatus: string;
   status: 'active' | 'paused' | 'blocked' | 'completed' | 'failed';
+  pauseOrigin?: 'manual' | 'system' | 'unknown';
   currentStep: number;
   actualStep: number;
   nextStep: number;
   phase: 'waiting' | 'generating' | 'ready' | 'sending' | 'due' | 'paused' | 'blocked' | 'completed' | 'failed';
   draftStage?: OutreachDraftStage;
-  deliveryStatus?: 'waiting_delivery' | 'cancelled' | 'failed' | 'sent';
+  deliveryStatus?: 'waiting_delivery' | 'cancelled' | 'uncertain' | 'failed' | 'sent';
   draftReady: boolean;
   draftId?: string;
   draftNeedsReverify?: boolean;
   draftAuditReason?: string;
   draftAuditDetail?: OutreachDraftAuditDetail;
   sendGateDetail?: OutreachSendGateDetail;
+  flaggedExcerpts?: { text: string; reason: string; status?: string }[];
   contextWarnings?: { code: string; message: string }[];
   pausedReadyToResume?: boolean;
+  deliveryUncertain?: boolean;
   deliveryError?: string;
   failedLetterId?: string;
   cancelledLetterId?: string;
   cancelledReason?: string;
+  cancelOrigin?: string;
   isRuleStopped?: boolean;
   errorHistory?: OutreachEnrollmentErrorHistoryItem[];
   draftUpdatedAt?: string;
@@ -1800,6 +1811,7 @@ export interface OutreachAutomationQueueRow {
   timezoneSource?: 'explicit' | 'country' | 'fallback';
   recipientWindowOpen?: boolean;
   nextRunAt: string;
+  nextSendLocalLabel?: string;
   lastError?: string;
   lastSentAt?: string;
 }
@@ -1847,8 +1859,10 @@ export interface OutreachAutomationOverview {
     sendGateBlockedDrafts?: number;
     contextWarningDrafts?: number;
     pausedReadyCount?: number;
+    deliveryUncertainCount?: number;
     deliveryFailedCount?: number;
     deliveryCancelledCount?: number;
+    actionNeededCount?: number;
     exceptionQueueCount?: number;
     approvedProofBlocksCount?: number;
     queuedTasks?: number;

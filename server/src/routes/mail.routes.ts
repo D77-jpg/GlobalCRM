@@ -226,7 +226,8 @@ router.post('/:id/reply', validate({ params, body: sendLetterSchema }), asyncHan
 router.post('/:id/cancel', validate({ params }), asyncHandler(async (req, res) => {
   await outgoing(req.params.id, req.user!);
   const doc = await DevelopmentLetter.findOneAndUpdate({ _id: req.params.id, ...await customerRefScope(req.user), status: { $in: ['scheduled', 'queued', 'retrying'] } }, {
-    $set: { status: 'cancelled' }, $push: { history: { at: new Date(), status: 'cancelled' } },
+    $set: { status: 'cancelled', cancelOrigin: 'manual', error: '已手动取消，未发送' },
+    $push: { history: { at: new Date(), status: 'cancelled', error: '已手动取消，未发送' } },
   }, { new: true });
   if (!doc) throw ApiError.conflict('任务已开始发送或已结束，无法取消');
   sendSuccess(res, outgoingDto(doc));

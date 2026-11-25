@@ -103,6 +103,9 @@ export function LetterViewDialog({
   }
 
   const plainText = letter.contentText || htmlToPlainText(letter.content);
+  const isInFlight = ['queued', 'scheduled', 'sending', 'retrying'].includes(letter.status);
+  const isUncertain = letter.status === 'failed' && Boolean(letter.needsReview);
+  const cannotResendOrDelete = isInFlight || isUncertain;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -113,18 +116,38 @@ export function LetterViewDialog({
             <span className="min-w-0 break-words">{letter.subject || '（无主题）'}</span>
           </DialogTitle>
           <DialogDescription className="flex flex-wrap items-center gap-2">
-            <LetterStatusBadge status={letter.status} />
+            <LetterStatusBadge status={letter.status} needsReview={letter.needsReview} />
             <span>{MAIL_CHANNEL_LABEL[letter.channel] ?? letter.channel}</span>
-            {letter.sentAt ? <span>· 发送于 {formatDateTime(letter.sentAt)}</span> : <span>· 尚未发送</span>}
+            {letter.sentAt
+              ? <span>· 发送于 {formatDateTime(letter.sentAt)}</span>
+              : letter.status === 'cancelled'
+                ? <span>· 已取消，未发送</span>
+                : letter.status === 'scheduled' && letter.scheduledAt
+                  ? <span>· 定时于 {formatDateTime(letter.scheduledAt)}</span>
+                  : <span>· 尚未发送</span>}
           </DialogDescription>
         </DialogHeader>
 
         <DialogBody className="space-y-4">
-          {letter.status === 'failed' && letter.error ? (
+          {isUncertain ? (
+            <Alert variant="warning">
+              <AlertCircle aria-hidden />
+              <AlertTitle>请确认这封邮件是否已发出 · 确认前不会重发</AlertTitle>
+              <AlertDescription>
+                {letter.error || '发送期间发生中断，系统无法确认客户是否已收到。请先到发件邮箱核对后再处理，避免客户收到两封邮件。'}
+              </AlertDescription>
+            </Alert>
+          ) : letter.status === 'failed' && letter.error ? (
             <Alert variant="destructive">
               <AlertCircle aria-hidden />
-              <AlertTitle>发送失败</AlertTitle>
+              <AlertTitle>邮件未发出</AlertTitle>
               <AlertDescription>{letter.error}</AlertDescription>
+            </Alert>
+          ) : letter.status === 'cancelled' ? (
+            <Alert>
+              <AlertCircle aria-hidden />
+              <AlertTitle>已取消，未发送</AlertTitle>
+              <AlertDescription>{letter.error || '这封邮件已取消且确认未发送，如需继续跟进可重新编辑发送。'}</AlertDescription>
             </Alert>
           ) : null}
 
@@ -152,8 +175,8 @@ export function LetterViewDialog({
             <MetaRow icon={<Clock className="h-3.5 w-3.5" aria-hidden />} label="创建时间：">
               {formatDateTime(letter.createdAt)}
             </MetaRow>
-            <MetaRow icon={<Hash className="h-3.5 w-3.5" aria-hidden />} label="Message-ID：">
-              <span className="break-all font-mono text-2xs">{letter.messageId || '—'}</span>
+            <MetaRow icon={<Hash className="h-3.5 w-3.5" aria-hidden />} label="发件邮箱：">
+              <span className="break-all">{letter.senderAddress || '—'}</span>
             </MetaRow>
           </dl>
 
@@ -175,7 +198,7 @@ export function LetterViewDialog({
                 </Button>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   className="h-7 text-xs"
                   onClick={() => void copy('text', plainText, '纯文本正文')}
@@ -185,7 +208,7 @@ export function LetterViewDialog({
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   className="h-7 text-xs"
                   onClick={() => void copy('html', letter.content, 'HTML 正文')}
@@ -205,6 +228,17 @@ export function LetterViewDialog({
             />
           </div>
 
+          {letter.messageId ? (
+            <details className="rounded-md border bg-muted/20 p-3 text-xs">
+              <summary className="cursor-pointer font-medium text-muted-foreground">
+                技术详情
+              </summary>
+              <p className="mt-2 break-all font-mono text-2xs text-muted-foreground">
+                Message-ID: {letter.messageId}
+              </p>
+            </details>
+          ) : null}
+
           {letter.template && letter.template !== letter.content ? (
             <details className="rounded-md border bg-muted/20 p-3 text-xs">
               <summary className="cursor-pointer font-medium text-muted-foreground">
@@ -218,7 +252,7 @@ export function LetterViewDialog({
         </DialogBody>
 
         <DialogFooter>
-          {onDelete ? (
+          {onDelete && !cannotResendOrDelete ? (
             <Button
               type="button"
               variant="ghost"
@@ -234,7 +268,7 @@ export function LetterViewDialog({
             关闭
           </Button>
 
-          {onResend ? (
+          {onResend && !cannotResendOrDelete ? (
             <>
               <Separator orientation="vertical" className="hidden h-6 sm:block" />
               <Button
@@ -242,7 +276,7 @@ export function LetterViewDialog({
                 onClick={() => onResend(letter)}
               >
                 {letter.status === 'draft' ? <FilePenLine className="h-3.5 w-3.5" aria-hidden/> : <RotateCw className="h-3.5 w-3.5" aria-hidden/>}
-                {letter.status === 'draft' ? '审核草稿' : '重新发送'}
+                {letter.status === 'draft' ? '查看并修改' : letter.status === 'cancelled' ? '重新编辑发送' : '重新发送'}
               </Button>
             </>
           ) : null}

@@ -2,6 +2,7 @@ import * as React from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Plus, RefreshCw, ShieldAlert, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/common/page-header';
+import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -79,6 +80,8 @@ export function MailCompliancePage(): React.JSX.Element {
   const [suppressions, setSuppressions] = React.useState<Suppression[]>([]);
   const [search, setSearch] = React.useState('');
   const [loading, setLoading] = React.useState(true);
+  const [loadError, setLoadError] = React.useState('');
+  const [removeTarget, setRemoveTarget] = React.useState<Suppression | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const [addForm, setAddForm] = React.useState(EMPTY_ADD);
   const [addSaving, setAddSaving] = React.useState(false);
@@ -101,10 +104,13 @@ export function MailCompliancePage(): React.JSX.Element {
       setDomainHealth(nextOverview.domainHealth);
       setDomain((current) => current || nextOverview.domain || nextOverview.domainHealth?.domain || '');
       setSuppressions(list.items);
+      setLoadError('');
     } catch (error) {
-      toast.error(t('errors.generic'), { description: toErrorMessage(error) });
+      const msg = toErrorMessage(error, '加载发信合规配置失败');
+      setLoadError(msg);
+      toast.error('加载发信合规配置失败', { description: msg });
     } finally { setLoading(false); }
-  }, [search, t]);
+  }, [search]);
 
   React.useEffect(() => { void load(); }, [load]);
 
@@ -118,17 +124,19 @@ export function MailCompliancePage(): React.JSX.Element {
       setAddForm(EMPTY_ADD);
       await load();
     } catch (error) {
-      toast.error(t('errors.generic'), { description: toErrorMessage(error) });
+      toast.error('加入不再发送名单失败', { description: toErrorMessage(error) });
     } finally { setAddSaving(false); }
   };
 
-  const remove = async (row: Suppression) => {
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
     try {
-      await apiDelete(`/mail-compliance/suppressions/${row._id}`);
-      setSuppressions((items) => items.filter((item) => item._id !== row._id));
-      toast.success(t('compliance.removed'));
+      await apiDelete(`/mail-compliance/suppressions/${removeTarget._id}`);
+      setSuppressions((items) => items.filter((item) => item._id !== removeTarget._id));
+      toast.success(`已将 ${removeTarget.email} 移出不再发送名单`);
+      setRemoveTarget(null);
     } catch (error) {
-      toast.error(t('errors.generic'), { description: toErrorMessage(error) });
+      toast.error('移出不再发送名单失败', { description: toErrorMessage(error) });
     }
   };
 
@@ -141,7 +149,7 @@ export function MailCompliancePage(): React.JSX.Element {
       setOverview((current) => current ? { ...current, settings: saved } : current);
       toast.success(t('compliance.settingsSaved'));
     } catch (error) {
-      toast.error(t('errors.generic'), { description: toErrorMessage(error) });
+      toast.error('保存发送策略失败', { description: toErrorMessage(error) });
     } finally { setSettingsSaving(false); }
   };
 
@@ -151,7 +159,7 @@ export function MailCompliancePage(): React.JSX.Element {
       const result = await apiGet<DomainHealth>(`/mail-compliance/domain-health?domain=${encodeURIComponent(domain)}&selector=${encodeURIComponent(selector)}`);
       setDomainHealth(result);
     } catch (error) {
-      toast.error(t('errors.generic'), { description: toErrorMessage(error) });
+      toast.error('域名认证检查失败', { description: toErrorMessage(error) });
     } finally { setChecking(false); }
   };
 
@@ -187,7 +195,13 @@ export function MailCompliancePage(): React.JSX.Element {
                       <td className="max-w-[15rem] truncate px-2.5 py-2" title={row.email}>{row.email}</td>
                       <td className="px-2.5 py-2"><Badge variant="outline">{t(REASON_KEYS[row.reason])}</Badge></td>
                       <td className="px-2.5 py-2 text-muted-foreground">{row.scopeKey === 'global' ? t('compliance.globalScope') : t('compliance.projectScope')}</td>
-                      <td className="px-2.5 py-2 text-right"><Button type="button" variant="ghost" size="icon-sm" aria-label={t('compliance.remove')} onClick={() => void remove(row)}><Trash2 className="h-3.5 w-3.5" /></Button></td>
+                      <td className="px-2.5 py-2 text-right">
+                        {row.scopeKey === 'global' && !isAdmin ? null : (
+                          <Button type="button" variant="ghost" size="icon-sm" aria-label={t('compliance.remove')} onClick={() => setRemoveTarget(row)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {!suppressions.length ? <tr><td colSpan={4} className="px-2.5 py-8 text-center text-muted-foreground">{loading ? t('common.loading') : t('compliance.empty')}</td></tr> : null}
@@ -250,9 +264,24 @@ export function MailCompliancePage(): React.JSX.Element {
               {settings.trackingEnabled ? <p className="text-xs text-muted-foreground lg:col-span-5">{t('compliance.trackingNotice')}</p> : null}
               {overview ? <p className="text-xs text-muted-foreground lg:col-span-5">{t('compliance.currentCap')}: <strong className="text-foreground">{overview.effectiveDailyLimit}</strong></p> : null}
             </div>
+          ) : loadError ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-destructive">
+              <span>{loadError}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => void load()}>重试</Button>
+            </div>
           ) : <p className="text-xs text-muted-foreground">{t('common.loading')}</p>}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={Boolean(removeTarget)}
+        onOpenChange={(next) => { if (!next) setRemoveTarget(null); }}
+        title="确认移出不再发送名单？"
+        description={removeTarget ? `移出 ${removeTarget.email} 后，系统将不再自动拦截向该邮箱发信。请确认对方已同意重新接收邮件。` : ''}
+        confirmText="确认移出"
+        variant="destructive"
+        onConfirm={confirmRemove}
+      />
 
       <Dialog open={addOpen} onOpenChange={(next) => !addSaving && setAddOpen(next)}>
         <DialogContent className="max-w-md">

@@ -63,8 +63,8 @@ export function GlobalSiteInquiries({ customerId, onDraft }: {
     customerId: string;
     onDraft: () => void;
 }) {
-    const projectId = useProjectStore(s => s.activeProject?.id), role = useAuthStore(s => s.user?.role), { t } = useI18n(), [items, setItems] = React.useState<Row[]>([]), [cursor, setCursor] = React.useState<string | null>(null), [error, setError] = React.useState(false), [busy, setBusy] = React.useState<string | null>(null), [notice, setNotice] = React.useState<string>('');
-    const load = React.useCallback(async (next?: string) => { setError(false); try {
+    const projectId = useProjectStore(s => s.activeProject?.id), role = useAuthStore(s => s.user?.role), { t } = useI18n(), [items, setItems] = React.useState<Row[]>([]), [cursor, setCursor] = React.useState<string | null>(null), [loading, setLoading] = React.useState(true), [error, setError] = React.useState<string>(''), [busy, setBusy] = React.useState<string | null>(null), [notice, setNotice] = React.useState<string>('');
+    const load = React.useCallback(async (next?: string) => { setError(''); if (!next) setLoading(true); try {
         const d = await apiGet<{
             items: Row[];
             nextCursor: string | null;
@@ -72,11 +72,13 @@ export function GlobalSiteInquiries({ customerId, onDraft }: {
         setItems(v => next ? [...v, ...d.items] : d.items);
         setCursor(d.nextCursor);
     }
-    catch {
-        setError(true);
-    } }, [customerId]);
+    catch (err) {
+        setError(err instanceof Error && err.message ? err.message : t('j1.error'));
+    } finally {
+        setLoading(false);
+    } }, [customerId, t]);
     React.useEffect(() => { setItems([]); void load(); }, [load, projectId]);
-    async function action(row: Row, draft: boolean) { setBusy(row.id); setNotice(''); setError(false); try {
+    async function action(row: Row, draft: boolean) { setBusy(row.id); setNotice(''); setError(''); try {
         await apiPost('/globalsite-inquiries/' + row.id + (draft ? '/reply-draft' : '/read'), {});
         if (draft) {
             setNotice(t('j1.draftSaved'));
@@ -84,15 +86,15 @@ export function GlobalSiteInquiries({ customerId, onDraft }: {
         }
         await load();
     }
-    catch {
-        setError(true);
+    catch (err) {
+        setError(err instanceof Error && err.message ? err.message : t('j1.error'));
     }
     finally {
         setBusy(null);
     } }
     return <Card id="globalsite-inquiries"><CardHeader><CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5" aria-hidden/>{t('j1.title')}</CardTitle></CardHeader><CardContent className="space-y-5">
- <p className="text-sm text-muted-foreground">{t('j1.draftHint')}</p>{error ? <p role="alert" className="text-destructive">{t('j1.error')}</p> : null}{notice ? <p role="status">{notice} <a href="#letters" className="underline">{t('j1.openDraft')}</a></p> : null}
- {!items.length && !error ? <p className="text-sm text-muted-foreground">{t('j1.empty')}</p> : null}
+ <p className="text-sm text-muted-foreground">{t('j1.draftHint')}</p>{error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive"><span>{error}</span><Button type="button" size="sm" variant="outline" onClick={() => void load()}>重试</Button></div> : null}{notice ? <p role="status">{notice} <a href="#letters" className="underline">{t('j1.openDraft')}</a></p> : null}
+ {loading && !items.length ? <p className="text-sm text-muted-foreground">{t('common.loading')}</p> : !items.length && !error ? <p className="text-sm text-muted-foreground">{t('j1.empty')}</p> : null}
  {items.map(row => <article key={row.id} className="space-y-3 rounded-lg border p-4 [overflow-wrap:anywhere]"><div className="flex flex-wrap items-center justify-between gap-3"><div><Badge variant="muted">{t('j1.from')}</Badge><h3 className="mt-2 font-semibold">{row.site.name}</h3><p className="text-sm text-muted-foreground">{new Date(row.submittedAt).toLocaleString()}</p></div>{role !== 'viewer' ? <Button className="min-h-11" disabled={busy !== null} onClick={() => void action(row, true)}>{busy === row.id ? t('common.loading') : t('j1.reply')}</Button> : null}</div>
  <p>{row.contact.name} · {row.contact.company} · {row.contact.email}</p><p className="whitespace-pre-wrap">{row.message}</p>{row.products.length ? <p>{t('j1.products')}: {row.products.map(p => p.name).join(', ')}</p> : null}{row.quantity !== null ? <p>{t('j1.quantity')}: {row.quantity}</p> : null}
  <a className="block text-sm underline" href={row.source.pageUrl} target="_blank" rel="noreferrer">{t('j1.page')}: {row.source.pageUrl}</a>

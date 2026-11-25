@@ -124,8 +124,15 @@ function mailSrcdoc(html: string): string {
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${style}</style>${html}`;
 }
 
-function StatusChip({ status }: { status?: LetterStatus }): React.JSX.Element | null {
+function StatusChip({ status, needsReview }: { status?: LetterStatus; needsReview?: boolean }): React.JSX.Element | null {
   if (!status) return null;
+  if (status === 'failed' && needsReview) {
+    return (
+      <span className="chip chip-amber" title="请确认这封邮件是否已发出 · 确认前不会重发">
+        投递结果未知
+      </span>
+    );
+  }
   const tone = status === 'failed' || status === 'retrying'
     ? 'chip-rose'
     : status === 'opened'
@@ -154,6 +161,7 @@ export function MailPage(): React.JSX.Element {
   const [reply, setReply] = React.useState(false);
   const [resend, setResend] = React.useState<DevelopmentLetter | null>(null);
   const [resolve, setResolve] = React.useState<'sent' | 'not_sent' | null>(null);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = React.useState(false);
   const [compose, setCompose] = React.useState(false);
   const [search, setSearch] = React.useState('');
   const [followups, setFollowups] = React.useState<OutreachFollowUpList | null>(null);
@@ -176,9 +184,9 @@ export function MailPage(): React.JSX.Element {
   const detailRequest = React.useRef(0);
   const listRequest = React.useRef(0);
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (silent = false) => {
     const version = ++listRequest.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       if (folder === 'followup') {
         const plan = await apiGet<OutreachFollowUpList>('/mail/outreach-followups');
@@ -191,10 +199,10 @@ export function MailPage(): React.JSX.Element {
       if (version !== listRequest.current) return;
       setItems(data.items); setTotal(data.total); setError('');
       setStatus(await apiGet<SyncStatus>('/mail/status'));
-    } catch (e) { setError(toErrorMessage(e)); }
-    finally { setLoading(false); }
+    } catch (e) { if (!silent) setError(toErrorMessage(e)); }
+    finally { if (!silent) setLoading(false); }
   }, [folder, page]);
-  React.useEffect(() => { void refresh(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 15000); return () => clearInterval(timer); }, [refresh]);
+  React.useEffect(() => { void refresh(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(true); }, 15000); return () => clearInterval(timer); }, [refresh]);
 
   const loadDetail = React.useCallback(async () => {
     const version = ++detailRequest.current;
@@ -217,9 +225,13 @@ export function MailPage(): React.JSX.Element {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [search, compose, admin, detail]);
 
-  async function action(fn: () => Promise<unknown>) {
+  async function action(fn: () => Promise<unknown>, successMessage?: string) {
     setBusy(true);
-    try { await fn(); await Promise.all([refresh(), loadDetail()]); }
+    try {
+      await fn();
+      await Promise.all([refresh(true), loadDetail()]);
+      if (successMessage) toast.success(successMessage);
+    }
     catch (e) { toast.error(toErrorMessage(e)); }
     finally { setBusy(false); }
   }
@@ -261,12 +273,12 @@ export function MailPage(): React.JSX.Element {
         seed = { analysisId: '', subject: draft.subject, content: draft.content };
         toast.success(`已生成第 ${row.nextStep} 封跟进草稿`, { description: draft.note });
       } catch (e) {
-        toast.warning('跟进草稿没生成，先手动写', { description: toErrorMessage(e) });
+        toast.warning('未能自动生成跟进草稿，已打开空白编辑框', { description: toErrorMessage(e) });
       }
       setFollowupCustomer(customer);
       setFollowupSeed(seed);
       setFollowupOpen(true);
-    } catch (e) { toast.error('打不开客户资料', { description: toErrorMessage(e) }); }
+    } catch (e) { toast.error('无法加载客户资料', { description: toErrorMessage(e) }); }
     finally { setFollowupBusy(false); }
   }, [followupBusy]);
 
@@ -276,7 +288,7 @@ export function MailPage(): React.JSX.Element {
     try {
       const plan = await apiGet<MailCustomerPlan>('/mail/mail-customers/plan');
       setMailPlan(plan);
-    } catch (e) { toast.error('看不出方案', { description: toErrorMessage(e) }); }
+    } catch (e) { toast.error('无法生成邮件建客方案', { description: toErrorMessage(e) }); }
     finally { setMailPlanBusy(false); }
   }, [mailPlanBusy]);
 
@@ -284,12 +296,12 @@ export function MailPage(): React.JSX.Element {
     setMailPlanBusy(true);
     try {
       const result = await apiPost<MailCustomerPlan>('/mail/mail-customers/import');
-      toast.success(`建了 ${result.created?.length ?? 0} 个客户`, {
-        description: `关联 ${result.linkedMails ?? 0} 封邮件${result.totals.skipSupplier ? `；跳过供应商 ${result.totals.skipSupplier} 封` : ''}`,
+      toast.success(`已新建 ${result.created?.length ?? 0} 位客户并关联 ${result.linkedMails ?? 0} 封邮件`, {
+        description: result.totals.skipSupplier ? `已自动跳过供应商/账务邮件 ${result.totals.skipSupplier} 封` : undefined,
       });
       setMailPlan(null);
       await refresh();
-    } catch (e) { toast.error('建客户失败', { description: toErrorMessage(e) }); }
+    } catch (e) { toast.error('从邮件建客失败', { description: toErrorMessage(e) }); }
     finally { setMailPlanBusy(false); }
   }, [refresh]);
 
@@ -511,7 +523,7 @@ export function MailPage(): React.JSX.Element {
                 <span className={cn('chip', detail.mail.direction === 'inbound' ? 'chip-mint' : 'chip-violet')}>
                   {detail.mail.direction === 'inbound' ? <><ArrowDownLeft className="h-3 w-3" aria-hidden />收到</> : <><ArrowUpRight className="h-3 w-3" aria-hidden />发出</>}
                 </span>
-                <StatusChip status={detail.mail.status} />
+                <StatusChip status={detail.mail.status} needsReview={detail.mail.needsReview} />
                 <span className="chip chip-muted"><Clock className="h-3 w-3" aria-hidden />{formatDateTime(detail.mail.sentAt)}</span>
                 {detail.customer
                   ? <Link className="chip chip-muted hover:text-primary" to={`/customers/${detail.customer.id}`}>客户：{detail.customer.name}{detail.customer.company ? ` · ${detail.customer.company}` : ''}</Link>
@@ -520,15 +532,26 @@ export function MailPage(): React.JSX.Element {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 border-y border-border/50 py-3">
-              {detail.mail.direction === 'inbound' && <Button variant="outline" size="sm" disabled={busy} onClick={() => void action(() => apiPost(`/mail/${detail.mail.id}/read`, { read: !detail.mail.read }))}>{detail.mail.read ? '标记未读' : '标记已读'}</Button>}
+              {detail.mail.direction === 'inbound' && <Button variant="outline" size="sm" disabled={busy} onClick={() => void action(() => apiPost(`/mail/${detail.mail.id}/read`, { read: !detail.mail.read }), detail.mail.read ? '已标记为未读' : '已标记为已读')}>{detail.mail.read ? '标记未读' : '标记已读'}</Button>}
               {detail.customer && detail.mail.direction === 'inbound' && (!detail.mail.mailboxUserId || detail.mail.mailboxUserId === currentUserId)
                 ? <Button size="sm" onClick={() => setReply(true)}><Mail className="mr-1.5 h-3.5 w-3.5" aria-hidden />回复客户</Button>
                 : detail.mail.direction === 'inbound' && detail.mail.mailboxUserId ? <Badge variant="warning">请由邮箱所属业务员回复</Badge> : null}
               <Button variant="outline" size="sm" onClick={() => setAgentOpen(true)}><MailSearch className="mr-1.5 h-3.5 w-3.5" aria-hidden />邮件会话助理</Button>
-              {detail.mail.status && ['scheduled', 'queued', 'retrying'].includes(detail.mail.status) && <Button variant="outline" size="sm" disabled={busy} onClick={() => void action(() => apiPost(`/mail/${detail.mail.id}/cancel`))}>取消任务</Button>}
-              {detail.customer && detail.mail.status === 'failed' && !detail.mail.needsReview && <Button size="sm" disabled={busy} onClick={() => void action(async () => { setResend(await apiGet<DevelopmentLetter>(`/letters/${detail.mail.id}`)); })}>编辑并重新发送</Button>}
-              {admin && detail.mail.needsReview && <><Button variant="outline" size="sm" onClick={() => setResolve('sent')}>已核实投递成功</Button><Button variant="outline" size="sm" onClick={() => setResolve('not_sent')}>已核实未投递</Button></>}
+              {detail.mail.status && ['scheduled', 'queued', 'retrying'].includes(detail.mail.status) && <Button variant="outline" size="sm" disabled={busy} onClick={() => setCancelConfirmOpen(true)}>取消发送</Button>}
+              {detail.customer && ((detail.mail.status === 'failed' && !detail.mail.needsReview) || detail.mail.status === 'cancelled') && <Button size="sm" disabled={busy} onClick={() => void action(async () => { setResend(await apiGet<DevelopmentLetter>(`/letters/${detail.mail.id}`)); })}>{detail.mail.status === 'cancelled' ? '重新编辑发送' : '编辑并重新发送'}</Button>}
+              {admin && detail.mail.needsReview && <><Button variant="outline" size="sm" onClick={() => setResolve('sent')}>确认已发出</Button><Button variant="outline" size="sm" onClick={() => setResolve('not_sent')}>确认未发出</Button></>}
             </div>
+
+            {detail.mail.needsReview ? (
+              <div role="status" className="rounded-md border border-amber-300/80 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+                <p className="font-semibold">请确认这封邮件是否已发出 · 确认前不会重发</p>
+                <p className="mt-0.5 text-muted-foreground">
+                  {admin
+                    ? '请先在发件邮箱的「已发送」中核对，再点上方「确认已发出」或「确认未发出」。'
+                    : '请先检查你的发件邮箱是否已发出，并联系管理员确认结果（确认前系统不会自动重发）。'}
+                </p>
+              </div>
+            ) : null}
 
             {!detail.customer && admin && customerPicker}
 
@@ -555,7 +578,7 @@ export function MailPage(): React.JSX.Element {
                       {translatingId === mail.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Languages className="mr-1 h-3 w-3" />}
                       {translations[mail.id] ? '隐藏译文' : '双语对照'}
                     </Button>
-                    <StatusChip status={mail.status} />
+                    <StatusChip status={mail.status} needsReview={mail.needsReview} />
                   </div>
                 </header>
 
@@ -569,7 +592,13 @@ export function MailPage(): React.JSX.Element {
                   </div>
                 ) : null}
 
-                {mail.error && <p role="status" className="rounded-md bg-destructive/5 px-3 py-2 text-xs text-destructive">{mail.error}{mail.needsReview ? '（待核实，不会自动重发）' : ''}</p>}
+                {mail.needsReview ? (
+                  <p role="status" className="rounded-md bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
+                    请确认这封邮件是否已发出 · 确认前不会重发{mail.error ? `（${mail.error}）` : ''}
+                  </p>
+                ) : mail.error ? (
+                  <p role="status" className="rounded-md bg-destructive/5 px-3 py-2 text-xs text-destructive">{mail.error}</p>
+                ) : null}
                 {mail.scheduledAt && <p className="text-[11px] text-muted-foreground">定时时间：{formatDateTime(mail.scheduledAt)}</p>}
                 {mail.status === 'retrying' && <p className="text-[11px] text-muted-foreground">下次重试：{formatDateTime(mail.nextAttemptAt)} · 已尝试 {mail.attempts} 次</p>}
 
@@ -681,7 +710,25 @@ export function MailPage(): React.JSX.Element {
         </p>
       ) : null}
     </ConfirmDialog>
-    <ConfirmDialog open={!!resolve} onOpenChange={v => { if (!v) setResolve(null); }} title="确认投递核实结果" description={resolve === 'sent' ? '请仅在邮箱或服务器记录已确认投递成功后操作。此操作会将任务标记为已发送。' : '请仅在邮箱或服务器记录已确认未投递后操作。此操作解除待核实状态，之后可以手动重新发送。'} loading={busy}
-      onConfirm={() => action(async () => { await apiPost(`/mail/${detail?.mail.id}/resolve`, { outcome: resolve }); setResolve(null); })} />
+    <ConfirmDialog
+      open={cancelConfirmOpen}
+      onOpenChange={(v) => { if (!busy) setCancelConfirmOpen(v); }}
+      title="确认取消这封待发邮件？"
+      description="取消后不会发送给客户，状态会变为「已取消，未发送」。如需后续再发，随时可以重新编辑发送。"
+      confirmText="确认取消"
+      loading={busy}
+      onConfirm={() => action(async () => { await apiPost(`/mail/${detail?.mail.id}/cancel`); setCancelConfirmOpen(false); }, '已取消发送，邮件未发出')}
+    />
+    <ConfirmDialog
+      open={!!resolve}
+      onOpenChange={v => { if (!v) setResolve(null); }}
+      title="确认这封邮件是否已发出"
+      description={resolve === 'sent'
+        ? '请先在发件邮箱确认客户已收到或已发出。确认后会标记为「已发送」。'
+        : '请先在发件邮箱确认这封邮件确实未发出。确认后会解除锁定，之后可以重新编辑发送。'}
+      confirmText={resolve === 'sent' ? '确认已发出' : '确认未发出'}
+      loading={busy}
+      onConfirm={() => action(async () => { await apiPost(`/mail/${detail?.mail.id}/resolve`, { outcome: resolve }); setResolve(null); }, resolve === 'sent' ? '已标记为已发送' : '已确认未发出，现在可以重新编辑发送')}
+    />
   </div>;
 }

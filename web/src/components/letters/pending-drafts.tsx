@@ -9,17 +9,18 @@ import type { DevelopmentLetter } from '@/types';
 /** 列表里的审核状态：未审核 / 已通过 / 不通过，与弹窗内口径一致；硬拦截优先于审核结论 */
 function reviewView(letter: DevelopmentLetter): { label: string; variant: 'pending' | 'developed' | 'failed' } {
   if (letter.sendBlocker) return { label: '不可发送', variant: 'failed' };
-  if (letter.review?.decision === 'approved') return { label: '审核已通过', variant: 'developed' };
-  if (letter.review?.decision === 'rejected') return { label: '不通过', variant: 'failed' };
-  return { label: '待审核', variant: 'pending' };
+  if (letter.review?.decision === 'approved' && letter.reviewStale) return { label: '需重新确认', variant: 'pending' };
+  if (letter.review?.decision === 'approved') return { label: '已确认', variant: 'developed' };
+  if (letter.review?.decision === 'rejected') return { label: '暂不发送', variant: 'failed' };
+  return { label: '待确认', variant: 'pending' };
 }
 
-/** 行内按钮：已通过只需查看，不通过给一次重新审核的机会 */
 function actionLabel(letter: DevelopmentLetter): string {
   if (letter.sendBlocker) return '查看原因';
+  if (letter.review?.decision === 'approved' && letter.reviewStale) return '重新确认';
   if (letter.review?.decision === 'approved') return '查看草稿';
-  if (letter.review?.decision === 'rejected') return '重新审核';
-  return '审核草稿';
+  if (letter.review?.decision === 'rejected') return '重新查看';
+  return '查看并修改';
 }
 
 export function PendingDrafts({

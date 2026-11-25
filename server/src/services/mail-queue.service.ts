@@ -32,18 +32,35 @@ export function newMessageId(senderAddress?: string): string {
   return `<${randomUUID()}@${domain}>`;
 }
 
-async function checkAutomaticDelivery(job: DevelopmentLetterDocument, customerEmail: string | undefined, user: AuthUser): Promise<string | undefined> {
+async function checkAutomaticDelivery(
+  job: DevelopmentLetterDocument,
+  customerEmail: string | undefined,
+  user: AuthUser,
+): Promise<{ reason: string; cancelOrigin: 'manual' | 'system_transient' | 'rule_stop' | 'permission' } | undefined> {
   const campaignId = job.automationCampaignId;
   if (!campaignId) return;
   const [campaign, enrollment, project] = await Promise.all([
-    OutreachAutomationConfig.exists({ _id: campaignId, projectId: job.projectId, userId: job.sentBy, enabled: true, rolloutMode: { $ne: 'shadow' } }),
-    OutreachAutomationEnrollment.exists({ _id: job.automationEnrollmentId, campaignId, projectId: job.projectId, customerId: job.customerId, status: 'active' }),
+    OutreachAutomationConfig.findOne({ _id: campaignId, projectId: job.projectId, userId: job.sentBy }).select('enabled rolloutMode').lean(),
+    OutreachAutomationEnrollment.findOne({ _id: job.automationEnrollmentId, campaignId, projectId: job.projectId, customerId: job.customerId }).select('status pauseOrigin').lean(),
     Project.findOne({ _id: job.projectId, status: 'active' }).select('organizationId brandProfile').lean(),
   ]);
-  if (!campaign || !enrollment || !project || (project.organizationId && String(project.organizationId) !== user.organizationId)) {
-    return '自动开发已暂停或所属项目权限发生变化';
+  if (!project || (project.organizationId && String(project.organizationId) !== user.organizationId)) {
+    return { reason: '所属项目状态或权限发生变化，已取消发送', cancelOrigin: 'permission' };
   }
-  if (customerEmail?.trim().toLowerCase() !== job.recipientEmail.trim().toLowerCase()) return '客户邮箱已变化，需重新准备开发信';
+  if (!campaign || !campaign.enabled || campaign.rolloutMode === 'shadow') {
+    return { reason: '自动开发已暂停，邮件已取消且未发送', cancelOrigin: 'manual' };
+  }
+  if (!enrollment || enrollment.status !== 'active') {
+    const cancelOrigin = enrollment?.status === 'paused' && enrollment.pauseOrigin === 'system'
+      ? 'system_transient'
+      : enrollment?.status === 'blocked'
+        ? 'rule_stop'
+        : 'manual';
+    return { reason: '该客户的自动跟进已暂停或停止，邮件已取消且未发送', cancelOrigin };
+  }
+  if (customerEmail?.trim().toLowerCase() !== job.recipientEmail.trim().toLowerCase()) {
+    return { reason: '客户邮箱已变化，需重新准备开发信', cancelOrigin: 'permission' };
+  }
   const review = job.knowledgeReview;
   const approvedOffers = project.brandProfile?.approvedOffers;
   const issue = automatedReviewIssue(review, job.outreachStep, {
@@ -51,9 +68,9 @@ async function checkAutomaticDelivery(job: DevelopmentLetterDocument, customerEm
     subject: job.subject,
     approvedOffers,
   });
-  if (issue) return issue;
+  if (issue) return { reason: issue, cancelOrigin: 'system_transient' };
   if (!review || review.bodyHash !== draftHash(job.contentText) || review.context.customerId !== String(job.customerId)) {
-    return '草稿正文或证据与当前客户不一致';
+    return { reason: '草稿正文或证据与当前客户不一致', cancelOrigin: 'system_transient' };
   }
   if (job.outreachStep && job.outreachStep >= 2) {
     const previous = await previousOutreachDrafts(String(job.projectId), String(job.customerId), job.outreachStep);
@@ -62,10 +79,12 @@ async function checkAutomaticDelivery(job: DevelopmentLetterDocument, customerEm
       step: job.outreachStep,
       approvedOffers,
     });
-    if (repeated) return repeated;
+    if (repeated) return { reason: repeated, cancelOrigin: 'system_transient' };
   }
   const freshness = await knowledgeFreshness(review, user);
-  if (freshness.failed || freshness.changed.length) return '发信前未能确认依据仍有效';
+  if (freshness.failed || freshness.changed.length) {
+    return { reason: '发信前未能确认资料仍为最新', cancelOrigin: 'system_transient' };
+  }
   return undefined;
 }
 
@@ -117,7 +136,7 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
   const projectAccess = user?.role === 'admin' || user?.projectIds.some((id) => String(id) === String(job.projectId));
   if (!customer || !user || user.status === 'disabled' || user.role === 'viewer' || !projectAccess || (user.role === 'user' && String(customer.ownerId) !== String(user._id))) {
     await DevelopmentLetter.updateOne({ _id: job._id, status: 'sending' }, {
-      $set: { status: 'cancelled', error: '客户或发送人权限已变化，任务已取消' },
+      $set: { status: 'cancelled', cancelOrigin: 'permission', error: '客户或发送人权限已变化，任务已取消' },
       $push: { history: { at: new Date(), status: 'cancelled' } },
     });
     return;
@@ -136,7 +155,7 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
       const reason = '客户已回复，已停止后续开发信';
       await cancelPendingOutreachLetters(job.projectId, job.customerId, reason);
       await DevelopmentLetter.updateOne({ _id: job._id, status: 'sending' }, {
-        $set: { status: 'cancelled', error: reason },
+        $set: { status: 'cancelled', cancelOrigin: 'rule_stop', error: reason },
         $push: { history: { at: new Date(), status: 'cancelled', error: reason } },
       });
       return;
@@ -144,33 +163,33 @@ export async function processMailJob(id?: string, deliver: (payload: SendMailPay
   }
 
   if((job.agentOutreachId||job.agentTaskId)&&await hasProtectedCustomerMail(String(job.customerId),String(job.projectId))){
-    await DevelopmentLetter.updateOne({_id:job._id,status:'sending'},{$set:{status:'cancelled',error:'检测到停止营销联系记录，已阻止投递'},$push:{history:{at:new Date(),status:'cancelled'}}});return;
+    await DevelopmentLetter.updateOne({_id:job._id,status:'sending'},{$set:{status:'cancelled',cancelOrigin:'rule_stop',error:'检测到停止营销联系记录，已阻止投递'},$push:{history:{at:new Date(),status:'cancelled'}}});return;
   }
   const suppression = await isEmailSuppressed(String(job.projectId), job.recipientEmail);
   if (suppression) {
     await DevelopmentLetter.updateOne({ _id: job._id, status: 'sending' }, {
-      $set: { status: 'cancelled', error: `收件人已进入不再发送名单（${suppression.reason}），已阻止投递` },
+      $set: { status: 'cancelled', cancelOrigin: 'rule_stop', error: `收件人已进入不再发送名单（${suppression.reason}），已阻止投递` },
       $push: { history: { at: new Date(), status: 'cancelled', error: '收件人已退订或被标记为退信/投诉' } },
     });
     return;
   }
   if (job.automationCampaignId) {
-    let reason: string | undefined;
+    let checkResult: { reason: string; cancelOrigin: 'manual' | 'system_transient' | 'rule_stop' | 'permission' } | undefined;
     try {
-      reason = await checkAutomaticDelivery(job, customer.email, {
+      checkResult = await checkAutomaticDelivery(job, customer.email, {
         id: user.id, role: user.role, projectId: String(job.projectId), organizationId: user.organizationId?.toString(),
         username: user.username, displayName: user.displayName,
       });
-      if (!reason && await hasInboundReplySince(job.projectId, job.customerId, customer.outreachLastAt ?? customer.createdAt)) {
-        reason = '客户已回复，已停止自动开发';
+      if (!checkResult && await hasInboundReplySince(job.projectId, job.customerId, customer.outreachLastAt ?? customer.createdAt)) {
+        checkResult = { reason: '客户已回复，已停止自动开发', cancelOrigin: 'rule_stop' };
       }
     } catch {
-      reason = '发信前未能完成自动开发核对';
+      checkResult = { reason: '发信前系统临时中断，未发送邮件', cancelOrigin: 'system_transient' };
     }
-    if (reason) {
+    if (checkResult) {
       await DevelopmentLetter.updateOne({ _id: job._id, status: 'sending' }, {
-        $set: { status: 'cancelled', error: reason },
-        $push: { history: { at: new Date(), status: 'cancelled', error: reason } },
+        $set: { status: 'cancelled', cancelOrigin: checkResult.cancelOrigin, error: checkResult.reason },
+        $push: { history: { at: new Date(), status: 'cancelled', error: checkResult.reason } },
       });
       return;
     }

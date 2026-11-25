@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/page-header';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
+import { SendLetterDialog, type FlaggedExcerptItem } from '@/components/letters/send-letter-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,11 +34,12 @@ import { usePageTitle } from '@/hooks/use-ui';
 import { selectIsAdmin, useAuthStore } from '@/store/auth.store';
 import { useProjectStore } from '@/store/project.store';
 import type {
+  Customer,
+  DevelopmentLetter,
   OutreachAutomationConfig,
   OutreachAutomationOverview,
   OutreachAutomationQueueRow,
   OutreachAutomationStartResult,
-  OutreachDraftStage,
   OutreachEnrollmentErrorHistoryItem,
   OutreachSendGateDetail,
   ProjectApprovedProofBlock,
@@ -72,15 +74,20 @@ interface AutoFixSendGatesResult {
   }[];
 }
 
-function isExceptionQueueRow(row: OutreachAutomationQueueRow): boolean {
+function isActionNeededRow(row: OutreachAutomationQueueRow): boolean {
   return Boolean(
-    row.draftNeedsReverify
-    || row.draftStage === 'draft_audit_failed'
-    || row.draftStage === 'send_gate_blocked'
-    || row.draftStage === 'task_failed'
-    || row.draftStage === 'delivery_failed'
-    || row.draftStage === 'delivery_cancelled'
-    || row.status === 'failed',
+    !row.isRuleStopped
+    && row.status !== 'completed'
+    && row.draftStage !== 'waiting_model'
+    && row.draftStage !== 'reverify_queued'
+    && (
+      row.draftStage === 'draft_audit_failed'
+      || row.draftStage === 'send_gate_blocked'
+      || row.draftStage === 'delivery_uncertain'
+      || row.draftStage === 'delivery_failed'
+      || row.draftStage === 'task_failed'
+      || row.status === 'failed'
+    ),
   );
 }
 
@@ -103,6 +110,7 @@ interface EnrollmentDiagnosticsDto {
       | 'waiting_buyer_window'
       | 'waiting_delivery'
       | 'delivery_cancelled'
+      | 'delivery_uncertain'
       | 'blocked_by_send_gate'
       | 'blocked_by_audit'
       | 'delivery_failed'
@@ -205,21 +213,6 @@ const CHECK_STATUS_LABELS: Record<string, string> = {
   unverifiable: '待人工确认',
 };
 
-const DRAFT_STAGE_META: Record<
-  Exclude<OutreachDraftStage, 'none'>,
-  { label: string; variant: 'outline' | 'warning' | 'failed' | 'developed' }
-> = {
-  reverify_queued: { label: '排队重新生成', variant: 'outline' },
-  waiting_model: { label: '正在生成草稿', variant: 'warning' },
-  draft_saved_verified: { label: '核对通过', variant: 'developed' },
-  draft_audit_failed: { label: '内容待核对', variant: 'failed' },
-  send_gate_blocked: { label: '发送前待调整', variant: 'warning' },
-  waiting_delivery: { label: '等待投递', variant: 'outline' },
-  delivery_cancelled: { label: '已取消（未发送）', variant: 'warning' },
-  task_failed: { label: '生成未完成', variant: 'failed' },
-  delivery_failed: { label: '发信失败', variant: 'failed' },
-};
-
 const TZ_SOURCE_LABELS: Record<'explicit' | 'country' | 'fallback', string> = {
   explicit: '客户时区',
   country: '按国家匹配',
@@ -239,15 +232,15 @@ const PHASE_META: Record<
   OutreachAutomationQueueRow['phase'],
   { label: (step: number) => string; variant: 'outline' | 'warning' | 'failed' | 'muted' | 'developed' }
 > = {
-  waiting: { label: (step) => `等待第 ${step} 封`, variant: 'outline' },
+  waiting: { label: () => '等待发送', variant: 'outline' },
   generating: { label: (step) => `正在准备第 ${step} 封`, variant: 'warning' },
-  ready: { label: (step) => `待发送第 ${step} 封`, variant: 'warning' },
-  sending: { label: (step) => `正在发送第 ${step} 封`, variant: 'outline' },
-  due: { label: (step) => `等待发送第 ${step} 封`, variant: 'warning' },
-  paused: { label: () => '已暂停', variant: 'warning' },
+  ready: { label: () => '等待发送', variant: 'outline' },
+  sending: { label: () => '正在发送', variant: 'outline' },
+  due: { label: () => '等待发送', variant: 'outline' },
+  paused: { label: () => '跟进已暂停', variant: 'warning' },
   blocked: { label: () => '按规则停止', variant: 'muted' },
   completed: { label: () => '三封已完成', variant: 'developed' },
-  failed: { label: () => '需要处理', variant: 'failed' },
+  failed: { label: () => '需要你处理', variant: 'failed' },
 };
 
 function formatWindow(config: OutreachAutomationConfig): string {
@@ -256,16 +249,16 @@ function formatWindow(config: OutreachAutomationConfig): string {
 
 function blockedStatus(reason: string): { label: string; detail: string; variant: 'warning' | 'muted' | 'developed' } {
   if (reason.includes('已回复')) {
-    return { label: '按规则停止 · 客户已回复', detail: '已自动停止后续开发，转人工跟进（非故障）', variant: 'developed' };
+    return { label: '按规则停止 · 客户已回复', detail: '已自动停止后续开发，转人工跟进', variant: 'developed' };
   }
   if (reason.includes('退订') || reason.includes('退信') || reason.includes('拒绝')) {
-    return { label: '按规则停止 · 退订/拒收', detail: '已按合规规则停止发送（非故障）', variant: 'muted' };
+    return { label: '按规则停止 · 退订/拒收', detail: '已按规则停止发送', variant: 'muted' };
   }
   if (reason.includes('已删除') || reason.includes('归属已变化')) {
     return { label: '按规则停止 · 归属变更', detail: '客户已删除或负责人已变更', variant: 'muted' };
   }
   if (reason.includes('不在可开发状态')) {
-    return { label: '按规则停止 · 已转人工', detail: '客户状态已变化，自动开发停止（非故障）', variant: 'muted' };
+    return { label: '按规则停止 · 已转人工', detail: '客户状态已变化，自动跟进已结束', variant: 'muted' };
   }
   return { label: '按规则停止', detail: reason || '按业务规则不再继续发送', variant: 'muted' };
 }
@@ -277,30 +270,27 @@ function phaseBadge(
   if (row.isRuleStopped || row.phase === 'blocked') {
     return blockedStatus(row.lastError ?? '');
   }
+  if (row.draftStage === 'delivery_uncertain') {
+    return { label: '请确认这封邮件是否已发出', variant: 'failed' };
+  }
   if (row.draftStage === 'delivery_failed') {
-    return { label: '发信失败', variant: 'failed' };
+    return { label: '邮件未发出', variant: 'failed' };
   }
   if (row.draftStage === 'delivery_cancelled') {
-    return { label: '已取消（未发送）', variant: 'warning' };
+    return { label: '已取消，未发送', variant: 'outline' };
   }
   if (row.draftStage === 'waiting_delivery') {
-    return { label: '等待投递', variant: 'outline' };
+    return { label: '等待发送', variant: 'outline' };
   }
-  if (row.pausedReadyToResume) {
-    return { label: '队列暂停 · 待恢复', variant: 'warning' };
+  if (row.draftStage === 'send_gate_blocked' || row.draftStage === 'draft_audit_failed') {
+    return { label: '请修改邮件', variant: row.draftStage === 'draft_audit_failed' ? 'failed' : 'warning' };
   }
-  if (row.draftStage === 'send_gate_blocked') {
-    return { label: '发送前待调整', variant: 'warning' };
-  }
-  if (row.draftStage === 'draft_audit_failed') {
-    if (row.sendGateDetail) {
-      return { label: '发送前待调整', variant: 'warning' };
-    }
-    return { label: '内容待核对', variant: 'failed' };
+  if (row.status === 'paused') {
+    return { label: '跟进已暂停', variant: 'warning' };
   }
   const effectiveOpen = row.recipientWindowOpen ?? windowOpen;
-  if (!effectiveOpen && ['due', 'ready', 'generating', 'sending'].includes(row.phase)) {
-    return { label: '等待当地发送时段', variant: 'outline' };
+  if (!effectiveOpen && ['due', 'ready', 'generating', 'sending', 'waiting'].includes(row.phase)) {
+    return { label: '等待发送', variant: 'outline' };
   }
   const meta = PHASE_META[row.phase];
   return { label: meta.label(row.nextStep), variant: meta.variant };
@@ -310,67 +300,65 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
   const effectiveOpen = row.recipientWindowOpen ?? windowOpen;
   if (row.isRuleStopped || row.phase === 'blocked') {
     const status = blockedStatus(row.lastError ?? '');
-    if (status.label.includes('客户已回复')) return '按规则停止：查看客户并人工跟进';
-    if (status.label.includes('归属变更')) return '按规则停止：请确认负责人后重新加入';
-    if (status.label.includes('退订/拒收')) return '按规则停止：保持停发，保留记录';
-    if (status.label.includes('已转人工')) return '按规则停止：已转人工跟进';
-    return '按规则停止（非系统故障）';
+    if (status.label.includes('客户已回复')) return '客户已回复，转人工跟进';
+    if (status.label.includes('归属变更')) return '确认负责人后可重新加入';
+    if (status.label.includes('退订/拒收')) return '保持停发';
+    if (status.label.includes('已转人工')) return '已转人工跟进';
+    return '无需操作';
+  }
+  if (row.draftStage === 'delivery_uncertain') {
+    return '确认前不会重发 · 请先点击「查看发件记录」核对邮箱';
   }
   if (row.draftStage === 'delivery_failed') {
-    return `第 ${row.nextStep} 封邮件发送失败，请检查客户邮箱或发件记录后再处理`;
+    return `第 ${row.nextStep} 封未发出，请检查客户邮箱或发件记录后再决定是否重新安排`;
   }
   if (row.draftStage === 'delivery_cancelled') {
-    return `第 ${row.nextStep} 封邮件已取消（未发送），如需重发可点「重新生成」`;
+    return '无需操作；如需继续跟进可点「重新安排」';
   }
   if (row.draftStage === 'waiting_delivery') {
-    return `第 ${row.nextStep} 封已进入发信队列，等待邮件中心投递`;
+    return '已进入发信队列，无需操作';
   }
   if (row.draftStage === 'waiting_model') {
-    return row.taskStepLabel ? `处理中：${row.taskStepLabel}` : '正在生成并核对草稿';
+    return row.taskStepLabel ? `正在处理：${row.taskStepLabel}` : '正在准备草稿，无需操作';
   }
   if (row.draftStage === 'reverify_queued') {
-    return '已加入队列，等待生成新草稿';
-  }
-  if (row.pausedReadyToResume) {
-    return '当前草稿已通过检查，队列仍暂停，确认后请手动恢复';
+    return '正在排队准备新草稿，无需操作';
   }
   if (row.draftStage === 'send_gate_blocked') {
-    return row.sendGateDetail?.guidance || '正文已核对通过，请按提示微调后重检';
+    return row.sendGateDetail?.guidance || '点「查看并修改」调整内容后再检查';
   }
   if (row.draftStage === 'draft_audit_failed') {
-    if (row.sendGateDetail) {
-      return row.sendGateDetail.guidance;
-    }
-    return row.draftAuditDetail?.rebuiltAndFailedAgain
-      ? '新稿仍有待核对内容：请查看下方具体句子，补充资料后再处理'
-      : '请查看下方提示或点「查看详情」确认缺失依据，再决定是否重新生成';
+    return '点「查看并修改」定位到需要调整的句子，修改后再发送';
   }
   if (row.draftStage === 'task_failed') {
     return row.taskRetryAt
       ? `预计自动重试：${formatDateTime(row.taskRetryAt)}`
-      : '请点「查看详情」确认原因后再点「重新生成」';
+      : '点「重新生成」重试，或点「查看详情」了解原因';
   }
-  if (!effectiveOpen && ['due', 'ready', 'sending'].includes(row.phase)) {
-    return `等当地工作日 ${windowText}（${formatDateTime(row.nextRunAt)}）`;
+  if (row.status === 'paused') {
+    return '不会自动发信 · 如需继续请点「继续跟进」';
+  }
+  if (!effectiveOpen && ['due', 'ready', 'sending', 'waiting'].includes(row.phase)) {
+    return `${row.nextSendLocalLabel || `预计当地工作日 ${windowText} 发送`} · 无需操作`;
   }
   switch (row.phase) {
     case 'waiting':
-      return `${formatRelative(row.nextRunAt)}（${formatDateTime(row.nextRunAt)}）${row.draftReady ? ' · 草稿已就绪' : ''}`;
+      return `${row.nextSendLocalLabel || `${formatRelative(row.nextRunAt)}（${formatDateTime(row.nextRunAt)}）`} · 无需操作`;
     case 'generating':
-      return '正在生成并核对草稿';
+      return '正在准备草稿，无需操作';
     case 'ready':
-      return row.draftReady ? '草稿已就绪，等待发送' : '等待核对与检查';
+      return `${row.nextSendLocalLabel || '草稿已就绪，按计划自动发送'} · 无需操作`;
     case 'sending':
-      return '正在发送邮件';
+      return '正在发出邮件，无需操作';
     case 'due':
-      return '已到发送时间，等待处理';
+      return '等待发送，无需操作';
     case 'paused':
-      return row.draftStage === 'draft_saved_verified' ? '当前草稿已通过检查，队列仍暂停，待手动恢复' : '已暂停（可先重新生成草稿）';
+      return '不会自动发信 · 如需继续请点「继续跟进」';
     case 'failed':
-      return '请点「查看详情」确认后再处理';
+      return '请点「查看详情」了解原因后再处理';
     case 'completed':
     default:
-      return '—';
+      return '三封已完成 · 无需操作';
   }
 }
 
@@ -426,7 +414,12 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const [diagLoading, setDiagLoading] = React.useState(false);
   const [diagData, setDiagData] = React.useState<EnrollmentDiagnosticsDto | null>(null);
   const [diagRowId, setDiagRowId] = React.useState('');
-  const [queueFilter, setQueueFilter] = React.useState<'all' | 'exceptions' | 'paused_ready'>('all');
+  const [queueFilter, setQueueFilter] = React.useState<'all' | 'action_needed' | 'paused'>('all');
+  const [editDraftOpen, setEditDraftOpen] = React.useState(false);
+  const [editDraftLoadingId, setEditDraftLoadingId] = React.useState('');
+  const [editDraftCustomer, setEditDraftCustomer] = React.useState<Customer | null>(null);
+  const [editDraftLetter, setEditDraftLetter] = React.useState<DevelopmentLetter | null>(null);
+  const [editDraftHighlights, setEditDraftHighlights] = React.useState<FlaggedExcerptItem[]>([]);
   const [lastReverifyResult, setLastReverifyResult] = React.useState<ReverifyBatchResult | null>(null);
   const [lastAutoFixResult, setLastAutoFixResult] = React.useState<AutoFixSendGatesResult | null>(null);
   const [error, setError] = React.useState('');
@@ -785,22 +778,51 @@ export function OutreachAutomationPage(): React.JSX.Element {
       const data = await apiGet<EnrollmentDiagnosticsDto>(scoped(`/outreach-automation/enrollments/${enrollmentId}/diagnostics`));
       setDiagData(data);
     } catch (caught) {
-      toast.error(toErrorMessage(caught, '加载单条诊断失败'));
+      toast.error(toErrorMessage(caught, '加载发送状态详情失败'));
     } finally {
       setDiagLoading(false);
     }
   }, [scoped]);
 
+  const openDraftForEdit = React.useCallback(async (row: OutreachAutomationQueueRow) => {
+    if (!row.draftId) {
+      void loadDiagnostics(row.id);
+      return;
+    }
+    setEditDraftLoadingId(row.id);
+    try {
+      const [cust, letterDoc] = await Promise.all([
+        apiGet<Customer>(`/customers/${row.customerId}`),
+        apiGet<DevelopmentLetter>(`/letters/${row.draftId}`),
+      ]);
+      const highlights: FlaggedExcerptItem[] = (row.flaggedExcerpts ?? []).map((item) => ({
+        text: item.text,
+        reason: item.reason,
+        status: item.status,
+      }));
+      setEditDraftCustomer(cust);
+      setEditDraftLetter(letterDoc);
+      setEditDraftHighlights(highlights);
+      setEditDraftOpen(true);
+    } catch (caught) {
+      toast.error('无法打开草稿编辑页', {
+        description: toErrorMessage(caught, '请刷新后重试，或进入客户详情页查看草稿'),
+      });
+    } finally {
+      setEditDraftLoadingId('');
+    }
+  }, [loadDiagnostics]);
+
   const mailbox = overview?.mailbox;
   const canStart = (overview?.config.rolloutMode === 'shadow' || Boolean(mailbox?.canSend)) && Boolean(overview?.stats.eligible || overview?.stats.enrolled);
   const ruleStoppedCount = overview?.stats.ruleStopped ?? 0;
-  const nonRuleBlocked = Math.max(0, (overview?.stats.blocked ?? 0) - ruleStoppedCount);
-  const issueCount = (overview?.stats.paused ?? 0) + (overview?.stats.failed ?? 0) + nonRuleBlocked;
+  const actionNeededCount = overview?.stats.actionNeededCount
+    ?? (overview?.queue.filter(isActionNeededRow).length ?? 0);
+  const pausedRowCount = overview?.queue.filter((r) => r.status === 'paused' && r.draftStage !== 'delivery_cancelled').length ?? 0;
   const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
   const rebuildableCount = overview?.stats.rebuildableUnverifiedDrafts ?? unverifiedCount;
   const sendGateBlockedCount = overview?.stats.sendGateBlockedDrafts ?? 0;
-  const contextWarningCount = overview?.stats.contextWarningDrafts ?? 0;
-  const pausedReadyCount = overview?.stats.pausedReadyCount ?? 0;
+  const deliveryUncertainCount = overview?.stats.deliveryUncertainCount ?? 0;
   const deliveryFailedCount = overview?.stats.deliveryFailedCount ?? 0;
   const deliveryCancelledCount = overview?.stats.deliveryCancelledCount ?? 0;
   const circuitFailedCount = overview?.stats.circuitFailed ?? 0;
@@ -992,6 +1014,24 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 </div>
               </div>
             ) : null}
+            {deliveryUncertainCount > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-2.5 text-xs text-destructive">
+                <div className="flex min-w-0 items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold">
+                      请确认 {deliveryUncertainCount} 封邮件是否已发出 · 确认前不会重发
+                    </p>
+                    <p className="leading-5 text-muted-foreground">
+                      发送期间发生中断，系统无法确认收件人是否已收到。请先到邮件中心核对发件记录，避免客户收到两封相同邮件。
+                    </p>
+                  </div>
+                </div>
+                <Button type="button" size="sm" variant="outline" className="shrink-0" asChild>
+                  <Link to="/mail">查看发件记录</Link>
+                </Button>
+              </div>
+            ) : null}
             {unverifiedCount > 0 ? (
               <div className="mt-3 space-y-2 rounded-md border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -999,12 +1039,10 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                     <div className="space-y-0.5">
                       <p className="font-semibold">
-                        内容待核对：{unverifiedCount} 封（可重新生成 {rebuildableCount} 封）
-                        {sendGateBlockedCount > 0 ? `；另有 ${sendGateBlockedCount} 封待按提示微调` : ''}
+                        请修改邮件：{unverifiedCount} 封草稿有内容待调整（可重新生成 {rebuildableCount} 封）
                       </p>
                       <p className="leading-5">
-                        点击右侧按钮将只重新生成未通过内容核对的草稿，不会覆盖已人工审核通过的草稿
-                        {overview.config.enabled ? '。' : '（自动发送仍保持暂停，确认无误后再手动恢复）。'}
+                        可在下方点「查看并修改」直接定位到对应句子，或点击右侧按钮重新生成（不会覆盖你已手动确认过的草稿）。
                       </p>
                     </div>
                   </div>
@@ -1026,17 +1064,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <div className="mt-2.5 flex flex-wrap items-start justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs">
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">
-                    本次批量重建结果：已扫描 {lastReverifyResult.scanned} 封 · 本次入队 <strong className="text-emerald-600 dark:text-emerald-400">{lastReverifyResult.queued}</strong> 封 · 跳过 <strong>{lastReverifyResult.skipped}</strong> 封
+                    本次批量重新生成：扫描 {lastReverifyResult.scanned} 封 · 已加入生成 <strong className="text-emerald-600 dark:text-emerald-400">{lastReverifyResult.queued}</strong> 封 · 跳过 <strong>{lastReverifyResult.skipped}</strong> 封
                     {(lastReverifyResult.remainingUnverified ?? 0) > 0 || (lastReverifyResult.remainingSendGateBlocked ?? 0) > 0 ? (
                       <>
-                        {' · '}当前仍有 <strong className="text-destructive">{lastReverifyResult.remainingUnverified ?? 0}</strong> 封正文核验未过
-                        {(lastReverifyResult.remainingSendGateBlocked ?? 0) > 0 ? <> / <strong className="text-amber-700 dark:text-amber-300">{lastReverifyResult.remainingSendGateBlocked}</strong> 封其他发送检查拦截</> : null}
+                        {' · '}当前仍有 <strong className="text-destructive">{(lastReverifyResult.remainingUnverified ?? 0) + (lastReverifyResult.remainingSendGateBlocked ?? 0)}</strong> 封需要修改
                       </>
                     ) : null}
                   </p>
                   {lastReverifyResult.skippedReasons && lastReverifyResult.skippedReasons.length > 0 ? (
                     <p className="text-muted-foreground">
-                      跳过原因汇总：{lastReverifyResult.skippedReasons.map((r) => `${r.reason}（${r.count}）`).join('；')}
+                      跳过原因：{lastReverifyResult.skippedReasons.map((r) => `${r.reason}（${r.count}）`).join('；')}
                     </p>
                   ) : null}
                   {lastReverifyResult.skippedDetails && lastReverifyResult.skippedDetails.length > 0 ? (
@@ -1047,13 +1084,8 @@ export function OutreachAutomationPage(): React.JSX.Element {
                   ) : null}
                   {lastReverifyResult.remainingDetails && lastReverifyResult.remainingDetails.length > 0 ? (
                     <p className="text-[11px] text-muted-foreground">
-                      当前未过明细：{lastReverifyResult.remainingDetails.slice(0, 6).map((d) => `${d.customerName}（${d.category === 'send_gate' ? '发送检查' : '正文核验'}：${d.reason}）`).join('；')}
+                      仍需修改：{lastReverifyResult.remainingDetails.slice(0, 6).map((d) => `${d.customerName}（${d.reason}）`).join('；')}
                       {lastReverifyResult.remainingDetails.length > 6 ? ` 等共 ${lastReverifyResult.remainingDetails.length} 条` : ''}
-                    </p>
-                  ) : null}
-                  {(lastReverifyResult.pausedReadyCount ?? 0) > 0 ? (
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
-                      另有 {lastReverifyResult.pausedReadyCount} 位客户当前草稿检查已通过，队列仍暂停（待手动恢复，系统不会自动恢复发信）。
                     </p>
                   ) : null}
                 </div>
@@ -1066,14 +1098,14 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-300/70 bg-sky-50/70 p-2.5 text-xs text-sky-900 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200">
                 <div className="space-y-0.5">
                   <p className="font-semibold">
-                    发送前待调整：{sendGateBlockedCount} 封（正文已核对通过，按提示处理即可发送）
+                    请修改邮件：{sendGateBlockedCount} 封草稿需要微调后发出
                   </p>
                   <p className="leading-5">
                     {[
-                      sendGateCounts.missingEvidence > 0 ? `首封缺少公司能力资料 ${sendGateCounts.missingEvidence} 封` : '',
-                      sendGateCounts.offerMismatch > 0 ? `寄样/色卡或优惠未授权 ${sendGateCounts.offerMismatch} 封（可一键移除提议）` : '',
-                      sendGateCounts.layoutOrLength > 0 ? `段落或字数待调整 ${sendGateCounts.layoutOrLength} 封（可一键拆段）` : '',
-                    ].filter(Boolean).join(' · ') || '请在下方队列按每行提示处理。'}
+                      sendGateCounts.missingEvidence > 0 ? `首封缺少公司能力介绍 ${sendGateCounts.missingEvidence} 封` : '',
+                      sendGateCounts.offerMismatch > 0 ? `提到了寄样或免费/运费提议 ${sendGateCounts.offerMismatch} 封` : '',
+                      sendGateCounts.layoutOrLength > 0 ? `段落或字数待调整 ${sendGateCounts.layoutOrLength} 封` : '',
+                    ].filter(Boolean).join(' · ') || '可点「一键自动修复」或到下方点「查看并修改」。'}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -1094,11 +1126,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     variant="ghost"
                     className="shrink-0"
                     onClick={() => {
-                      setQueueFilter('exceptions');
+                      setQueueFilter('action_needed');
                       queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }}
                   >
-                    定位列表
+                    查看列表
                   </Button>
                 </div>
               </div>
@@ -1107,7 +1139,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
               <div className="mt-2.5 flex flex-wrap items-start justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-xs">
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">
-                    本次自动修复结果：已处理 {lastAutoFixResult.scanned} 封 · 直接通过 <strong className="text-emerald-600 dark:text-emerald-400">{lastAutoFixResult.fixed}</strong> 封 · 提交重新生成 <strong>{lastAutoFixResult.requeued}</strong> 封 · 跳过 <strong>{lastAutoFixResult.skipped}</strong> 封
+                    本次自动修复：共处理 {lastAutoFixResult.scanned} 封 · 直接通过 <strong className="text-emerald-600 dark:text-emerald-400">{lastAutoFixResult.fixed}</strong> 封 · 已重新生成 <strong>{lastAutoFixResult.requeued}</strong> 封 · 跳过 <strong>{lastAutoFixResult.skipped}</strong> 封
                   </p>
                   {lastAutoFixResult.details.length > 0 ? (
                     <p className="text-[11px] text-muted-foreground">
@@ -1121,26 +1153,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 </Button>
               </div>
             ) : null}
-            {pausedReadyCount > 0 || deliveryFailedCount > 0 || deliveryCancelledCount > 0 || contextWarningCount > 0 ? (
+            {deliveryCancelledCount > 0 || deliveryFailedCount > 0 ? (
               <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                {pausedReadyCount > 0 ? (
-                  <span>
-                    已过检待手动恢复 <strong className="text-foreground">{pausedReadyCount}</strong> 位
-                  </span>
-                ) : null}
-                {contextWarningCount > 0 ? (
-                  <span>
-                    附带背景资料提示（不影响发送）<strong className="text-foreground">{contextWarningCount}</strong> 封
-                  </span>
-                ) : null}
                 {deliveryCancelledCount > 0 ? (
                   <span>
-                    邮件已取消（未发送）<strong className="text-amber-700 dark:text-amber-300">{deliveryCancelledCount}</strong> 位
+                    已取消，未发送 <strong className="text-foreground">{deliveryCancelledCount}</strong> 位（不计入待办）
                   </span>
                 ) : null}
                 {deliveryFailedCount > 0 ? (
                   <span>
-                    发信失败 <strong className="text-destructive">{deliveryFailedCount}</strong> 位
+                    邮件未发出 <strong className="text-destructive">{deliveryFailedCount}</strong> 位
                   </span>
                 ) : null}
               </div>
@@ -1149,10 +1171,10 @@ export function OutreachAutomationPage(): React.JSX.Element {
 
           <section aria-label="自动开发指标" className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             {[
-              { label: '可加入客户', value: overview.stats.eligible, hint: '待开发，或已有开发信记录', icon: Users },
-              { label: '进行中', value: overview.stats.active, hint: `队列共 ${overview.stats.enrolled} 位`, icon: Bot },
-              { label: '今日已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit}`, hint: `剩余 ${overview.stats.remainingToday} 封`, icon: Send },
-              { label: '需要处理', value: issueCount, hint: `暂停或待确认${ruleStoppedCount > 0 ? `（正常停止 ${ruleStoppedCount} 位不计入）` : ''}`, icon: ShieldCheck },
+              { label: '今天已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit} 封`, hint: `当日发送量 · 剩余 ${overview.stats.remainingToday} 封`, icon: Send },
+              { label: '自动开发客户', value: `${overview.stats.enrolled} 位`, hint: `全部队列客户 · 正常排程 ${overview.stats.active} 位`, icon: Bot },
+              { label: '需要你处理', value: `${actionNeededCount} 位`, hint: actionNeededCount > 0 ? '仅统计需修改、待确认或未发出的邮件' : '当前无需人工处理', icon: ShieldCheck },
+              { label: '可加入客户', value: `${overview.stats.eligible} 位`, hint: `待开发或已有开发信${ruleStoppedCount > 0 ? ` · 已按规则停止 ${ruleStoppedCount} 位` : ''}`, icon: Users },
             ].map((item) => (
               <div key={item.label} className="rounded-lg border bg-card p-3.5">
                 <div className="flex items-center justify-between gap-2">
@@ -1306,21 +1328,21 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     <Button
                       type="button"
                       size="sm"
-                      variant={queueFilter === 'exceptions' ? 'secondary' : 'ghost'}
+                      variant={queueFilter === 'action_needed' ? 'secondary' : 'ghost'}
                       className="h-7 px-2 text-xs"
-                      onClick={() => setQueueFilter('exceptions')}
+                      onClick={() => setQueueFilter('action_needed')}
                     >
-                      异常待审（{overview.queue.filter(isExceptionQueueRow).length}）
+                      需要你处理（{overview.queue.filter(isActionNeededRow).length}）
                     </Button>
-                    {pausedReadyCount > 0 ? (
+                    {pausedRowCount > 0 ? (
                       <Button
                         type="button"
                         size="sm"
-                        variant={queueFilter === 'paused_ready' ? 'secondary' : 'ghost'}
+                        variant={queueFilter === 'paused' ? 'secondary' : 'ghost'}
                         className="h-7 px-2 text-xs"
-                        onClick={() => setQueueFilter('paused_ready')}
+                        onClick={() => setQueueFilter('paused')}
                       >
-                        已过检待恢复（{pausedReadyCount}）
+                        已暂停（{pausedRowCount}）
                       </Button>
                     ) : null}
                   </div>
@@ -1332,27 +1354,27 @@ export function OutreachAutomationPage(): React.JSX.Element {
               </CardHeader>
               <CardContent className="p-0">
                 {(() => {
-                  const visibleQueue = queueFilter === 'exceptions'
-                    ? overview.queue.filter(isExceptionQueueRow)
-                    : queueFilter === 'paused_ready'
-                      ? overview.queue.filter((r) => Boolean(r.pausedReadyToResume))
+                  const visibleQueue = queueFilter === 'action_needed'
+                    ? overview.queue.filter(isActionNeededRow)
+                    : queueFilter === 'paused'
+                      ? overview.queue.filter((r) => r.status === 'paused' && r.draftStage !== 'delivery_cancelled')
                       : overview.queue;
                   if (visibleQueue.length === 0) {
                     return (
                       <div className="px-4 py-10 text-center">
                         <Bot className="mx-auto h-7 w-7 text-muted-foreground/60" aria-hidden />
                         <p className="mt-2 text-sm font-medium">
-                          {queueFilter === 'exceptions'
-                            ? '当前没有异常待审客户'
-                            : queueFilter === 'paused_ready'
-                              ? '当前没有已过检待恢复的客户'
+                          {queueFilter === 'action_needed'
+                            ? '当前没有需要你处理的邮件'
+                            : queueFilter === 'paused'
+                              ? '当前没有手动暂停跟进的客户'
                               : '还没有自动开发客户'}
                         </p>
                         <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-                          {queueFilter === 'exceptions'
-                            ? '所有已生成的草稿均已通过分级核验与发送检查，无需人工介入。'
-                            : queueFilter === 'paused_ready'
-                              ? '当前没有处于暂停且草稿已过检的客户。'
+                          {queueFilter === 'action_needed'
+                            ? '全部可发送邮件都在按计划等待发送，无需人工介入。'
+                            : queueFilter === 'paused'
+                              ? '没有处于暂停状态的客户。'
                               : canStart ? '点击右上角「开始自动开发」，系统会从符合条件的客户开始准备并发送下一封。' : '先配置并验证个人发件邮箱，再开始自动开发。'}
                         </p>
                       </div>
@@ -1375,15 +1397,16 @@ export function OutreachAutomationPage(): React.JSX.Element {
                           const status = phaseBadge(row, overview.windowOpen);
                           const verificationBlocked = row.status === 'blocked' && Boolean(row.lastError && /核验|依据审核|依据已变化|模拟校验|缺少依据|partial|unverif/i.test(row.lastError));
                           const complianceBlocked = Boolean(row.isRuleStopped) || (row.status === 'blocked' && !verificationBlocked);
-                          const controllable = !complianceBlocked && (row.status === 'active' || row.status === 'paused' || row.status === 'failed' || verificationBlocked);
+                          const isUncertain = row.draftStage === 'delivery_uncertain';
+                          const isCancelled = row.draftStage === 'delivery_cancelled';
+                          const isNeedsEdit = row.draftStage === 'draft_audit_failed' || row.draftStage === 'send_gate_blocked';
+                          const controllable = !complianceBlocked && !isUncertain && !isCancelled && (row.status === 'active' || row.status === 'paused' || row.status === 'failed' || verificationBlocked);
                           const sendGate = row.sendGateDetail;
-                          const canSingleTestRun = row.status !== 'completed'
+                          const canRegenerate = row.status !== 'completed'
                             && !complianceBlocked
+                            && !isUncertain
                             && row.draftStage !== 'waiting_model'
-                            && (!sendGate || sendGate.code === 'missing_supplier_evidence');
-                          const stageMeta = row.draftStage && row.draftStage !== 'none' ? DRAFT_STAGE_META[row.draftStage] : undefined;
-                          const showStageMeta = Boolean(stageMeta && stageMeta.label !== status.label);
-                          const lastArchivedError = row.errorHistory?.length ? row.errorHistory[row.errorHistory.length - 1] : undefined;
+                            && (isCancelled || row.draftStage === 'task_failed' || row.draftStage === 'delivery_failed' || sendGate?.code === 'missing_supplier_evidence' || row.draftStage === 'draft_audit_failed');
                           return (
                             <TableRow key={row.id}>
                               <TableCell>
@@ -1398,177 +1421,130 @@ export function OutreachAutomationPage(): React.JSX.Element {
                               <TableCell>
                                 <div className="flex flex-wrap items-center gap-1">
                                   <Badge variant={status.variant}>{status.label}</Badge>
-                                  {row.draftStage === 'send_gate_blocked' ? (
-                                    <Badge variant="developed" className="text-[10px]">核对已通过</Badge>
-                                  ) : null}
-                                  {showStageMeta && stageMeta ? <Badge variant={stageMeta.variant}>{stageMeta.label}</Badge> : null}
-                                  {row.draftAuditDetail?.rebuiltAndFailedAgain ? (
-                                    <Badge variant="warning" className="text-[10px]">新稿仍待处理</Badge>
-                                  ) : null}
                                 </div>
-                                {row.draftStage === 'task_failed' && row.taskError ? (
+                                {isUncertain ? (
                                   <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-destructive">
-                                    {row.taskStepLabel ? `${row.taskStepLabel}：` : ''}
+                                    发送期间中断，无法确认客户是否已收到；确认前不会重发。
+                                  </p>
+                                ) : row.draftStage === 'task_failed' && row.taskError ? (
+                                  <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-destructive">
                                     {row.taskError}
                                   </p>
                                 ) : row.draftStage === 'delivery_failed' ? (
-                                  <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4 text-destructive">
-                                    <p>第 {row.nextStep} 封发信失败：{row.deliveryError || row.lastError || '邮件发送被拒或异常'}</p>
-                                    <Link to={`/customers/${row.customerId}`} className="inline-block text-primary underline underline-offset-2">
-                                      查看客户发信记录
-                                    </Link>
-                                  </div>
-                                ) : row.draftStage === 'delivery_cancelled' ? (
-                                  <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4 text-amber-800 dark:text-amber-200">
-                                    <p>第 {row.nextStep} 封邮件已取消（未发送）：{row.cancelledReason || '不会再继续投递'}</p>
-                                    <Link to={`/customers/${row.customerId}`} className="inline-block text-primary underline underline-offset-2">
-                                      查看客户发信记录
-                                    </Link>
-                                  </div>
+                                  <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-destructive">
+                                    第 {row.nextStep} 封邮件未发出：{row.deliveryError || row.lastError || '发送被拒或邮箱异常'}
+                                  </p>
+                                ) : isCancelled ? (
+                                  <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-muted-foreground">
+                                    {row.cancelledReason || '已取消，确认未发送'}
+                                  </p>
                                 ) : row.draftStage === 'waiting_delivery' ? (
                                   <p className="mt-1 max-w-[16rem] text-[11px] leading-4 text-sky-700 dark:text-sky-300">
-                                    第 {row.nextStep} 封已进入发信队列，等待邮件中心投递
+                                    已提交发送队列，正在等待发出
                                   </p>
                                 ) : row.draftStage === 'waiting_model' && row.taskStepLabel ? (
                                   <p className="mt-1 max-w-[15rem] text-[11px] leading-4 text-amber-700 dark:text-amber-300">
                                     当前进度：{row.taskStepLabel}
                                   </p>
                                 ) : sendGate ? (
-                                  <div className="mt-1 max-w-[20rem] space-y-0.5 text-[11px] leading-4">
-                                    <p className="font-medium text-destructive">{sendGate.label}</p>
-                                    <p className="text-muted-foreground">{sendGate.detail}</p>
-                                  </div>
-                                ) : row.draftNeedsReverify && (row.draftAuditDetail || row.draftAuditReason) ? (
+                                  <p className="mt-1 max-w-[20rem] text-[11px] leading-4 text-destructive">
+                                    {sendGate.detail}
+                                  </p>
+                                ) : row.draftStage === 'draft_audit_failed' && (row.draftAuditDetail || row.draftAuditReason) ? (
                                   <div className="mt-1 max-w-[20rem] space-y-1 text-[11px] leading-4">
                                     <p className="text-destructive">
                                       {row.draftAuditDetail?.summary || row.draftAuditReason}
-                                      {row.draftUpdatedAt ? `（更新：${formatDateTime(row.draftUpdatedAt)}）` : ''}
                                     </p>
-                                    {row.draftAuditDetail?.previousError ? (
-                                      <p className="text-muted-foreground">
-                                        上次未通过原因（已解决）：{row.draftAuditDetail.previousError}
-                                      </p>
-                                    ) : null}
-                                    {row.draftAuditDetail?.failedChecks?.length ? (
-                                      <ul className="space-y-0.5 rounded bg-muted/40 p-1.5 text-[11px]">
-                                        {row.draftAuditDetail.failedChecks.slice(0, 2).map((chk, idx) => (
-                                          <li key={`${chk.id}-${idx}`} className="text-muted-foreground">
-                                            <span className="font-medium text-destructive">[{CHECK_STATUS_LABELS[chk.status] ?? '待核对'}]</span>{' '}
-                                            {chk.excerpt ? `“${chk.excerpt}”` : ''}{' '}
-                                            <span>{chk.reason}</span>
-                                          </li>
-                                        ))}
-                                        {row.draftAuditDetail.checksFailed > 2 ? (
-                                          <li className="text-muted-foreground">
-                                            还有 {row.draftAuditDetail.checksFailed - 2} 处待核对，点「查看详情」查看全部
-                                          </li>
-                                        ) : null}
-                                      </ul>
-                                    ) : null}
                                   </div>
-                                ) : row.pausedReadyToResume ? (
-                                  <div className="mt-1 max-w-[18rem] space-y-0.5 text-[11px] leading-4">
-                                    <p className="text-emerald-700 dark:text-emerald-300">
-                                      当前草稿已通过核对与发送检查（队列仍暂停）
-                                    </p>
-                                    {lastArchivedError ? (
-                                      <p className="text-muted-foreground">
-                                        已解决旧提示：{lastArchivedError.message}
-                                      </p>
-                                    ) : null}
-                                  </div>
+                                ) : row.status === 'paused' ? (
+                                  <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-muted-foreground">
+                                    {row.pauseOrigin === 'manual' ? '业务员已暂停跟进，不会自动发信' : '跟进已暂停，不会自动发信'}
+                                  </p>
                                 ) : status.detail ? (
                                   <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${status.variant === 'warning' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
                                     {status.detail}
+                                  </p>
+                                ) : row.nextSendLocalLabel && ['waiting', 'ready', 'due'].includes(row.phase) ? (
+                                  <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-muted-foreground">
+                                    {row.nextSendLocalLabel}
                                   </p>
                                 ) : row.lastError ? (
                                   <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${row.phase === 'failed' ? 'text-destructive' : 'text-muted-foreground'}`}>
                                     {row.lastError}
                                   </p>
                                 ) : null}
-                                {row.contextWarnings && row.contextWarnings.length > 0 && !row.draftAuditDetail ? (
-                                  <p className="mt-1 max-w-[18rem] rounded bg-muted/40 px-1.5 py-0.5 text-[11px] leading-4 text-muted-foreground">
-                                    背景提示（不影响发送）：{row.contextWarnings.map((w) => w.message).join('；')}
-                                  </p>
-                                ) : null}
                               </TableCell>
                               <TableCell className="min-w-[14rem] text-xs text-muted-foreground">
                                 <p>{nextActionLabel(row, overview.windowOpen, formatWindow(overview.config))}</p>
-                                {row.effectiveTimezone && row.status !== 'completed' && !complianceBlocked ? (
-                                  <p className="mt-0.5 text-[11px] text-muted-foreground/80">
-                                    时区：{row.effectiveTimezone}（{TZ_SOURCE_LABELS[row.timezoneSource ?? 'fallback']}
-                                    {row.recipientWindowOpen ? ' · 当前在时段内' : ' · 非当地时段'}）
-                                  </p>
-                                ) : null}
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="inline-flex flex-wrap items-center justify-end gap-1">
+                                  {isUncertain ? (
+                                    <Button type="button" variant="outline" size="sm" className="h-8 px-2.5 text-xs" asChild>
+                                      <Link to={`/customers/${row.customerId}#letters`}>查看发件记录</Link>
+                                    </Button>
+                                  ) : null}
+                                  {isNeedsEdit && row.draftId ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 px-2.5 text-xs"
+                                      disabled={busy || editDraftLoadingId === row.id}
+                                      onClick={() => void openDraftForEdit(row)}
+                                    >
+                                      {editDraftLoadingId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                                      查看并修改
+                                    </Button>
+                                  ) : null}
                                   {sendGate?.canStripOffer ? (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 px-2 text-xs"
-                                      disabled={busy}
-                                      onClick={() => void fixSendGate(row.id, 'strip_offer')}
-                                    >
-                                      删除提议后重检
-                                    </Button>
-                                  ) : null}
-                                  {sendGate?.canSplitParagraphs ? (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 px-2 text-xs"
-                                      disabled={busy}
-                                      onClick={() => void fixSendGate(row.id, 'split_paragraphs')}
-                                    >
-                                      拆段并重检
-                                    </Button>
-                                  ) : null}
-                                  {sendGate?.code === 'missing_supplier_evidence' ? (
-                                    isAdmin ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-8 px-2 text-xs"
-                                        onClick={() => document.getElementById('approved-proof-blocks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                                      >
-                                        去补充卖点库
-                                      </Button>
-                                    ) : (
-                                      <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" asChild>
-                                        <Link to="/knowledge">查看知识依据</Link>
-                                      </Button>
-                                    )
-                                  ) : null}
-                                  {sendGate?.canRecheck ? (
                                     <Button
                                       type="button"
                                       variant="ghost"
                                       size="sm"
                                       className="h-8 px-2 text-xs"
                                       disabled={busy}
-                                      onClick={() => void fixSendGate(row.id, 'recheck')}
+                                      onClick={() => void fixSendGate(row.id, 'strip_offer')}
                                     >
-                                      重检
+                                      删除提议后再检查
+                                    </Button>
+                                  ) : null}
+                                  {sendGate?.canSplitParagraphs ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs"
+                                      disabled={busy}
+                                      onClick={() => void fixSendGate(row.id, 'split_paragraphs')}
+                                    >
+                                      拆段后再检查
+                                    </Button>
+                                  ) : null}
+                                  {sendGate?.code === 'missing_supplier_evidence' && isAdmin ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 px-2 text-xs"
+                                      onClick={() => document.getElementById('approved-proof-blocks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                                    >
+                                      去补充卖点库
+                                    </Button>
+                                  ) : null}
+                                  {canRegenerate ? (
+                                    <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void regenerateRow(row)}>
+                                      {isCancelled ? '重新安排' : '重新生成'}
+                                    </Button>
+                                  ) : null}
+                                  {controllable ? (
+                                    <Button type="button" variant={row.status === 'paused' ? 'outline' : 'ghost'} size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void controlRow(row)}>
+                                      {row.status === 'active' ? '暂停跟进' : '继续跟进'}
                                     </Button>
                                   ) : null}
                                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void loadDiagnostics(row.id)}>
                                     查看详情
                                   </Button>
-                                  {canSingleTestRun ? (
-                                    <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void regenerateRow(row)}>
-                                      重新生成
-                                    </Button>
-                                  ) : null}
-                                  {controllable ? (
-                                    <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void controlRow(row)}>
-                                      {row.status === 'active' ? '暂停' : '恢复'}
-                                    </Button>
-                                  ) : null}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1799,7 +1775,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       ) : null}
                       {diagData.latestDraft.contextWarnings && diagData.latestDraft.contextWarnings.length > 0 ? (
                         <div className="rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">
-                          <p className="font-medium text-foreground">背景资料提示（未写入正文，不影响发送）：</p>
+                          <p className="font-medium text-foreground">部分官网资料未读取，不影响这封邮件发送</p>
                           <ul className="mt-0.5 list-disc pl-4">
                             {diagData.latestDraft.contextWarnings.map((w, idx) => (
                               <li key={idx}>{w.message}</li>
@@ -1885,6 +1861,19 @@ export function OutreachAutomationPage(): React.JSX.Element {
           <p className="font-medium">请确认这个业务员的客户名单和邮箱已经核对无误。</p>
         </div>
       </ConfirmDialog>
+
+      <SendLetterDialog
+        open={editDraftOpen}
+        onOpenChange={(nextOpen) => {
+          setEditDraftOpen(nextOpen);
+          if (!nextOpen) void load(true);
+        }}
+        customer={editDraftCustomer}
+        letter={editDraftLetter}
+        highlightExcerpts={editDraftHighlights}
+        onSent={() => void load(true)}
+        onReviewed={() => void load(true)}
+      />
     </div>
   );
 }

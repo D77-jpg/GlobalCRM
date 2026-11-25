@@ -454,7 +454,7 @@ export function AgentPanel(): React.JSX.Element | null {
       if(result.assistantMessage.batchId)setTab('batches');
       if (result.assistantMessage.taskId) {setAutoOpenTaskId(result.assistantMessage.taskId);setTab('tasks');}
       if (result.assistantMessage.uiAction) openOutreachComposer(result.assistantMessage.uiAction);
-      if (result.degraded) toast.warning(result.assistantMessage.content);
+      if (result.degraded) toast.warning('当前为降级回复，请核对关键信息后再使用');
       await Promise.all([loadRecords(), loadSessions()]);
     } catch (reason) {
       setMessages((current) => current.filter((item) => !item.id.startsWith('pending-')));
@@ -537,6 +537,14 @@ export function AgentPanel(): React.JSX.Element | null {
           <X className="h-4 w-4" />
         </Button>
       </div>
+      {status && !status.available ? (
+        <div role="status" className="mx-3 mt-2 shrink-0 rounded-md border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+          AI 助手暂不可用，无法生成新分析或草稿；已有草稿仍可正常查看和发送。
+          {user.role === 'admin'
+            ? <> 请前往<a href="/ai-settings" className="ml-1 font-medium underline underline-offset-2">AI 配置</a>检查连接。</>
+            : ' 请联系管理员检查 AI 配置。'}
+        </div>
+      ) : null}
 
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b px-3 py-1.5">

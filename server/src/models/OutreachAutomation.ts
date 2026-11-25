@@ -50,6 +50,10 @@ export interface IOutreachAutomationEnrollment {
   userId: Types.ObjectId;
   customerId: Types.ObjectId;
   status: OutreachAutomationEnrollmentStatus;
+  /** 区分是业务员手动暂停还是系统因检查/发信拦截而自动暂停；旧记录未填时不做猜测恢复。 */
+  pauseOrigin?: 'manual' | 'system';
+  pausedAt?: Date;
+  pausedReason?: string;
   /** 已发出的开发信封数；以 Customer.outreachStep 为准，这里只做队列展示。 */
   currentStep: number;
   nextRunAt: Date;
@@ -104,6 +108,12 @@ const enrollmentSchema = new Schema<IOutreachAutomationEnrollment>(
       default: 'active',
       index: true,
     },
+    pauseOrigin: {
+      type: String,
+      enum: ['manual', 'system'],
+    },
+    pausedAt: Date,
+    pausedReason: { type: String, maxlength: 300 },
     currentStep: { type: Number, default: 0, min: 0, max: 3 },
     nextRunAt: { type: Date, required: true, index: true },
     queuedStep: { type: Number, min: 1, max: 3 },

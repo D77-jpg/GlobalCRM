@@ -259,15 +259,23 @@ export function CustomerWorkbenchSidebar({
                 <SelectTrigger className="h-7 text-[11px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="open_question">未解决问题</SelectItem>
-                  <SelectItem value="commitment">对外承诺 (A/B/C)</SelectItem>
+                  <SelectItem value="commitment">对外承诺事项</SelectItem>
                   <SelectItem value="internal_task">跨部门核实待办</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={newOwner} onValueChange={(v) => setNewOwner(v as WorkbenchOwnerRole)}>
                 <SelectTrigger className="h-7 text-[11px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(['Sales', 'Costing', 'Engineering', 'QC', 'Logistics', 'Customs', 'Management'] as const).map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                  {([
+                    ['Sales', '销售'],
+                    ['Costing', '核算'],
+                    ['Engineering', '工程'],
+                    ['QC', '质检'],
+                    ['Logistics', '物流'],
+                    ['Customs', '关务'],
+                    ['Management', '管理层'],
+                  ] as const).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>{label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -276,9 +284,9 @@ export function CustomerWorkbenchSidebar({
               <Select value={newGrade} onValueChange={(v) => setNewGrade(v as CommitmentGrade)}>
                 <SelectTrigger className="h-7 text-[11px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="A">A 级：已验证事实</SelectItem>
-                  <SelectItem value="B">B 级：已授权下一步</SelectItem>
-                  <SelectItem value="C">C 级：待核实动作</SelectItem>
+                  <SelectItem value="A">已确认事项（可直接答复）</SelectItem>
+                  <SelectItem value="B">可告知下一步（已授权）</SelectItem>
+                  <SelectItem value="C">需内部核实后再回复</SelectItem>
                 </SelectContent>
               </Select>
             ) : null}
@@ -315,8 +323,14 @@ export function CustomerWorkbenchSidebar({
                         <div className="min-w-0 flex-1">
                           <p className={item.status === 'resolved' ? 'line-through text-muted-foreground' : 'font-medium'}>{item.title}</p>
                           <div className="mt-0.5 flex flex-wrap gap-1">
-                            <Badge variant="outline" className="px-1 py-0 text-[9px]">{item.ownerRole}</Badge>
-                            {item.handling ? <Badge variant="secondary" className="px-1 py-0 text-[9px]">{item.handling}</Badge> : null}
+                            <Badge variant="outline" className="px-1 py-0 text-[9px]">
+                              {({ Sales: '销售', Costing: '核算', Engineering: '工程', QC: '质检', Logistics: '物流', Customs: '关务', Management: '管理层' } as Record<string, string>)[item.ownerRole] ?? item.ownerRole}
+                            </Badge>
+                            {item.handling ? (
+                              <Badge variant="secondary" className="px-1 py-0 text-[9px]">
+                                {({ CHECKING: '待内部核实', ASKED: '待客户确认', ANSWERED: '已回复', DEFERRED: '后续跟进' } as Record<string, string>)[item.handling] ?? item.handling}
+                              </Badge>
+                            ) : null}
                           </div>
                         </div>
                         <button type="button" onClick={() => void removeItem(item.id)} className="text-muted-foreground hover:text-destructive">
@@ -374,7 +388,9 @@ export function CustomerWorkbenchSidebar({
                     <div key={t.id} className="space-y-1 rounded border border-border p-2 text-[11px]">
                       <div className="flex items-center justify-between gap-1">
                         <span className={t.status === 'resolved' ? 'line-through text-muted-foreground' : 'font-medium'}>{t.title}</span>
-                        <Badge variant="outline" className="text-[9px]">{t.ownerRole}</Badge>
+                        <Badge variant="outline" className="text-[9px]">
+                          {({ Sales: '销售', Costing: '核算', Engineering: '工程', QC: '质检', Logistics: '物流', Customs: '关务', Management: '管理层' } as Record<string, string>)[t.ownerRole] ?? t.ownerRole}
+                        </Badge>
                       </div>
                       <div className="flex gap-1">
                         <Input
@@ -417,7 +433,7 @@ export function CustomerWorkbenchSidebar({
               <div className="space-y-1">
                 {updateDraftDialog.guards.map((g, idx) => (
                   <p key={idx} className={g.severity === 'bad' ? 'text-destructive' : g.severity === 'warn' ? 'text-amber-700' : 'text-emerald-700'}>
-                    [{g.severity.toUpperCase()}] {g.message}
+                    [{g.severity === 'bad' ? '需修改' : g.severity === 'warn' ? '提醒' : '通过'}] {g.message}
                   </p>
                 ))}
               </div>
@@ -427,8 +443,9 @@ export function CustomerWorkbenchSidebar({
             <Button variant="outline" onClick={() => setUpdateDraftDialog(null)}>关闭</Button>
             <Button onClick={() => {
               if (!updateDraftDialog) return;
-              void navigator.clipboard.writeText(updateDraftDialog.body);
-              toast.success('已复制买家更新草稿');
+              void navigator.clipboard.writeText(updateDraftDialog.body)
+                .then(() => toast.success('已复制买家更新草稿'))
+                .catch(() => toast.error('复制失败，请手动选中文本复制'));
             }}>
               <Copy className="h-3.5 w-3.5" />复制英文草稿
             </Button>

@@ -43,10 +43,12 @@ export function KnowledgePage(){
  const descriptions: Record<KnowledgeView, string> = {
   sales: '销售查询已发布的公司、产品与交易政策，作为写开发信的事实依据。',
   qa: '按目录树查阅并通过 AI 问答联动检索已审核资料、对外口径与产品参数卡。',
-  policies: '统一维护项目对外口径（含待拍板与可对外开关）、品牌作废红线与毫秒级护栏自检。',
+  policies: canManage
+   ? '统一维护项目对外口径、品牌禁忌与发信规则检查。'
+   : '查看本项目已确认的对外口径与品牌禁忌，避免写信时超出授权。',
   manage: '把文件收成资料，发布后助手才能使用',
   playbook: '行业卡只影响写作策略，不进入事实证据',
-  training: '用真实审核结果校准检索，不自动改模型权重',
+  training: '用真实审核结果校准资料检索，不改动 AI 底层模型',
  };
  return <section className="workspace-page">
   <PageHeader title="知识库" description={descriptions[active]} />

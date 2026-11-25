@@ -89,6 +89,12 @@ import {
 import { useAuthStore } from '@/store/auth.store';
 import type { CurrentMailSender, Customer, CustomerAttachment, DevelopmentLetter, LetterReview, SendLetterResult } from '@/types';
 
+export interface FlaggedExcerptItem {
+  text: string;
+  reason?: string;
+  status?: string;
+}
+
 export interface SendLetterDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -97,6 +103,8 @@ export interface SendLetterDialogProps {
   /** 重发场景：带出原信的主题与模板 */
   letter?: DevelopmentLetter | null;
   initialDraft?: { analysisId: string; subject: string; content: string; outreachStep?: number } | null;
+  /** 需要业务员重点修改的句子列表（打开编辑框时自动定位到第一句，也可逐句跳转） */
+  highlightExcerpts?: Array<string | FlaggedExcerptItem>;
   /** 发送 / 存草稿成功后回调，父级据此刷新历史列表与客户信息 */
   reply?: { id: string; subject: string; from: string };
   onSent?: (result: SendLetterResult) => void;
@@ -235,21 +243,32 @@ function reviewStatusView(review: LetterReview | null, dirty: boolean): ReviewSt
   return { label: '待审核', variant: 'pending', description: '自己过一遍：收件人、正文里的交期和承诺没问题就通过并发送；觉得不能用就标记不通过。' };
 }
 
-/** 发送结果提示：草稿、定时、失败、模拟通道分别给出可操作文案 */
+/** 发送结果提示：草稿、定时、投递结果不确定、失败、模拟通道分别给出可操作文案 */
 function notifyLetterResult(result: SendLetterResult, asDraft: boolean): void {
   if (asDraft) {
-    toast.success('草稿已保存', { description: result.message || '可在开发信记录中继续编辑发送' });
-  } else if (['scheduled', 'queued', 'sending', 'retrying'].includes(result.letter.status)) {
-    toast.success('发送任务已保存', { description: result.message });
+    toast.success('草稿已保存（未发送）', { description: result.message || '可在邮件记录中继续编辑或发送' });
+  } else if (result.letter.needsReview) {
+    toast.warning('请确认这封邮件是否已发出', {
+      description: '发送期间发生中断，投递结果不确定；确认前系统不会重发，请先查看发件记录。',
+    });
+  } else if (result.letter.status === 'scheduled') {
+    toast.success('定时发送已安排', {
+      description: result.letter.scheduledAt
+        ? `将于 ${formatDateTime(result.letter.scheduledAt)} 自动发出`
+        : result.message,
+    });
+  } else if (['queued', 'sending', 'retrying'].includes(result.letter.status)) {
+    toast.success('已加入发送队列，正在发出', { description: '可在邮件中心查看投递结果。' });
   } else if (!result.delivered) {
-    // 发送失败但已落库：给出可操作提示
-    toast.error('发送失败，记录已保存', { description: result.message });
+    toast.error('邮件未发出，记录已保存', {
+      description: result.message || '请检查收件人邮箱或发件邮箱配置后再决定是否重发。',
+    });
   } else if (result.channel === 'mock') {
-    toast.info(result.message || '开发信已记录（模拟发送）', {
+    toast.info(result.message || '开发信已记录（模拟发送，未真实发出）', {
       description: `发送方式：${MAIL_CHANNEL_LABEL[result.channel] ?? result.channel}`,
     });
   } else {
-    toast.success(result.message || '开发信已发送', { description: `收件人：${result.letter.recipientEmail}` });
+    toast.success(result.message || '邮件已发送', { description: `收件人：${result.letter.recipientEmail}` });
   }
 }
 
@@ -259,6 +278,7 @@ export function SendLetterDialog({
   customer,
   letter = null,
   initialDraft = null,
+  highlightExcerpts,
   reply,
   onSent,
   onReviewed,
@@ -489,6 +509,41 @@ export function SendLetterDialog({
     () => analyzeLiveDraftStyle(englishBody, activeLetter?.outreachStep ?? initialDraft?.outreachStep),
     [englishBody, activeLetter?.outreachStep, initialDraft?.outreachStep],
   );
+  const resolvedFlaggedExcerpts = React.useMemo<FlaggedExcerptItem[]>(() => {
+    const manual = (highlightExcerpts ?? [])
+      .map((item) => (typeof item === 'string' ? { text: item } : item))
+      .filter((item) => Boolean(item.text?.trim()));
+    if (manual.length > 0) return manual;
+    const checks = activeLetter?.knowledgeReview?.factAudit?.checks ?? [];
+    return checks
+      .filter((c) => c.status !== 'supported' && c.status !== 'non_claim' && Boolean(c.text?.trim()))
+      .slice(0, 5)
+      .map((c) => ({
+        text: c.text.trim(),
+        reason: c.reason || (c.status === 'contradicted' ? '与公司资料不一致' : '缺少对应依据'),
+        status: c.status,
+      }));
+  }, [highlightExcerpts, activeLetter?.knowledgeReview?.factAudit?.checks]);
+
+  const locateExcerptInEditor = React.useCallback((excerpt: string) => {
+    setActiveTab('edit');
+    window.setTimeout(() => {
+      const found = editorRef.current?.locateText(excerpt);
+      if (!found) {
+        toast.info('未在当前正文中找到该句，可能已经被修改或删除');
+      }
+    }, 80);
+  }, []);
+
+  React.useEffect(() => {
+    if (!open || !highlightExcerpts?.length || resolvedFlaggedExcerpts.length === 0) return;
+    const first = resolvedFlaggedExcerpts[0]?.text;
+    if (!first) return;
+    const timer = window.setTimeout(() => {
+      editorRef.current?.locateText(first);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [open, highlightExcerpts, resolvedFlaggedExcerpts]);
   const compareBase = previousSnapshot ?? (activeLetter?.aiSnapshot ? {
     subject: activeLetter.aiSnapshot.subject,
     contentText: activeLetter.aiSnapshot.contentText,
@@ -687,7 +742,7 @@ export function SendLetterDialog({
           if (advanceNext && queueProgress?.hasNext && onAdvanceNext) onAdvanceNext();
           else onOpenChange(false);
         } catch (error) {
-          setServerError(toErrorMessage(error, '审核通过后发送失败'));
+          setServerError(`草稿修改与确认已保存，但发送未完成：${toErrorMessage(error, '请稍后重试发送')}`);
         } finally {
           reviewLock.current = false;
           setReviewBusy(false);
@@ -722,9 +777,11 @@ export function SendLetterDialog({
       ? '保存定时任务'
       : reply
         ? '发送回复'
-        : letter && letter.status !== 'draft'
-          ? '重新发送'
-          : '发送开发信';
+        : letter && letter.status === 'cancelled'
+          ? '发送开发信'
+          : letter && letter.status !== 'draft'
+            ? '重新发送'
+            : '发送开发信';
 
   const primaryDisabled = Boolean(sendBlocker) || sending || reviewBusy || senderLoading || !customer || (!canSend && !needsApprove);
   const primaryTitle = sendBlocker
@@ -815,7 +872,15 @@ export function SendLetterDialog({
           <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
             <DialogTitle className="flex items-center gap-2">
               {isDraftReview ? <ShieldCheck className="h-4 w-4 text-primary" aria-hidden /> : <Send className="h-4 w-4 text-primary" aria-hidden />}
-              {reply ? '回复客户邮件' : isDraftReview ? '审核开发信草稿' : activeLetter ? '重新发送开发信' : '发送开发信'}
+              {reply
+                ? '回复客户邮件'
+                : isDraftReview
+                  ? '查看并修改草稿'
+                  : activeLetter?.status === 'cancelled'
+                    ? '重新编辑并发送开发信'
+                    : activeLetter
+                      ? '重新发送开发信'
+                      : '发送开发信'}
               {activeLetter?.outreachStep ? <Badge variant="outline">第 {activeLetter.outreachStep} 封</Badge> : null}
             </DialogTitle>
             {queueProgress && queueProgress.total > 1 && onNavigateQueue ? (
@@ -832,10 +897,12 @@ export function SendLetterDialog({
           </div>
           <DialogDescription>
             {isDraftReview
-              ? '左侧核对要发给客户的内容，右侧可换角度重写、看线索依据与质量反馈；没问题就通过并发送，觉得不能用直接标记不通过。'
-              : activeLetter
-                ? '已带出原信内容，可修改后再次发送；会新增一条发送记录。'
-                : '正文中的 {{占位符}} 会在发送时自动替换为该客户的真实信息。'}
+              ? '左侧直接修改正文内容，右侧可查看参考依据与提醒；改完可先存草稿，确认无误后再发出。'
+              : activeLetter?.status === 'cancelled'
+                ? '原邮件已取消、尚未发出，可直接修改后重新发送。'
+                : activeLetter
+                  ? '已带出原信内容，可修改后再次发送；会新增一条发送记录。'
+                  : '正文中的 {{占位符}} 会在发送时自动替换为该客户的真实信息。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -974,6 +1041,32 @@ export function SendLetterDialog({
                     ) : null}
                   </TabsList>
                   <TabsContent value="edit" className="space-y-4 pt-1">
+                    {resolvedFlaggedExcerpts.length > 0 ? (
+                      <div className="space-y-1.5 rounded-md border border-amber-300/80 bg-amber-50/70 p-2.5 text-xs dark:border-amber-400/30 dark:bg-amber-400/10">
+                        <p className="font-medium text-amber-900 dark:text-amber-200">
+                          需要重点修改的句子（{resolvedFlaggedExcerpts.length} 处）
+                        </p>
+                        <ul className="space-y-1.5">
+                          {resolvedFlaggedExcerpts.map((item, idx) => (
+                            <li key={`${item.text.slice(0, 24)}-${idx}`} className="flex flex-wrap items-start justify-between gap-2 rounded bg-background/85 px-2 py-1.5">
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                {item.reason ? <p className="font-medium text-destructive">{item.reason}</p> : null}
+                                <p className="break-words text-[11px] text-muted-foreground">“{item.text}”</p>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 shrink-0 px-2 text-[11px]"
+                                onClick={() => locateExcerptInEditor(item.text)}
+                              >
+                                定位到正文
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     <div>
                       <Label htmlFor="letter-content">正文</Label>
 
@@ -1004,20 +1097,22 @@ export function SendLetterDialog({
                         />
                       </div>
                       <FieldMessage error={errors.content?.message} />
-                      {/* 实时字数与文风反馈条 */}
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border/70 bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-                        <span className="tabular-nums">正文约 <strong className="text-foreground">{liveStyle.words}</strong> 词（建议 {liveStyle.wordTarget}）</span>
-                        <span className="tabular-nums">最长段 {liveStyle.maxParagraphWords} 词</span>
-                        <span className="tabular-nums">问句 {liveStyle.questions} 个</span>
-                        {liveStyle.warnings.length === 0
-                          ? <span className="text-emerald-700 dark:text-emerald-400">文风简洁自然</span>
-                          : liveStyle.warnings.map((warn) => (
-                              <span key={warn} className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
-                                <TriangleAlert className="h-3 w-3 shrink-0" aria-hidden />
-                                {warn}
-                              </span>
-                            ))}
-                      </div>
+                      {/* 实时字数与文风反馈条（回复客户场景不套用陌生开发信字数限制） */}
+                      {!reply ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border/70 bg-muted/20 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                          <span className="tabular-nums">正文约 <strong className="text-foreground">{liveStyle.words}</strong> 词（建议 {liveStyle.wordTarget}）</span>
+                          <span className="tabular-nums">最长段 {liveStyle.maxParagraphWords} 词</span>
+                          <span className="tabular-nums">问句 {liveStyle.questions} 个</span>
+                          {liveStyle.warnings.length === 0
+                            ? <span className="text-emerald-700 dark:text-emerald-400">文风简洁自然</span>
+                            : liveStyle.warnings.map((warn) => (
+                                <span key={warn} className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                                  <TriangleAlert className="h-3 w-3 shrink-0" aria-hidden />
+                                  {warn}
+                                </span>
+                              ))}
+                        </div>
+                      ) : null}
                     </div>
 
                     {missingLabels.length > 0 ? (
@@ -1167,7 +1262,7 @@ export function SendLetterDialog({
                     {activeLetter.knowledgeReview.context.playbook.dualAngleComparison.rationale}
                   </p>
                 ) : null}
-                {activeLetter.knowledgeReview.context.experimentArm ? (
+                {authUser?.role === 'admin' && activeLetter.knowledgeReview.context.experimentArm ? (
                   <p className="text-[11px] text-muted-foreground">
                     试发实验分组：<Badge variant="outline" className="text-[10px]">{activeLetter.knowledgeReview.context.experimentArm === 'treatment' ? '新版实验组' : '对照组'}</Badge>（{activeLetter.knowledgeReview.context.writingVersion}）
                   </p>
@@ -1344,7 +1439,7 @@ export function SendLetterDialog({
             </section>
 
             <section className="rounded-lg border border-border bg-card p-3">
-              <h3 className="text-[0.8125rem] font-semibold">发送前检查</h3>
+              <h3 className="text-[0.8125rem] font-semibold">基础发送检查</h3>
               <ul className="mt-2 space-y-2">
                 {preflight.map((item) => (
                   <li key={item.label} className="flex items-start gap-2 text-xs leading-5">

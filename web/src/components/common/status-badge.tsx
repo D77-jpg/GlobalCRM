@@ -34,17 +34,27 @@ export function CustomerStatusBadge({
 
 export function LetterStatusBadge({
   status,
+  needsReview = false,
   className,
   showDot = true,
 }: {
   status: LetterStatus;
+  needsReview?: boolean;
   className?: string;
   showDot?: boolean;
 }): React.JSX.Element {
+  const isUncertain = status === 'failed' && Boolean(needsReview);
+  const badgeClass = isUncertain
+    ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200'
+    : (LETTER_STATUS_BADGE_CLASS[status] ?? LETTER_STATUS_BADGE_CLASS.draft);
   return (
-    <Badge variant="outline" className={cn('gap-1.5', LETTER_STATUS_BADGE_CLASS[status] ?? LETTER_STATUS_BADGE_CLASS.draft, className)}>
+    <Badge
+      variant="outline"
+      title={isUncertain ? '请确认这封邮件是否已发出 · 确认前不会重发' : undefined}
+      className={cn('gap-1.5', badgeClass, className)}
+    >
       {showDot ? <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden /> : null}
-      {LETTER_STATUS_LABEL[status] ?? status}
+      {isUncertain ? '投递结果未知' : (LETTER_STATUS_LABEL[status] ?? status)}
     </Badge>
   );
 }

@@ -143,7 +143,15 @@ function UserRow({
         <span className="block truncate text-xs text-muted-foreground">
           @{user.username}
           {user.mailbox
-            ? ` · 发件邮箱 ${user.mailbox.email}${user.mailbox.status === 'disabled' ? '（已停用）' : user.mailbox.verificationStatus === 'verified' ? '（已验证）' : '（未验证）'}`
+            ? ` · 发件邮箱 ${user.mailbox.email}${
+              user.mailbox.status === 'disabled'
+                ? '（已停用）'
+                : user.mailbox.verificationStatus === 'verified'
+                  ? '（已验证）'
+                  : user.mailbox.verificationStatus === 'failed'
+                    ? '（验证失败，需重新配置）'
+                    : '（未验证）'
+            }`
             : ' · 未配置发件邮箱'}
           {user.email ? ` · 账号邮箱 ${user.email}` : ''}
         </span>
