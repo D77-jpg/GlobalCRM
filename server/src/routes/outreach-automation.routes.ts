@@ -8,6 +8,8 @@ import { requireProjectId } from '../utils/access';
 import {
   auditLegacyOutreachCampaigns,
   autoFixOutreachSendGates,
+  checkAndResumeOutreach,
+  MAX_CHECK_AND_RESUME_ROWS,
   controlOutreachEnrollment,
   drainQueuedOutreachTasks,
   fixEnrollmentSendGate,
@@ -132,6 +134,12 @@ router.post('/reverify-unverified', validate({
 
 router.post('/auto-fix-send-gates', asyncHandler(async (req, res) => {
   sendSuccess(res, await autoFixOutreachSendGates(req.user!, targetUserId(req)));
+}));
+
+router.post('/check-and-resume', validate({
+  body: z.object({ enrollmentIds: z.array(objectId).max(MAX_CHECK_AND_RESUME_ROWS).optional() }).strict().optional(),
+}), asyncHandler(async (req, res) => {
+  sendSuccess(res, await checkAndResumeOutreach(req.user!, { enrollmentIds: req.body?.enrollmentIds }, targetUserId(req)));
 }));
 
 router.post('/reconcile', asyncHandler(async (req, res) => {

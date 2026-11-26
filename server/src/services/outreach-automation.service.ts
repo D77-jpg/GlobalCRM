@@ -56,7 +56,10 @@ const MAX_AUTO_STEPS = 3;
 const DAY_MS = 86_400_000;
 const TICK_MS = 15_000;
 const MAX_QUEUE_ROWS = 200;
+export const MAX_CHECK_AND_RESUME_ROWS = 100;
 export const MAX_INFLIGHT_OUTREACH_TASKS = 3;
+const BATCH_REBUILD_COOLDOWN_MS = 30 * 60_000;
+const activeRecoveryBatches = new Set<string>();
 const TASK_BACKOFF_MS = [5 * 60_000, 15 * 60_000, 45 * 60_000] as const;
 
 const TASK_STEP_LABELS: Record<string, string> = {
@@ -633,6 +636,8 @@ export interface OutreachAutomationQueueRow {
   status: string;
   /** 区分人工暂停、系统拦停或无法确认来源的旧暂停记录。 */
   pauseOrigin?: 'manual' | 'system' | 'unknown';
+  pauseSummary?: string;
+  canCheckAndResume?: boolean;
   /** 实际已发送的开发信封数（以客户开发信记录为准）。 */
   currentStep: number;
   actualStep: number;
@@ -732,6 +737,7 @@ export interface OutreachAutomationOverview {
     sendGateBlockedDrafts: number;
     contextWarningDrafts: number;
     pausedReadyCount: number;
+    checkAndResumeCount: number;
     deliveryUncertainCount: number;
     deliveryFailedCount: number;
     deliveryCancelledCount: number;
@@ -1059,10 +1065,13 @@ export async function reconcileOutreachEnrollmentsForCampaign(
   config: InstanceType<typeof OutreachAutomationConfig>,
   targetActor: AuthUser,
   now = new Date(),
+  batch?: { enrollmentIds?: string[] },
 ): Promise<{
   scanned: number;
   resumedPaused: number;
   requeuedCancelled: number;
+  requeuedWebsiteDrafts?: number;
+  reasons?: Record<string, number>;
   keptPausedManualOrUnknown: number;
   keptCancelled: number;
   keptUncertain: number;
@@ -1082,8 +1091,9 @@ export async function reconcileOutreachEnrollmentsForCampaign(
     projectId: config.projectId,
     userId: config.userId,
     campaignId: config._id,
-    status: { $in: ['paused', 'failed', 'active'] },
-  }).limit(MAX_QUEUE_ROWS);
+    status: batch ? 'paused' : { $in: ['paused', 'failed', 'active'] },
+    ...(batch?.enrollmentIds ? { _id: { $in: batch.enrollmentIds.map((id) => new Types.ObjectId(id)) } } : {}),
+  }).sort({ _id: 1 }).limit(batch ? MAX_CHECK_AND_RESUME_ROWS : MAX_QUEUE_ROWS);
 
   if (candidateRows.length === 0) {
     return {
@@ -1107,14 +1117,29 @@ export async function reconcileOutreachEnrollmentsForCampaign(
   let keptPausedManualOrUnknown = 0;
   let keptCancelled = 0;
   let keptUncertain = 0;
+  let requeuedWebsiteDrafts = 0;
+  const reasons: Record<string, number> = {};
+  function skip(reason: string): void {
+    if (batch) reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  const currentConfigStillOpen = () => OutreachAutomationConfig.exists({
+    _id: config._id, projectId: config.projectId, userId: config.userId,
+    enabled: true, version: config.version,
+  });
 
   for (const row of candidateRows) {
+    const rowFence = {
+      _id: row._id, projectId: config.projectId, campaignId: config._id, userId: config.userId,
+      status: 'paused', updatedAt: row.updatedAt,
+      pauseOrigin: row.pauseOrigin ?? { $exists: false },
+    };
     const customer = await Customer.findOne({
       _id: row.customerId,
       projectId: config.projectId,
       ownerId: config.userId,
-    }).select('_id name status email outreachStep letterCount outreachAbandonedAt outreachRepliedAt outreachLastAt nextFollowUpAt timezone country address phone').lean();
+    }).select('_id name status email createdAt outreachStep letterCount outreachAbandonedAt outreachRepliedAt outreachLastAt nextFollowUpAt timezone country address phone').lean();
     if (!customer || !customer.email || !AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number]) || customer.outreachAbandonedAt || customer.outreachRepliedAt) {
+      skip('客户已回复或不再符合跟进条件');
       continue;
     }
 
@@ -1126,9 +1151,10 @@ export async function reconcileOutreachEnrollmentsForCampaign(
         Number(row.currentStep ?? 0),
       ),
     );
-    if (actualStep >= MAX_AUTO_STEPS) continue;
+    if (actualStep >= MAX_AUTO_STEPS) { skip('跟进已完成'); continue; }
     const nextStep = (actualStep + 1) as OutreachStep;
 
+    const stepLetterScope = { projectId: config.projectId, customerId: customer._id, outreachStep: nextStep };
     const stepLetters = await DevelopmentLetter.find({
       projectId: config.projectId,
       customerId: customer._id,
@@ -1137,56 +1163,147 @@ export async function reconcileOutreachEnrollmentsForCampaign(
     }).sort({ createdAt: -1 }).limit(10).lean();
 
     const nonSuperseded = stepLetters.filter((l) => !isSupersededArchiveCancellation(l));
-    // Duplicate-delivery guard: if ANY letter for this step is already sent/in-flight/uncertain, NEVER auto-resume or re-queue.
-    if (nonSuperseded.some((l) => isUncertainDeliveryLetter(l))) {
+    // Check every potentially delivered record for this step, not just the recent draft window.
+    const unsafeLetters = await DevelopmentLetter.find({ ...stepLetterScope,
+      status: { $in: ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying', 'failed', ...(batch ? ['cancelled'] : [])] },
+    }).select('status needsReview error cancelOrigin').lean();
+    if (unsafeLetters.some((l) => isUncertainDeliveryLetter(l))) {
       keptUncertain += 1;
+      skip('需先确认邮件是否已经发出');
       continue;
     }
-    if (nonSuperseded.some((l) => ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying'].includes(String(l.status)))) {
+    if (unsafeLetters.some((l) => ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying'].includes(String(l.status)))) {
+      skip('本封已发送或正在排队');
+      continue;
+    }
+    if (batch && unsafeLetters.some((l) => !isSupersededArchiveCancellation(l))) {
+      skip('存在取消或失败的投递记录，请单独查看');
       continue;
     }
 
     const latestLetter = nonSuperseded.find((l) => l.status === 'draft') ?? nonSuperseded[0];
-    if (!latestLetter) continue;
+    if (!latestLetter) { skip('没有可检查的邮件草稿'); continue; }
 
     // Case A: System-paused enrollment whose current draft now passes ALL checks -> auto-return to normal scheduling
     if (row.status === 'paused' && latestLetter.status === 'draft') {
       const origin = resolveEnrollmentPauseOrigin(row, nextStep);
       if (origin !== 'system') {
         keptPausedManualOrUnknown += 1;
+        skip(origin === 'manual' ? '业务员已暂停跟进' : '暂停原因不明，请单独查看');
         continue;
       }
       if (latestLetter.review?.decision === 'rejected') {
         keptPausedManualOrUnknown += 1;
+        skip('邮件已被人工标记为不通过');
         continue;
       }
       const audit = inspectOutreachDraftAudit(latestLetter);
-      if (audit.needsReverify) continue;
+      if (audit.needsReverify) { skip('邮件内容还需检查'); continue; }
       const sendGateIssue = automatedReviewIssue(latestLetter.knowledgeReview, nextStep, {
         bodyText: latestLetter.contentText,
         subject: latestLetter.subject,
         approvedOffers: projectApprovedOffers,
         signature: projectSignature,
       });
-      if (sendGateIssue) continue;
-      if (!latestLetter.knowledgeReview?.bodyHash || latestLetter.knowledgeReview.bodyHash !== draftHash(latestLetter.contentText)) {
+      if (sendGateIssue) { skip('邮件未通过发送检查，请查看并修改'); continue; }
+      if (!latestLetter.knowledgeReview?.bodyHash || latestLetter.knowledgeReview.bodyHash !== draftHash(latestLetter.contentText)
+        || (latestLetter.aiSnapshot && latestLetter.aiSnapshot.subject !== latestLetter.subject)) {
+        skip('邮件有改动，请先重新检查');
         continue;
       }
       if (!latestLetter.subject?.trim() || !latestLetter.contentText?.trim() || /\{\{[^}]+\}\}/.test(latestLetter.contentText)) {
+        skip('邮件内容不完整');
         continue;
       }
+      // Re-verify contactability before resuming or replacing any draft.
+      if (await hasInboundReplySince(config.projectId, customer._id, customer.outreachLastAt ?? customer.createdAt)) {
+        skip('客户已回复，不再自动跟进');
+        continue;
+      }
+      if (await hasProtectedCustomerMail(String(customer._id), String(config.projectId))
+        || await isEmailSuppressed(String(config.projectId), customer.email)) {
+        skip('客户不再适合自动发信');
+        continue;
+      }
+      if (await hasActiveTask(config.projectId, customer._id, nextStep)) { skip('已在准备新邮件'); continue; }
       try {
         const freshness = await knowledgeFreshness(latestLetter.knowledgeReview, targetActor);
-        if (freshness.failed || freshness.changed.length > 0) continue;
+        if (freshness.failed) { skip('暂时无法核对邮件依据'); continue; }
+        if (freshness.changed.length > 0) {
+          const onlyWebsiteChanged = freshness.changed.every((source) => source.sourceId.startsWith('website:'));
+          if (!batch || !onlyWebsiteChanged || latestLetter.review?.decision === 'approved') {
+            skip('邮件引用的资料已变化，请重新检查');
+            continue;
+          }
+          const inFlight = await AgentTask.countDocuments({
+            projectId: config.projectId, userId: config.userId, outreachStep: { $in: [1, 2, 3] },
+            status: { $in: ['queued', 'running'] },
+          });
+          if (requeuedWebsiteDrafts >= MAX_INFLIGHT_OUTREACH_TASKS || inFlight >= MAX_INFLIGHT_OUTREACH_TASKS) {
+            skip('正在准备其他邮件，稍后可再次检查');
+            continue;
+          }
+          if (row.queuedAt && row.queuedAt.getTime() > now.getTime() - BATCH_REBUILD_COOLDOWN_MS) {
+            skip('近期已安排重新准备，请先查看结果');
+            continue;
+          }
+          if (!await currentConfigStillOpen()) { skip('发送设置已变化，请刷新后再检查'); continue; }
+          // Claim this exact paused snapshot. An overlapping request cannot claim it again;
+          // the job prepares a draft only and does not reactivate this row or send mail.
+          const claim = await OutreachAutomationEnrollment.updateOne(rowFence, {
+            $set: { pauseOrigin: 'system', queuedAt: now, queuedStep: nextStep },
+          });
+          if (!claim.modifiedCount) { skip('跟进状态已变化，请刷新后再检查'); continue; }
+          const hasOtherDelivery = await DevelopmentLetter.find({ ...stepLetterScope,
+            status: { $in: ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying', 'failed', 'cancelled'] },
+          }).select('status needsReview error cancelOrigin').lean();
+          if (hasOtherDelivery.some((letter) => !isSupersededArchiveCancellation(letter))
+            || await hasActiveTask(config.projectId, customer._id, nextStep) || !await currentConfigStillOpen()
+            || !await OutreachAutomationEnrollment.exists({ ...rowFence, pauseOrigin: 'system', queuedAt: now, updatedAt: { $ne: row.updatedAt } })) {
+            skip('邮件或跟进状态已变化，请刷新后再检查');
+            continue;
+          }
+          // The draft planner requires an empty slot. Retain the original as a visible archive,
+          // and restore it if no replacement draft or task was accepted.
+          const archived = await DevelopmentLetter.updateOne({
+            ...stepLetterScope, _id: latestLetter._id, status: 'draft', updatedAt: latestLetter.updatedAt,
+            'review.decision': { $nin: ['approved', 'rejected'] },
+          }, {
+            $set: { status: 'cancelled', cancelOrigin: 'superseded', error: SUPERSEDED_ARCHIVE_ERROR },
+            $push: { history: { at: now, status: 'cancelled' } },
+          });
+          if (!archived.modifiedCount) { skip('原邮件已变化，请刷新后再检查'); continue; }
+          let taskId: string | undefined;
+          try {
+            taskId = (await queueOutreachStep(targetActor, String(customer._id), nextStep)).taskId;
+          } catch {
+            // Preserve the original if the planner could not accept a replacement.
+          }
+          if (!taskId && !await hasActiveTask(config.projectId, customer._id, nextStep)) {
+            const occupied = await DevelopmentLetter.exists({ ...stepLetterScope,
+              status: { $in: ['draft', 'sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying'] },
+            });
+            if (!occupied) await DevelopmentLetter.updateOne({ ...stepLetterScope, _id: latestLetter._id,
+              status: 'cancelled', cancelOrigin: 'superseded', error: SUPERSEDED_ARCHIVE_ERROR,
+            }, {
+              $set: { status: 'draft', error: latestLetter.error ?? '' },
+              $unset: { cancelOrigin: 1 },
+              $push: { history: { at: new Date(), status: 'draft', error: '未能安排新邮件，保留原稿' } },
+            });
+            skip('暂未能安排新邮件，请稍后再检查');
+            continue;
+          }
+          if (taskId) await OutreachAutomationEnrollment.updateOne({ _id: row._id, status: 'paused',
+            pauseOrigin: 'system', queuedAt: now,
+          }, { $addToSet: { taskIds: new Types.ObjectId(taskId) } });
+          requeuedWebsiteDrafts += 1;
+          continue;
+        }
+        await assertAutomaticDraftCanSend(DevelopmentLetter.hydrate(latestLetter), targetActor);
       } catch {
+        skip('邮件仍未通过发送检查');
         continue;
       }
-      // Re-verify contactability (inbound reply, protected mail, suppression) before auto-resuming
-      const replied = await hasInboundReplySince(config.projectId, customer._id, customer.outreachLastAt ?? customer.createdAt);
-      if (replied) continue;
-      if (await hasProtectedCustomerMail(String(customer._id), String(config.projectId))) continue;
-      if (await isEmailSuppressed(String(config.projectId), customer.email)) continue;
-      if (await hasActiveTask(config.projectId, customer._id, nextStep)) continue;
 
       const buyerSchedule = config.useBuyerTimezone || customer.timezone
         ? resolveBuyerTimezone({
@@ -1229,14 +1346,18 @@ export async function reconcileOutreachEnrollmentsForCampaign(
           },
         };
       }
-      await OutreachAutomationEnrollment.updateOne(
-        { _id: row._id, status: 'paused' },
-        updateDoc,
-      );
-      resumedPaused += 1;
+      if (!await currentConfigStillOpen()) { skip('发送设置已变化，请刷新后再检查'); continue; }
+      const currentDraft = await DevelopmentLetter.exists({
+        ...stepLetterScope, _id: latestLetter._id, status: 'draft', updatedAt: latestLetter.updatedAt,
+      });
+      if (!currentDraft) { skip('邮件已变化，请刷新后再检查'); continue; }
+      const resumed = await OutreachAutomationEnrollment.updateOne(rowFence, updateDoc);
+      if (resumed.modifiedCount) resumedPaused += 1;
+      else skip('跟进状态已变化，请刷新后再检查');
       continue;
     }
 
+    if (batch) { skip('没有可检查的邮件草稿'); continue; }
     // Case B: Cancelled letter (confirmed NOT sent) due purely to system transient interruption -> safely re-prepare & schedule
     if (latestLetter.status === 'cancelled') {
       const cancelOrigin = latestLetter.cancelOrigin;
@@ -1295,10 +1416,45 @@ export async function reconcileOutreachEnrollmentsForCampaign(
     scanned: candidateRows.length,
     resumedPaused,
     requeuedCancelled,
+    ...(batch ? { requeuedWebsiteDrafts, reasons } : {}),
     keptPausedManualOrUnknown,
     keptCancelled,
     keptUncertain,
   };
+}
+
+/** Explicit batch action. Unlike general reconciliation it only examines paused rows. */
+export async function checkAndResumeOutreach(
+  actor: AuthUser,
+  options: { enrollmentIds?: string[] } = {},
+  targetUserId?: string,
+) {
+  const target = await resolveTargetUser(actor, targetUserId);
+  const config = await getConfig(actor, target.id);
+  if (!config.enabled) throw ApiError.conflict('自动开发已暂停，请先开启自动开发');
+  const key = String(config._id);
+  if (activeRecoveryBatches.has(key)) throw ApiError.conflict('正在检查这批客户，请稍后查看');
+  if (options.enrollmentIds && (options.enrollmentIds.length > MAX_CHECK_AND_RESUME_ROWS
+    || options.enrollmentIds.some((id) => !/^[a-f\d]{24}$/i.test(id)))) {
+    throw ApiError.badRequest('请选择有效的客户记录');
+  }
+  activeRecoveryBatches.add(key);
+  try {
+    if (config.rolloutMode !== 'shadow') await assertMailboxReady(actor, target.id);
+    const targetActor = await getActorForConfig(config);
+    const enrollmentIds = options.enrollmentIds ? [...new Set(options.enrollmentIds.map((id) => id.toLowerCase()))] : undefined;
+    const result = await reconcileOutreachEnrollmentsForCampaign(config, targetActor, new Date(), { enrollmentIds });
+    const overview = await getOutreachAutomationOverview(actor, target.id, { skipAutoReconcile: true });
+    const resumed = result.resumedPaused;
+    const requeued = result.requeuedWebsiteDrafts ?? 0;
+    const skipped = (enrollmentIds?.length ?? result.scanned) - resumed - requeued;
+    const reasons = result.reasons ?? {};
+    const noLongerPaused = (enrollmentIds?.length ?? result.scanned) - result.scanned;
+    if (noLongerPaused > 0) reasons['记录不可用或已不在暂停列表'] = noLongerPaused;
+    return { resumed, requeued, skipped, reasons, overview };
+  } finally {
+    activeRecoveryBatches.delete(key);
+  }
 }
 
 export async function reconcileOutreachCampaign(
@@ -1472,6 +1628,7 @@ export async function getOutreachAutomationOverview(
   let sendGateBlockedDrafts = 0;
   let contextWarningDrafts = 0;
   let pausedReadyCount = 0;
+  let checkAndResumeCount = 0;
   let deliveryUncertainCount = 0;
   let deliveryFailedCount = 0;
   let deliveryCancelledCount = 0;
@@ -1728,6 +1885,16 @@ export async function getOutreachAutomationOverview(
       && !isRuleStopped,
     );
     if (pausedReadyToResume) pausedReadyCount += 1;
+    const canCheckAndResume = Boolean(config.enabled && pauseOrigin === 'system' && actualStep < MAX_AUTO_STEPS
+      && nextLetterStatus === 'draft' && !taskInFlight && !isRuleStopped && nextLetter?.review?.decision !== 'rejected');
+    if (canCheckAndResume) checkAndResumeCount += 1;
+    const pauseSummary = pauseOrigin === 'manual' ? '已手动暂停跟进，不会自动发信'
+      : isDeliveryUncertain && pauseOrigin ? '请先确认这封邮件是否已发出'
+        : isDeliveryCancelled && pauseOrigin ? '邮件已取消，未发送'
+          : pauseOrigin === 'unknown' ? '暂停原因未记录，请先查看详情'
+            : pauseOrigin === 'system' ? taskInFlight ? '正在准备新邮件，检查通过后继续安排'
+              : '邮件需要重新检查，通过后才会安排发送'
+              : undefined;
 
     const buyerSchedule = config.useBuyerTimezone || customer?.timezone
       ? resolveBuyerTimezone({
@@ -1834,6 +2001,7 @@ export async function getOutreachAutomationOverview(
       customerStatus: customer?.status ?? '',
       status: row.status,
       ...(pauseOrigin ? { pauseOrigin } : {}),
+      ...(pauseSummary ? { pauseSummary, canCheckAndResume } : {}),
       currentStep: actualStep,
       actualStep,
       nextStep,
@@ -1915,6 +2083,7 @@ export async function getOutreachAutomationOverview(
       sendGateBlockedDrafts,
       contextWarningDrafts,
       pausedReadyCount,
+      checkAndResumeCount,
       deliveryUncertainCount,
       deliveryFailedCount,
       deliveryCancelledCount,

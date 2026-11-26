@@ -2485,6 +2485,7 @@ test('Section 12: safe auto-resume of system pauses, cancelOrigin recovery, unce
         userId: rep._id,
         outreachStep: 1,
         subject: 'Commercial gym equipment inquiry',
+        aiSnapshot: { subject: 'Commercial gym equipment inquiry', contentText: text, at: new Date() },
         content: `<p>${text.replace(/\n\n/g, '</p><p>')}</p>`,
         contentText: text,
         recipientEmail,
@@ -2767,5 +2768,78 @@ test('Section 12: safe auto-resume of system pauses, cancelOrigin recovery, unce
 
     const uncertainDiag = await getOutreachEnrollmentDiagnostics(actorA, enrUncertain.id, rep.id);
     assert.equal(uncertainDiag.sendReadiness.status, 'delivery_uncertain');
+
+    // Exercise the actual authenticated route against the isolated replica-set fixture.
+    const { hashPassword } = await import('../src/models/User');
+    const password = 'Local-Fictional-Recovery-Password!1';
+    await Organization.updateOne({ _id: orgA }, { $setOnInsert: { name: 'Recovery Fixture', slug: 'recovery-fixture', subscriptionStatus: 'active' } }, { upsert: true });
+    await User.updateOne({ _id: rep._id }, { $set: { passwordHash: await hashPassword(password), defaultProjectId: projectAId } });
+    await OutreachAutomationConfig.updateOne({ _id: campaign._id }, { $set: { rolloutMode: 'shadow' } });
+    const markSystemPaused = { $set: { status: 'paused', pauseOrigin: 'system', pausedAt: new Date() } };
+    await OutreachAutomationEnrollment.updateMany({ _id: { $in: [enrSysPaused._id, enrUncertain._id, enrManualCancelled._id] } }, markSystemPaused);
+    // A new draft must not hide an older uncertain delivery for the same customer and step.
+    await DevelopmentLetter.create(makeVerifiedDraft(custUncertain._id, 'uncertain@example.test'));
+
+    const server = http.createServer(createApp());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as { port: number };
+    const base = `http://127.0.0.1:${address.port}/api`;
+    try {
+      const login = await fetch(`${base}/auth/login`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: rep.username, password }),
+      });
+      assert.equal(login.status, 200);
+      const cookies = login.headers.getSetCookie().map((line) => line.split(';', 1)[0]!);
+      const csrf = cookies.find((line) => line.startsWith('cdlm_csrf='))!.slice('cdlm_csrf='.length);
+      const postBatch = (enrollmentIds: string[], query = '') => fetch(`${base}/outreach-automation/check-and-resume${query}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: cookies.join('; '), 'x-csrf-token': csrf, 'x-project-id': projectAId },
+        body: JSON.stringify({ enrollmentIds }),
+      });
+      const wrongOwner = await postBatch([enrSysPaused.id], `?userId=${actorA.id}`);
+      assert.ok([403, 404].includes(wrongOwner.status));
+      const response = await postBatch([
+        enrSysPaused.id, enrManualPaused.id, enrUnknownPaused.id, enrRepliedSysPaused.id,
+        enrManualCancelled.id, enrUncertain.id,
+      ]);
+      assert.equal(response.status, 200);
+      const responseBody = await response.json() as { data: { resumed: number; requeued: number; skipped: number; reasons: Record<string, number> } };
+      assert.equal(responseBody.data.resumed, 1);
+      assert.equal(responseBody.data.requeued, 0);
+      assert.equal(responseBody.data.skipped, 5);
+      assert.equal(responseBody.data.reasons['需先确认邮件是否已经发出'], 1);
+      assert.equal((await OutreachAutomationEnrollment.findById(enrSysPaused._id))?.status, 'active');
+      for (const untouched of [enrManualPaused, enrUnknownPaused, enrRepliedSysPaused, enrManualCancelled, enrUncertain]) {
+        assert.equal((await OutreachAutomationEnrollment.findById(untouched._id))?.status, 'paused');
+      }
+      assert.equal(await DevelopmentLetter.countDocuments({ projectId: projectAId, customerId: custSysPaused._id, status: 'sent' }), 0);
+      const repeatedBatch = await postBatch([enrSysPaused.id]);
+      const repeatedResult = await repeatedBatch.json() as { data: { resumed: number; skipped: number } };
+      assert.equal(repeatedResult.data.resumed, 0);
+      assert.equal(repeatedResult.data.skipped, 1);
+
+      await OutreachAutomationEnrollment.updateOne({ _id: enrLegacySysPaused._id }, markSystemPaused);
+      const stale = await DevelopmentLetter.findOne({ customerId: custLegacySysPaused._id, status: 'draft' });
+      assert.ok(stale);
+      await DevelopmentLetter.collection.updateOne({ _id: stale._id }, { $set: { 'knowledgeReview.context': {
+        customerId: custLegacySysPaused.id,
+        customerWebsites: [{ sourceId: 'website:expired-fictional-snapshot', sha256: '0'.repeat(64), url: 'https://example.test/', text: 'Fictional old evidence', collectedAt: new Date(0).toISOString() }],
+      } } });
+      const rebuild = await postBatch([enrLegacySysPaused.id]);
+      assert.equal(rebuild.status, 200);
+      const rebuilt = await rebuild.json() as { data: { resumed: number; requeued: number; skipped: number } };
+      assert.deepEqual([rebuilt.data.resumed, rebuilt.data.requeued, rebuilt.data.skipped], [0, 1, 0]);
+      assert.equal((await OutreachAutomationEnrollment.findById(enrLegacySysPaused._id))?.status, 'paused');
+      assert.equal((await DevelopmentLetter.findById(stale._id))?.cancelOrigin, 'superseded');
+      const taskFilter = { customerId: custLegacySysPaused._id, status: 'queued' };
+      assert.equal(await AgentTask.countDocuments(taskFilter), 1);
+      const repeatRebuild = await postBatch([enrLegacySysPaused.id]);
+      const repeatedRebuild = await repeatRebuild.json() as { data: { requeued: number } };
+      assert.equal(repeatedRebuild.data.requeued, 0);
+      assert.equal(await AgentTask.countDocuments(taskFilter), 1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

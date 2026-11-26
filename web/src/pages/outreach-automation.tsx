@@ -31,7 +31,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { apiGet, apiPost, apiPut, toErrorMessage } from '@/lib/api';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { usePageTitle } from '@/hooks/use-ui';
-import { selectIsAdmin, useAuthStore } from '@/store/auth.store';
+import { selectIsAdmin, selectIsReadOnly, useAuthStore } from '@/store/auth.store';
 import { useProjectStore } from '@/store/project.store';
 import type {
   Customer,
@@ -58,6 +58,26 @@ interface ReverifyBatchResult {
   remainingSendGateBlocked?: number;
   pausedReadyCount?: number;
   remainingDetails?: { customerId: string; customerName: string; category: 'audit_failed' | 'send_gate'; reason: string }[];
+}
+
+interface CheckAndResumeResult {
+  resumed: number;
+  requeued: number;
+  skipped: number;
+  reasons: Record<string, number>;
+}
+
+interface CheckAndResumeSelection {
+  projectId: string;
+  ownerId: string;
+  enrollmentIds: string[];
+}
+
+function pauseSummary(row: OutreachAutomationQueueRow): string {
+  if (row.pauseSummary) return row.pauseSummary;
+  if (row.pauseOrigin === 'manual') return '业务员暂停了跟进，不会自动发信。';
+  if (row.pauseOrigin === 'system') return '这封邮件需要重新检查，目前不会自动发信。';
+  return '旧记录未注明暂停原因，目前不会自动发信。';
 }
 
 interface AutoFixSendGatesResult {
@@ -336,7 +356,9 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
       : '点「重新生成」重试，或点「查看详情」了解原因';
   }
   if (row.status === 'paused') {
-    return '不会自动发信 · 如需继续请点「继续跟进」';
+    if (row.canCheckAndResume) return '通过检查后，才会排回发送队列';
+    if (row.pauseOrigin === 'manual') return '如需继续，请点「继续跟进」';
+    return '请查看暂停原因，未确认前不会自动发信';
   }
   if (!effectiveOpen && ['due', 'ready', 'sending', 'waiting'].includes(row.phase)) {
     return `${row.nextSendLocalLabel || `预计当地工作日 ${windowText} 发送`} · 无需操作`;
@@ -400,6 +422,7 @@ function StepProgress({ row }: { row: OutreachAutomationQueueRow }): React.JSX.E
 export function OutreachAutomationPage(): React.JSX.Element {
   usePageTitle('自动开发');
   const isAdmin = useAuthStore(selectIsAdmin);
+  const readOnly = useAuthStore(selectIsReadOnly);
   const currentUserId = useAuthStore((state) => state.user?.id ?? '');
   const activeProjectId = useProjectStore((state) => state.activeProject?.id ?? '');
   const [owners, setOwners] = React.useState<UserDto[]>([]);
@@ -410,6 +433,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const [busy, setBusy] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = React.useState(false);
+  const [checkSelection, setCheckSelection] = React.useState<CheckAndResumeSelection | null>(null);
+  const [checkResult, setCheckResult] = React.useState<CheckAndResumeResult | null>(null);
+  const [checkingPaused, setCheckingPaused] = React.useState(false);
   const [diagOpen, setDiagOpen] = React.useState(false);
   const [diagLoading, setDiagLoading] = React.useState(false);
   const [diagData, setDiagData] = React.useState<EnrollmentDiagnosticsDto | null>(null);
@@ -427,6 +453,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const ownerTouchedRef = React.useRef(false);
   const queueCardRef = React.useRef<HTMLDivElement | null>(null);
 
+  const checkScope = JSON.stringify([activeProjectId, ownerId]);
+  const latestCheckScope = React.useRef(checkScope);
+  latestCheckScope.current = checkScope;
   const query = ownerId ? `?userId=${encodeURIComponent(ownerId)}` : '';
   const scoped = React.useCallback((path: string) => `${path}${query}`, [query]);
 
@@ -479,6 +508,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
     setLastReverifyResult(null);
     setLastAutoFixResult(null);
   }, [ownerId]);
+
+  React.useEffect(() => {
+    setCheckSelection(null);
+    setCheckResult(null);
+  }, [checkScope]);
 
   const patch = (value: Partial<OutreachAutomationConfig>): void => {
     setForm((current) => current ? { ...current, ...value } : current);
@@ -584,6 +618,34 @@ export function OutreachAutomationPage(): React.JSX.Element {
     } catch (caught) {
       setError(toErrorMessage(caught, '客户自动开发操作失败'));
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const checkAndResume = async (): Promise<void> => {
+    if (!checkSelection || checkingPaused || busy || readOnly || !overview?.config.enabled) return;
+    if (checkSelection.projectId !== activeProjectId || checkSelection.ownerId !== ownerId) return;
+    const scopeAtRequest = checkScope;
+    setCheckingPaused(true);
+    setBusy(true);
+    setCheckResult(null);
+    try {
+      const result = await apiPost<CheckAndResumeResult & { overview: OutreachAutomationOverview }>(
+        scoped('/outreach-automation/check-and-resume'),
+        { enrollmentIds: checkSelection.enrollmentIds },
+        { headers: { 'X-Project-Id': checkSelection.projectId } },
+      );
+      if (latestCheckScope.current !== scopeAtRequest) return;
+      setOverview(result.overview);
+      if (!dirtyRef.current) setForm(result.overview.config);
+      setCheckResult(result);
+      setCheckSelection(null);
+    } catch (caught) {
+      if (latestCheckScope.current === scopeAtRequest) {
+        toast.error(toErrorMessage(caught, '暂时无法检查，请刷新队列后再试'));
+      }
+    } finally {
+      setCheckingPaused(false);
       setBusy(false);
     }
   };
@@ -819,6 +881,14 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const actionNeededCount = overview?.stats.actionNeededCount
     ?? (overview?.queue.filter(isActionNeededRow).length ?? 0);
   const pausedRowCount = overview?.queue.filter((r) => r.status === 'paused' && r.draftStage !== 'delivery_cancelled').length ?? 0;
+  const checkableRows = overview?.queue.filter((row) => row.status === 'paused' && row.pauseOrigin === 'system'
+    && row.canCheckAndResume && !row.isRuleStopped && row.draftStage !== 'delivery_cancelled'
+    && row.draftStage !== 'delivery_uncertain' && row.draftStage !== 'delivery_failed') ?? [];
+  const checkableRowIds = new Set(checkableRows.map((row) => row.id));
+  const openCheckAndResume = (enrollmentIds: string[]): void => {
+    if (!activeProjectId || (isAdmin && !ownerId) || readOnly || busy || !overview?.config.enabled || enrollmentIds.length === 0) return;
+    setCheckSelection({ projectId: activeProjectId, ownerId, enrollmentIds: enrollmentIds.slice(0, 100) });
+  };
   const unverifiedCount = overview?.stats.unverifiedDrafts ?? 0;
   const rebuildableCount = overview?.stats.rebuildableUnverifiedDrafts ?? unverifiedCount;
   const sendGateBlockedCount = overview?.stats.sendGateBlockedDrafts ?? 0;
@@ -1358,6 +1428,26 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 </div>
               </CardHeader>
               <CardContent className="p-0">
+                {queueFilter === 'paused' && !readOnly && pausedRowCount > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
+                    <p>{checkableRows.length > 0
+                      ? `${checkableRows.length} 位客户可由系统重新检查；人工暂停或原因不明的记录不会批量恢复。`
+                      : '当前没有可批量继续的客户。可在列表查看每位客户的暂停原因。'}</p>
+                    {checkableRows.length > 0 ? (
+                      <Button type="button" size="sm" variant="outline" disabled={busy || !overview.config.enabled || !activeProjectId || (isAdmin && !ownerId)} onClick={() => openCheckAndResume(checkableRows.map((row) => row.id))}>
+                        {overview.config.enabled ? `检查并继续跟进（${Math.min(100, checkableRows.length)}）` : '请先开启自动开发'}
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {checkResult ? (
+                  <div role="status" className="space-y-1 border-t px-4 py-3 text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground">本次检查：{checkResult.resumed} 位已重新安排发送，{checkResult.requeued} 位已排队重新准备草稿，{checkResult.skipped} 位未继续。</p>
+                    {Object.entries(checkResult.reasons ?? {}).length > 0 ? (
+                      <ul className="list-disc space-y-1 pl-4">{Object.entries(checkResult.reasons).map(([reason, count]) => <li key={reason}>{reason}：{count} 位</li>)}</ul>
+                    ) : null}
+                  </div>
+                ) : null}
                 {(() => {
                   const visibleQueue = queueFilter === 'action_needed'
                     ? overview.queue.filter(isActionNeededRow)
@@ -1372,7 +1462,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                           {queueFilter === 'action_needed'
                             ? '当前没有需要你处理的邮件'
                             : queueFilter === 'paused'
-                              ? '当前没有手动暂停跟进的客户'
+                              ? '当前没有暂停跟进的客户'
                               : '还没有自动开发客户'}
                         </p>
                         <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
@@ -1405,7 +1495,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
                           const isUncertain = row.draftStage === 'delivery_uncertain';
                           const isCancelled = row.draftStage === 'delivery_cancelled';
                           const isNeedsEdit = row.draftStage === 'draft_audit_failed' || row.draftStage === 'send_gate_blocked';
-                          const controllable = !complianceBlocked && !isUncertain && !isCancelled && (row.status === 'active' || row.status === 'paused' || row.status === 'failed' || verificationBlocked);
+                          const canCheckPausedRow = checkableRowIds.has(row.id);
+                          const controllable = !readOnly && !complianceBlocked && !isUncertain && !isCancelled
+                            && (row.status === 'active' || (row.status === 'paused' && row.pauseOrigin !== 'system') || row.status === 'failed' || verificationBlocked);
                           const sendGate = row.sendGateDetail;
                           const canRegenerate = row.status !== 'completed'
                             && !complianceBlocked
@@ -1463,7 +1555,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                   </div>
                                 ) : row.status === 'paused' ? (
                                   <p className="mt-1 max-w-[18rem] text-[11px] leading-4 text-muted-foreground">
-                                    {row.pauseOrigin === 'manual' ? '业务员已暂停跟进，不会自动发信' : '跟进已暂停，不会自动发信'}
+                                    {pauseSummary(row)}
                                   </p>
                                 ) : status.detail ? (
                                   <p className={`mt-1 max-w-[14rem] text-[11px] leading-4 ${status.variant === 'warning' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
@@ -1542,6 +1634,11 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                   {canRegenerate ? (
                                     <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={busy} onClick={() => void regenerateRow(row)}>
                                       {isCancelled ? '重新安排' : '重新生成'}
+                                    </Button>
+                                  ) : null}
+                                  {canCheckPausedRow && !readOnly ? (
+                                    <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" disabled={busy || !overview.config.enabled || !activeProjectId || (isAdmin && !ownerId)} onClick={() => openCheckAndResume([row.id])}>
+                                      检查并继续
                                     </Button>
                                   ) : null}
                                   {controllable ? (
@@ -1850,6 +1947,22 @@ export function OutreachAutomationPage(): React.JSX.Element {
           </DialogBody>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!checkSelection}
+        onOpenChange={(open) => { if (!open && !checkingPaused) setCheckSelection(null); }}
+        title="检查并继续跟进？"
+        description={`系统将重新检查 ${checkSelection?.enrollmentIds.length ?? 0} 位客户的下一封邮件。`}
+        confirmText="检查并继续跟进"
+        loading={checkingPaused}
+        onConfirm={checkAndResume}
+      >
+        <div className="space-y-2 leading-5">
+          <p>仍可联系、且邮件符合发送要求的客户会回到原发送计划；需要更新内容的邮件会先重新准备草稿。</p>
+          <p>人工暂停、已取消或无法确认是否已发出的邮件保持原状。已回复、退订或退信的客户不会继续发送。</p>
+          <p>{overview?.config.rolloutMode === 'shadow' ? '当前为模拟模式，不会实际发信。' : '通过检查的邮件之后可能按原时段和额度自动发出。'}</p>
+        </div>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={startConfirmOpen}
