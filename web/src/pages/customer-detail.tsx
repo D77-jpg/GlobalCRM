@@ -527,15 +527,22 @@ export function CustomerDetailPage(): React.JSX.Element {
 
   /* ---------------------------- #letters 锚点 ---------------------------- */
 
-  const hash = location.hash;
+  const { hash, key: navigationKey } = location;
+  const loadedCustomerId = customer?.id;
   React.useEffect(() => {
-    if (hash !== '#letters' || loading || !customer) return;
-    // 等表格渲染完再滚，否则位置会偏
-    const timer = window.setTimeout(() => {
-      lettersAnchor.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, [hash, loading, customer]);
+    if (hash !== '#letters' || loading || !id || loadedCustomerId !== id) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = lettersAnchor.current;
+      const main = target?.closest<HTMLElement>('#workspace-main');
+      if (!target || !main) return;
+      // Keep the shell/header fixed: scrollIntoView can scroll every ancestor,
+      // including the overflow-hidden shell. Let only the workspace move.
+      const top = target.getBoundingClientRect().top - main.getBoundingClientRect().top
+        + main.scrollTop - main.clientTop - 16;
+      main.scrollTo({ top, behavior: 'instant' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [hash, id, loadedCustomerId, loading, navigationKey]);
 
   /* ---------------------------- 动作 ---------------------------- */
 
@@ -1181,7 +1188,8 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       {/* ---------------------------- 开发信历史 ---------------------------- */}
 
-      <div ref={lettersAnchor} id="letters" className="scroll-mt-20">
+      {/* The #letters route is handled above, without native scrolling of the outer shell. */}
+      <div ref={lettersAnchor} id="customer-letter-history">
         <Card>
           <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <div>
