@@ -28,6 +28,7 @@ import { listOutreachFollowUps } from '../services/outreach-followup.service';
 
 import {inboundAgentScope} from '../services/agent/mail-access';
 import { translateLetter } from '../services/agent/translation.service';
+import { retryConfirmedUndeliveredOutreachLetter } from '../services/outreach-automation.service';
 const router = Router();
 router.use(requireAuth);
 const idSchema = z.string().regex(/^[a-fA-F0-9]{24}$/);
@@ -243,7 +244,12 @@ router.post('/:id/resolve', validate({ params, body: z.object({ outcome: z.enum(
     $push: { history: { at: new Date(), status, error: `管理员核实：${req.body.outcome}` } },
   }, { new: true });
   if (!doc) throw ApiError.conflict('任务不处于待核实状态');
-  sendSuccess(res, outgoingDto(doc));
+  // A confirmed "未发出" development letter must not leave the automated follow-up stuck on a
+  // failed row: hand it back to the normal safe flow (resend verified content or prepare a fresh draft).
+  const autoFollowUp = status === 'failed'
+    ? await retryConfirmedUndeliveredOutreachLetter(String(doc._id)).catch(() => ({ recovered: false, resumed: false }))
+    : undefined;
+  sendSuccess(res, { ...outgoingDto(doc), ...(autoFollowUp ? { autoFollowUp } : {}) });
 }));
 router.get('/:id/attachments/:attachmentId', validate({ params: params.extend({ attachmentId: idSchema }) }), asyncHandler(async (req, res) => {
   await inbound(req.params.id, req.user!);

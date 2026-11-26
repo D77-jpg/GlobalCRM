@@ -2918,3 +2918,278 @@ test('Section 12: safe auto-resume of system pauses, cancelOrigin recovery, unce
     }
   });
 });
+
+test('Section 13: admin-confirmed non-delivery re-enters the automated flow without another click', async () => {
+  const { AgentTask } = await import('../src/models/AgentTask');
+  const { AgentKnowledge } = await import('../src/models/AgentKnowledge');
+  const { OutreachAutomationEnrollment } = await import('../src/models');
+  const { draftHash } = await import('../src/services/agent/knowledge-grounding');
+  const { hashPassword } = await import('../src/models/User');
+  const {
+    CONFIRMED_UNDELIVERED_LETTER_ERROR,
+    recoverConfirmedUndeliveredOutreach,
+    reconcileOutreachEnrollmentsForCampaign,
+  } = await import('../src/services/outreach-automation.service');
+
+  const server = http.createServer(createApp());
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address() as { port: number };
+  const base = `http://127.0.0.1:${address.port}/api`;
+  try {
+    await runWithTenant({ organizationId: String(orgA) }, async () => {
+      const repPassword = 'Local-Fictional-Confirmed-Password!1';
+      const adminPassword = 'Local-Fictional-Confirmed-Admin!1';
+      const rep = await User.create({
+        organizationId: orgA,
+        username: 'fictional_sales_confirmed_rep',
+        passwordHash: await hashPassword(repPassword),
+        displayName: 'Confirmed Rep',
+        role: 'user',
+        status: 'active',
+        projectIds: [new Types.ObjectId(projectAId)],
+        defaultProjectId: new Types.ObjectId(projectAId),
+      });
+      const adminUser = await User.create({
+        organizationId: orgA,
+        username: 'fictional_admin_confirmed_rep',
+        passwordHash: await hashPassword(adminPassword),
+        displayName: 'Confirmed Admin',
+        role: 'admin',
+        status: 'active',
+        projectIds: [new Types.ObjectId(projectAId)],
+        defaultProjectId: new Types.ObjectId(projectAId),
+      });
+      const campaign = await OutreachAutomationConfig.create({
+        projectId: new Types.ObjectId(projectAId),
+        userId: rep._id,
+        actorRole: 'user',
+        enabled: true,
+        rolloutMode: 'shadow',
+        dailyLimit: 20,
+        perDomainLimit: 3,
+        windowStart: '09:30',
+        windowEnd: '17:30',
+        timezone: 'Asia/Shanghai',
+        useBuyerTimezone: true,
+      });
+      const capText = 'IRONHUE produces commercial Olympic barbells and bumper plates with ISO9001 quality control.';
+      const kbDoc = await AgentKnowledge.create({
+        projectId: new Types.ObjectId(projectAId),
+        version: 1,
+        approvedVersion: 1,
+        revisions: [{
+          version: 1,
+          title: 'IRONHUE Confirmed Capability',
+          category: 'company',
+          content: capText,
+          approved: true,
+          validFrom: new Date(0),
+          createdBy: rep._id,
+          createdAt: new Date(),
+        }],
+      });
+      const kbSource = {
+        sourceId: `knowledge:${String(kbDoc._id)}:v1`,
+        knowledgeId: String(kbDoc._id),
+        kind: 'knowledge' as const,
+        title: 'IRONHUE Confirmed Capability',
+        category: 'company' as const,
+        version: 1,
+        content: capText,
+        source: 'fixture',
+        applicability: '',
+        products: ['Olympic barbells', 'bumper plates'],
+        validFrom: new Date(0).toISOString(),
+        terms: [],
+      };
+      const makeDraft = (customerId: Types.ObjectId, recipientEmail: string, step: number, extra: Record<string, unknown> = {}) => {
+        const text = `Hi team,\n\n${capText}\n\nWhich product line are you reviewing this quarter?`;
+        return {
+          projectId: new Types.ObjectId(projectAId),
+          customerId,
+          userId: rep._id,
+          outreachStep: step,
+          subject: 'Commercial gym equipment inquiry',
+          aiSnapshot: { subject: 'Commercial gym equipment inquiry', contentText: text, at: new Date() },
+          content: `<p>${text.replace(/\n\n/g, '</p><p>')}</p>`,
+          contentText: text,
+          recipientEmail,
+          status: 'draft' as const,
+          needsReview: false,
+          knowledgeReview: {
+            version: 1,
+            projectId: projectAId,
+            taskType: 'first_outreach' as const,
+            generatedAt: new Date().toISOString(),
+            status: 'ready' as const,
+            completeness: 'complete' as const,
+            sources: [kbSource],
+            claims: [{ text: capText, sourceIds: [kbSource.sourceId] }],
+            questions: [],
+            issues: [] as { code: string; message: string }[],
+            context: {},
+            bodyHash: draftHash(text),
+            factAudit: {
+              contract: 's4.1' as const,
+              mode: 'semantic' as const,
+              attempts: 1,
+              facts: [],
+              checks: [
+                { id: 's0', text: 'Hi team,', status: 'non_claim' as const, sourceIds: [], reason: 'greeting' },
+                { id: 's1', text: capText, status: 'supported' as const, sourceIds: [kbSource.sourceId], reason: 'supported' },
+                { id: 's2', text: 'Which product line are you reviewing this quarter?', status: 'non_claim' as const, sourceIds: [], reason: 'question' },
+              ],
+            },
+          },
+          ...extra,
+        };
+      };
+      const [custResend, custRegenOnResolve, custRegenButton, custResumeButton, custSweep, custUncertain, custPlain] = await Customer.create([
+        'Resend Gym', 'Regen On Resolve Gym', 'Regen Button Gym', 'Resume Button Gym', 'Sweep Gym', 'Uncertain Gym', 'Plain Gym',
+      ].map((name, index) => ({
+        projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: `Confirmed ${name}`,
+        country: 'United States', email: `confirmed-${index}@example.test`, status: 'pending',
+        outreachStep: 1, letterCount: 1,
+      })));
+      const enrollmentBase = (customerId: Types.ObjectId, status: string) => ({
+        projectId: new Types.ObjectId(projectAId), userId: rep._id, campaignId: campaign._id,
+        customerId, status, currentStep: 1, nextRunAt: new Date(),
+      });
+      const [enrResend, enrRegenOnResolve, enrRegenButton, enrResumeButton, enrSweep, enrUncertain] = await OutreachAutomationEnrollment.create([
+        enrollmentBase(custResend._id, 'failed'),
+        enrollmentBase(custRegenOnResolve._id, 'failed'),
+        enrollmentBase(custRegenButton._id, 'failed'),
+        enrollmentBase(custResumeButton._id, 'failed'),
+        enrollmentBase(custSweep._id, 'failed'),
+        enrollmentBase(custUncertain._id, 'paused'),
+      ]);
+      const uncertainError = '投递结果未知：发送期间连接中断；确认前系统不会自动重发';
+      const [letterResend, letterRegenOnResolve, letterRegenButton, letterResumeButton, letterSweep, letterUncertain, letterPlain] = await DevelopmentLetter.create([
+        makeDraft(custResend._id, custResend.email!, 2, {
+          status: 'failed', needsReview: true, error: uncertainError,
+          automationCampaignId: campaign._id, automationEnrollmentId: enrResend._id,
+        }),
+        makeDraft(custRegenOnResolve._id, custRegenOnResolve.email!, 2, {
+          status: 'failed', needsReview: true, error: uncertainError,
+          automationCampaignId: campaign._id, automationEnrollmentId: enrRegenOnResolve._id,
+          knowledgeReview: {
+            ...makeDraft(custRegenOnResolve._id, custRegenOnResolve.email!, 2).knowledgeReview,
+            issues: [{ code: 'semantic_partial', message: '正文仅为部分核验（partial），未达自动发送要求' }],
+          },
+        }),
+        makeDraft(custRegenButton._id, custRegenButton.email!, 2, {
+          status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+          automationCampaignId: campaign._id, automationEnrollmentId: enrRegenButton._id,
+          knowledgeReview: {
+            ...makeDraft(custRegenButton._id, custRegenButton.email!, 2).knowledgeReview,
+            issues: [{ code: 'semantic_partial', message: '正文仅为部分核验（partial），未达自动发送要求' }],
+          },
+        }),
+        makeDraft(custResumeButton._id, custResumeButton.email!, 2, {
+          status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+          automationCampaignId: campaign._id, automationEnrollmentId: enrResumeButton._id,
+          knowledgeReview: {
+            ...makeDraft(custResumeButton._id, custResumeButton.email!, 2).knowledgeReview,
+            issues: [{ code: 'semantic_partial', message: '正文仅为部分核验（partial），未达自动发送要求' }],
+          },
+        }),
+        makeDraft(custSweep._id, custSweep.email!, 2, {
+          status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+          automationCampaignId: campaign._id, automationEnrollmentId: enrSweep._id,
+        }),
+        makeDraft(custUncertain._id, custUncertain.email!, 2, {
+          status: 'failed', needsReview: true, error: uncertainError,
+          automationCampaignId: campaign._id, automationEnrollmentId: enrUncertain._id,
+        }),
+        // A failed letter that never belonged to the automation queue must stay untouched.
+        makeDraft(custPlain._id, custPlain.email!, 2, { status: 'failed', needsReview: true, error: uncertainError }),
+      ]);
+
+      const login = async (username: string, password: string) => {
+        const response = await fetch(`${base}/auth/login`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        assert.equal(response.status, 200);
+        const cookies = response.headers.getSetCookie().map((line) => line.split(';', 1)[0]!);
+        const csrf = cookies.find((line) => line.startsWith('cdlm_csrf='))!.slice('cdlm_csrf='.length);
+        return { cookie: cookies.join('; '), csrf };
+      };
+      const repSession = await login(rep.username, repPassword);
+      const adminSession = await login(adminUser.username, adminPassword);
+      const resolveLetter = (letterId: string, outcome: 'sent' | 'not_sent') => fetch(`${base}/mail/${letterId}/resolve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: adminSession.cookie, 'x-csrf-token': adminSession.csrf, 'x-project-id': projectAId },
+        body: JSON.stringify({ outcome }),
+      });
+      const repPost = (path: string) => fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: repSession.cookie, 'x-csrf-token': repSession.csrf, 'x-project-id': projectAId },
+      });
+
+      // 1) Admin confirms "未发出" for a letter whose content still passes the body audit:
+      // it is revived automatically, the row resumes, and no click on the queue is needed.
+      const resendResponse = await resolveLetter(letterResend.id, 'not_sent');
+      assert.equal(resendResponse.status, 200);
+      const resendBody = await resendResponse.json() as { data: { id: string; status: string; autoFollowUp?: { recovered: boolean; resumed: boolean; mode?: string } } };
+      assert.equal(resendBody.data.status, 'failed');
+      assert.equal(resendBody.data.autoFollowUp?.recovered, true, JSON.stringify(resendBody.data.autoFollowUp));
+      assert.equal(resendBody.data.autoFollowUp?.mode, 'resend');
+      assert.equal(resendBody.data.autoFollowUp?.resumed, true);
+      assert.equal((await DevelopmentLetter.findById(letterResend._id))?.status, 'draft');
+      assert.equal((await OutreachAutomationEnrollment.findById(enrResend._id))?.status, 'active');
+      assert.equal(await DevelopmentLetter.countDocuments({ customerId: custResend._id, status: 'sent' }), 0);
+
+      // 2) Admin confirms "未发出" for a draft whose body audit is not complete: a fresh verified
+      // draft is queued automatically instead of leaving the row stuck on a failed letter.
+      const regenResponse = await resolveLetter(letterRegenOnResolve.id, 'not_sent');
+      assert.equal(regenResponse.status, 200);
+      const regenBody = await regenResponse.json() as { data: { autoFollowUp?: { recovered: boolean; mode?: string } } };
+      assert.equal(regenBody.data.autoFollowUp?.recovered, true, JSON.stringify(regenBody.data.autoFollowUp));
+      assert.equal(regenBody.data.autoFollowUp?.mode, 'regenerate');
+      assert.equal((await DevelopmentLetter.findById(letterRegenOnResolve._id))?.status, 'cancelled');
+      assert.equal((await DevelopmentLetter.findById(letterRegenOnResolve._id))?.cancelOrigin, 'superseded');
+      assert.equal(await AgentTask.countDocuments({ customerId: custRegenOnResolve._id, outreachStep: 2, status: 'queued' }), 1);
+      assert.equal((await OutreachAutomationEnrollment.findById(enrRegenOnResolve._id))?.queuedStep, 2);
+
+      // 3) A letter that never belonged to the automation queue keeps the old behaviour.
+      const plainResponse = await resolveLetter(letterPlain.id, 'not_sent');
+      assert.equal(plainResponse.status, 200);
+      const plainBody = await plainResponse.json() as { data: { autoFollowUp?: { recovered: boolean } } };
+      assert.equal(plainBody.data.autoFollowUp?.recovered, false);
+      assert.equal((await DevelopmentLetter.findById(letterPlain._id))?.status, 'failed');
+
+      // 4) The per-row buttons now work on a confirmed-undelivered failed letter instead of
+      // returning "第 2 封当前状态为 failed，跳过重建".
+      const regenButtonResponse = await repPost(`/outreach-automation/enrollments/${enrRegenButton.id}/regenerate`);
+      assert.equal(regenButtonResponse.status, 200);
+      const regenButtonBody = await regenButtonResponse.json() as { data: { queued: boolean } };
+      assert.equal(regenButtonBody.data.queued, true);
+      assert.equal((await DevelopmentLetter.findById(letterRegenButton._id))?.status, 'cancelled');
+      assert.equal(await AgentTask.countDocuments({ customerId: custRegenButton._id, outreachStep: 2, status: 'queued' }), 1);
+
+      const resumeButtonResponse = await repPost(`/outreach-automation/enrollments/${enrResumeButton.id}/resume`);
+      assert.equal(resumeButtonResponse.status, 200);
+      assert.equal((await DevelopmentLetter.findById(letterResumeButton._id))?.status, 'cancelled');
+      assert.equal(await AgentTask.countDocuments({ customerId: custResumeButton._id, outreachStep: 2, status: 'queued' }), 1);
+
+      // 5) The worker sweep recovers rows confirmed while the app was offline, and still refuses to
+      // guess for uncertain deliveries.
+      assert.equal(await recoverConfirmedUndeliveredOutreach(campaign), 1);
+      assert.equal((await DevelopmentLetter.findById(letterSweep._id))?.status, 'draft');
+      assert.equal((await OutreachAutomationEnrollment.findById(enrSweep._id))?.status, 'paused');
+      assert.equal((await OutreachAutomationEnrollment.findById(enrSweep._id))?.pauseOrigin, 'system');
+      const confirmedActor = { ...actorA, id: rep.id, role: 'user' as const };
+      const settled = await reconcileOutreachEnrollmentsForCampaign(campaign, confirmedActor, new Date());
+      assert.equal(settled.resumedPaused, 1);
+      assert.equal((await OutreachAutomationEnrollment.findById(enrSweep._id))?.status, 'active');
+      assert.equal((await DevelopmentLetter.findById(letterUncertain._id))?.status, 'failed');
+      assert.equal((await DevelopmentLetter.findById(letterUncertain._id))?.needsReview, true);
+      assert.equal(await AgentTask.countDocuments({ customerId: custUncertain._id, status: 'queued' }), 0);
+      assert.equal(await recoverConfirmedUndeliveredOutreach(campaign), 0);
+      assert.equal(await DevelopmentLetter.countDocuments({ customerId: { $in: [custResend._id, custSweep._id] }, status: 'sent' }), 0);
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
