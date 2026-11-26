@@ -307,7 +307,7 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
     return '无需操作';
   }
   if (row.draftStage === 'delivery_uncertain') {
-    return '确认前不会重发 · 请先点击「查看发件记录」核对邮箱';
+    return '先核对发件邮箱的「已发送」；确认前不会重发';
   }
   if (row.draftStage === 'delivery_failed') {
     return `第 ${row.nextStep} 封未发出，请检查客户邮箱或发件记录后再决定是否重新安排`;
@@ -823,6 +823,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
   const rebuildableCount = overview?.stats.rebuildableUnverifiedDrafts ?? unverifiedCount;
   const sendGateBlockedCount = overview?.stats.sendGateBlockedDrafts ?? 0;
   const deliveryUncertainCount = overview?.stats.deliveryUncertainCount ?? 0;
+  const uncertainLetterId = deliveryUncertainCount === 1
+    ? overview?.queue.find((row) => row.draftStage === 'delivery_uncertain')?.failedLetterId
+    : undefined;
   const deliveryFailedCount = overview?.stats.deliveryFailedCount ?? 0;
   const deliveryCancelledCount = overview?.stats.deliveryCancelledCount ?? 0;
   const circuitFailedCount = overview?.stats.circuitFailed ?? 0;
@@ -1023,12 +1026,14 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       请确认 {deliveryUncertainCount} 封邮件是否已发出 · 确认前不会重发
                     </p>
                     <p className="leading-5 text-muted-foreground">
-                      发送期间发生中断，系统无法确认收件人是否已收到。请先到邮件中心核对发件记录，避免客户收到两封相同邮件。
+                      发送期间发生中断。请先到发件邮箱的「已发送」核对；{isAdmin ? '核对后在邮件记录里确认结果。' : '核对后请项目管理员在邮件记录里确认结果。'}
                     </p>
                   </div>
                 </div>
                 <Button type="button" size="sm" variant="outline" className="shrink-0" asChild>
-                  <Link to="/mail">查看发件记录</Link>
+                  <Link to={uncertainLetterId ? `/mail?folder=sent&direction=outbound&id=${encodeURIComponent(uncertainLetterId)}` : '/mail?folder=sent'}>
+                     {isAdmin && uncertainLetterId ? '核对并确认' : '查看发件记录'}
+                   </Link>
                 </Button>
               </div>
             ) : null}
@@ -1481,7 +1486,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
                                 <div className="inline-flex flex-wrap items-center justify-end gap-1">
                                   {isUncertain ? (
                                     <Button type="button" variant="outline" size="sm" className="h-8 px-2.5 text-xs" asChild>
-                                      <Link to={`/customers/${row.customerId}#letters`}>查看发件记录</Link>
+                                      <Link to={row.failedLetterId ? `/mail?folder=sent&direction=outbound&id=${encodeURIComponent(row.failedLetterId)}` : '/mail?folder=sent'}>
+                                         {isAdmin && row.failedLetterId ? '核对并确认' : '查看待确认邮件'}
+                                       </Link>
                                     </Button>
                                   ) : null}
                                   {isNeedsEdit && row.draftId ? (
