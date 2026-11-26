@@ -159,8 +159,22 @@ test('website evidence snapshots survive draft review and fail freshness after a
  assert.equal((await knowledgeFreshness(review,other)).failed,true);assert.equal((await knowledgeFreshness(review,foreign)).failed,true);
  const {taskContextStamp}=await import('../src/services/agent/task-context');const stamp=await taskContextStamp(linked.customerId,undefined,actor);
  await Research.updateOne({_id:j.id},{$set:{draftTaskId:new Types.ObjectId()}});assert.equal(await taskContextStamp(linked.customerId,undefined,actor),stamp);
- await Research.updateOne({_id:j.id},{$set:{'pages.0.hash':'changed-independent-fixture'}});
+ const oldRow=await Research.findById(j.id).lean();
+  assert.ok(oldRow);
+  const { _id: oldId, ...sameEvidence }=oldRow;
+  const updatedAt=new Date();
+  const replacementId=new Types.ObjectId();
+  await Research.collection.insertOne({...sameEvidence,_id:replacementId,requestKey:randomUUID(),createdAt:new Date(updatedAt.getTime()+1000),updatedAt,
+    pages:oldRow.pages.map(page=>({...page,collectedAt:updatedAt.toISOString()}))});
+  const refreshed=await service.websiteCustomerEvidence(linked.customerId!,actor);
+  assert.ok(refreshed.length);
+  assert.notEqual(refreshed[0].recordId,String(oldId));
+  assert.deepEqual((await knowledgeFreshness(review,actor)).changed,[]);
+  await Research.updateOne({_id:replacementId},{$set:{'pages.0.hash':'changed-independent-fixture'}});
  assert.notEqual(await taskContextStamp(linked.customerId,undefined,actor),stamp);
+ assert.ok((await knowledgeFreshness(review,actor)).changed.some(c=>c.sourceId===snapshots[0].sourceId));
+ await Research.collection.updateMany({_id:{$in:[oldId,replacementId]}},{$set:{createdAt:new Date(Date.now()-25*3600000)}});
+ assert.equal((await service.websiteCustomerEvidence(linked.customerId!,actor)).length,0);
  assert.ok((await knowledgeFreshness(review,actor)).changed.some(c=>c.sourceId===snapshots[0].sourceId));
 });
 

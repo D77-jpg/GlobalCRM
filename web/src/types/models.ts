@@ -1775,6 +1775,8 @@ export interface OutreachAutomationQueueRow {
   customerStatus: string;
   status: 'active' | 'paused' | 'blocked' | 'completed' | 'failed';
   pauseOrigin?: 'manual' | 'system' | 'unknown';
+  pauseSummary?: string;
+  canCheckAndResume?: boolean;
   currentStep: number;
   actualStep: number;
   nextStep: number;
@@ -1859,6 +1861,7 @@ export interface OutreachAutomationOverview {
     sendGateBlockedDrafts?: number;
     contextWarningDrafts?: number;
     pausedReadyCount?: number;
+    checkAndResumeCount?: number;
     deliveryUncertainCount?: number;
     deliveryFailedCount?: number;
     deliveryCancelledCount?: number;

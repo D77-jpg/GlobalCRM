@@ -265,7 +265,7 @@ export async function knowledgeFreshness(review:KnowledgeReview,actor:AuthUser):
   if(review.context?.customerWebsites?.length){
    if(!review.context.customerId)return {...result,failed:true};
    const current=await (await import('../website/research.service')).websiteCustomerEvidence(review.context.customerId,actor);
-   for(const source of review.context.customerWebsites){const match=current.find(s=>s.sourceId===source.sourceId);if(!match||match.content.sha256!==source.sha256||match.content.url!==source.url||match.content.text!==source.text||match.content.collectedAt!==source.collectedAt)result.changed.push({sourceId:source.sourceId,title:'客户官网原文',reason:'官网调查快照已变化或当前不可访问，请重新生成'});}
+   for(const source of review.context.customerWebsites){/* Match content rather than crawl ID/time, but only within fresh authorized evidence. */ const match=current.some(({content})=>content.url===source.url&&content.sha256===source.sha256&&content.text===source.text);if(!match)result.changed.push({sourceId:source.sourceId,title:'客户官网原文',reason:'官网调查快照已变化或当前不可访问，请重新生成'});}
   }
   const ids=review.sources.flatMap(s=>s.knowledgeId&&Types.ObjectId.isValid(s.knowledgeId)?[s.knowledgeId]:[]);
   const rows=await AgentKnowledge.find({projectId:requireProjectId(actor),_id:{$in:ids}});
