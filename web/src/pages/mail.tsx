@@ -147,7 +147,10 @@ export function MailPage(): React.JSX.Element {
   const currentUserId = useAuthStore((state) => state.user?.id);
   const setAgentOpen = useUiStore((state) => state.setAgentOpen);
   const [params, setParams] = useSearchParams();
-  const [folder, setFolder] = React.useState<Folder>('inbox');
+  const requestedFolder = params.get('folder');
+  const folder: Folder = requestedFolder === 'inbox' || requestedFolder === 'sent' || requestedFolder === 'tasks' || requestedFolder === 'followup' || (admin && requestedFolder === 'unknown')
+    ? requestedFolder
+    : params.get('direction') === 'outbound' ? 'sent' : 'inbox';
   const [page, setPage] = React.useState(1);
   const [items, setItems] = React.useState<MailItem[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -236,7 +239,7 @@ export function MailPage(): React.JSX.Element {
     finally { setBusy(false); }
   }
   function open(item: MailItem) {
-    setParams({ id: item.id, direction: item.direction });
+    setParams({ folder, id: item.id, direction: item.direction });
     if (item.direction === 'inbound' && !item.read) void apiPost(`/mail/${item.id}/read`, { read: true }).then(() => {
       setDetail(current => current?.mail.id === item.id ? { ...current, mail: { ...current.mail, read: true } } : current);
       void refresh();
@@ -363,7 +366,7 @@ export function MailPage(): React.JSX.Element {
               key={f}
               type="button"
               aria-pressed={active}
-              onClick={() => { setFolder(f); setPage(1); setParams({}); }}
+              onClick={() => { setPage(1); setParams({ folder: f }); }}
               className={cn(
                 '-mb-px inline-flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
