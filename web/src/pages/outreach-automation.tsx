@@ -63,6 +63,7 @@ interface ReverifyBatchResult {
 interface CheckAndResumeResult {
   resumed: number;
   requeued: number;
+  deferred?: number;
   skipped: number;
   reasons: Record<string, number>;
 }
@@ -74,6 +75,7 @@ interface CheckAndResumeSelection {
 }
 
 function pauseSummary(row: OutreachAutomationQueueRow): string {
+  if (row.continuationPending) return '等待系统检查，无需再次操作。';
   if (row.pauseSummary) return row.pauseSummary;
   if (row.pauseOrigin === 'manual') return '业务员暂停了跟进，不会自动发信。';
   if (row.pauseOrigin === 'system') return '这封邮件需要重新检查，目前不会自动发信。';
@@ -97,6 +99,7 @@ interface AutoFixSendGatesResult {
 function isActionNeededRow(row: OutreachAutomationQueueRow): boolean {
   return Boolean(
     !row.isRuleStopped
+    && !row.continuationPending
     && row.status !== 'completed'
     && row.draftStage !== 'waiting_model'
     && row.draftStage !== 'reverify_queued'
@@ -302,6 +305,7 @@ function phaseBadge(
   if (row.draftStage === 'waiting_delivery') {
     return { label: '等待发送', variant: 'outline' };
   }
+  if (row.continuationPending) return { label: '等待系统检查', variant: 'outline' };
   if (row.draftStage === 'send_gate_blocked' || row.draftStage === 'draft_audit_failed') {
     return { label: '请修改邮件', variant: row.draftStage === 'draft_audit_failed' ? 'failed' : 'warning' };
   }
@@ -356,6 +360,7 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
       : '点「重新生成」重试，或点「查看详情」了解原因';
   }
   if (row.status === 'paused') {
+    if (row.continuationPending) return '系统会接着检查，通过后安排发送；无需再点';
     if (row.canCheckAndResume) return '通过检查后，才会排回发送队列';
     if (row.pauseOrigin === 'manual') return '如需继续，请点「继续跟进」';
     return '请查看暂停原因，未确认前不会自动发信';
@@ -882,7 +887,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
     ?? (overview?.queue.filter(isActionNeededRow).length ?? 0);
   const pausedRowCount = overview?.queue.filter((r) => r.status === 'paused' && r.draftStage !== 'delivery_cancelled').length ?? 0;
   const checkableRows = overview?.queue.filter((row) => row.status === 'paused' && row.pauseOrigin === 'system'
-    && row.canCheckAndResume && !row.isRuleStopped && row.draftStage !== 'delivery_cancelled'
+    && row.canCheckAndResume && !row.continuationPending && !row.isRuleStopped && row.draftStage !== 'delivery_cancelled'
     && row.draftStage !== 'delivery_uncertain' && row.draftStage !== 'delivery_failed') ?? [];
   const checkableRowIds = new Set(checkableRows.map((row) => row.id));
   const openCheckAndResume = (enrollmentIds: string[]): void => {
@@ -1440,9 +1445,14 @@ export function OutreachAutomationPage(): React.JSX.Element {
                     ) : null}
                   </div>
                 ) : null}
+                {(overview.stats.continuationPendingCount ?? 0) > 0 ? (
+                  <p role="status" className="border-t px-4 py-3 text-xs text-muted-foreground">
+                    还有 {overview.stats.continuationPendingCount} 位客户等待系统检查。后台会分批继续，无需重复点击。
+                  </p>
+                ) : null}
                 {checkResult ? (
                   <div role="status" className="space-y-1 border-t px-4 py-3 text-xs text-muted-foreground">
-                    <p className="font-medium text-foreground">本次检查：{checkResult.resumed} 位已重新安排发送，{checkResult.requeued} 位已排队重新准备草稿，{checkResult.skipped} 位未继续。</p>
+                    <p className="font-medium text-foreground">提交时：{checkResult.resumed} 位已安排发送，{checkResult.requeued} 位开始准备新稿，{checkResult.deferred ?? 0} 位等后台继续，{checkResult.skipped} 位未继续。</p>
                     {Object.entries(checkResult.reasons ?? {}).length > 0 ? (
                       <ul className="list-disc space-y-1 pl-4">{Object.entries(checkResult.reasons).map(([reason, count]) => <li key={reason}>{reason}：{count} 位</li>)}</ul>
                     ) : null}
@@ -1958,7 +1968,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
         onConfirm={checkAndResume}
       >
         <div className="space-y-2 leading-5">
-          <p>仍可联系、且邮件符合发送要求的客户会回到原发送计划；需要更新内容的邮件会先重新准备草稿。</p>
+          <p>确认一次即可。系统会在后台分批检查；符合发送要求的客户会回到原发送计划，需要更新内容的邮件会先重新准备草稿。</p>
           <p>人工暂停、已取消或无法确认是否已发出的邮件保持原状。已回复、退订或退信的客户不会继续发送。</p>
           <p>{overview?.config.rolloutMode === 'shadow' ? '当前为模拟模式，不会实际发信。' : '通过检查的邮件之后可能按原时段和额度自动发出。'}</p>
         </div>

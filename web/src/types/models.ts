@@ -1777,6 +1777,7 @@ export interface OutreachAutomationQueueRow {
   pauseOrigin?: 'manual' | 'system' | 'unknown';
   pauseSummary?: string;
   canCheckAndResume?: boolean;
+  continuationPending?: boolean;
   currentStep: number;
   actualStep: number;
   nextStep: number;
@@ -1862,6 +1863,7 @@ export interface OutreachAutomationOverview {
     contextWarningDrafts?: number;
     pausedReadyCount?: number;
     checkAndResumeCount?: number;
+    continuationPendingCount?: number;
     deliveryUncertainCount?: number;
     deliveryFailedCount?: number;
     deliveryCancelledCount?: number;

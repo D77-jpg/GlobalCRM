@@ -59,7 +59,14 @@ const MAX_QUEUE_ROWS = 200;
 export const MAX_CHECK_AND_RESUME_ROWS = 100;
 export const MAX_INFLIGHT_OUTREACH_TASKS = 3;
 const BATCH_REBUILD_COOLDOWN_MS = 30 * 60_000;
-const activeRecoveryBatches = new Set<string>();
+const RECOVERY_BATCH_LEASE_MS = 2 * 60_000;
+const RECOVERY_CONTINUATION_SCAN_LIMIT = 20;
+
+type RecoveryBatch = {
+  enrollmentIds?: string[];
+  continuationOnly?: boolean;
+  leaseToken: Types.ObjectId;
+};
 const TASK_BACKOFF_MS = [5 * 60_000, 15 * 60_000, 45 * 60_000] as const;
 
 const TASK_STEP_LABELS: Record<string, string> = {
@@ -638,6 +645,7 @@ export interface OutreachAutomationQueueRow {
   pauseOrigin?: 'manual' | 'system' | 'unknown';
   pauseSummary?: string;
   canCheckAndResume?: boolean;
+  continuationPending?: boolean;
   /** 实际已发送的开发信封数（以客户开发信记录为准）。 */
   currentStep: number;
   actualStep: number;
@@ -738,6 +746,7 @@ export interface OutreachAutomationOverview {
     contextWarningDrafts: number;
     pausedReadyCount: number;
     checkAndResumeCount: number;
+    continuationPendingCount: number;
     deliveryUncertainCount: number;
     deliveryFailedCount: number;
     deliveryCancelledCount: number;
@@ -1061,16 +1070,43 @@ async function ensureEnrollment(
  * 3) 投递结果不确定（needsReview=true / 投递结果未知）的记录：
  *    绝不自动重发、绝不自动恢复，等待人工确认。
  */
+async function acquireRecoveryBatchLease(config: InstanceType<typeof OutreachAutomationConfig>) {
+  const token = new Types.ObjectId();
+  const now = new Date();
+  const claimed = await OutreachAutomationConfig.updateOne({
+    _id: config._id, projectId: config.projectId, userId: config.userId,
+    enabled: true, version: config.version,
+    $or: [{ recoveryBatchLease: { $exists: false } }, { 'recoveryBatchLease.until': { $lte: now } }],
+  }, { $set: { recoveryBatchLease: { token, until: new Date(now.getTime() + RECOVERY_BATCH_LEASE_MS) } } }, { timestamps: false });
+  return claimed.modifiedCount ? token : undefined;
+}
+
+/** Keep a long explicit check or a long worker drain from losing the lease mid-batch. */
+async function renewRecoveryBatchLease(config: InstanceType<typeof OutreachAutomationConfig>, token: Types.ObjectId) {
+  const renewed = await OutreachAutomationConfig.updateOne({
+    _id: config._id, projectId: config.projectId, userId: config.userId,
+    enabled: true, version: config.version, 'recoveryBatchLease.token': token,
+  }, { $set: { 'recoveryBatchLease.until': new Date(Date.now() + RECOVERY_BATCH_LEASE_MS) } }, { timestamps: false });
+  return renewed.matchedCount > 0;
+}
+
+async function releaseRecoveryBatchLease(config: InstanceType<typeof OutreachAutomationConfig>, token: Types.ObjectId) {
+  await OutreachAutomationConfig.updateOne({
+    _id: config._id, projectId: config.projectId, userId: config.userId, 'recoveryBatchLease.token': token,
+  }, { $unset: { recoveryBatchLease: 1 } }, { timestamps: false });
+}
+
 export async function reconcileOutreachEnrollmentsForCampaign(
   config: InstanceType<typeof OutreachAutomationConfig>,
   targetActor: AuthUser,
   now = new Date(),
-  batch?: { enrollmentIds?: string[] },
+  batch?: RecoveryBatch,
 ): Promise<{
   scanned: number;
   resumedPaused: number;
   requeuedCancelled: number;
   requeuedWebsiteDrafts?: number;
+  deferred?: number;
   reasons?: Record<string, number>;
   keptPausedManualOrUnknown: number;
   keptCancelled: number;
@@ -1093,7 +1129,10 @@ export async function reconcileOutreachEnrollmentsForCampaign(
     campaignId: config._id,
     status: batch ? 'paused' : { $in: ['paused', 'failed', 'active'] },
     ...(batch?.enrollmentIds ? { _id: { $in: batch.enrollmentIds.map((id) => new Types.ObjectId(id)) } } : {}),
-  }).sort({ _id: 1 }).limit(batch ? MAX_CHECK_AND_RESUME_ROWS : MAX_QUEUE_ROWS);
+    ...(batch?.continuationOnly ? { 'recoveryContinuation.configVersion': config.version }
+      : !batch ? { 'recoveryContinuation.configVersion': { $ne: config.version } } : {}),
+  }).sort(batch?.continuationOnly ? { 'recoveryContinuation.requestedAt': 1, _id: 1 } : { _id: 1 })
+    .limit(batch?.continuationOnly ? RECOVERY_CONTINUATION_SCAN_LIMIT : batch ? MAX_CHECK_AND_RESUME_ROWS : MAX_QUEUE_ROWS);
 
   if (candidateRows.length === 0) {
     return {
@@ -1118,6 +1157,7 @@ export async function reconcileOutreachEnrollmentsForCampaign(
   let keptCancelled = 0;
   let keptUncertain = 0;
   let requeuedWebsiteDrafts = 0;
+  let deferred = 0;
   const reasons: Record<string, number> = {};
   function skip(reason: string): void {
     if (batch) reasons[reason] = (reasons[reason] ?? 0) + 1;
@@ -1125,14 +1165,21 @@ export async function reconcileOutreachEnrollmentsForCampaign(
   const currentConfigStillOpen = () => OutreachAutomationConfig.exists({
     _id: config._id, projectId: config.projectId, userId: config.userId,
     enabled: true, version: config.version,
+    ...(batch ? { 'recoveryBatchLease.token': batch.leaseToken, 'recoveryBatchLease.until': { $gt: new Date() } } : {}),
   });
 
   for (const row of candidateRows) {
+    // Renew before each row so a slow batch never loses its lease halfway through;
+    // a failed renewal means the settings changed or another batch took over.
+    if (batch && !await renewRecoveryBatchLease(config, batch.leaseToken)) break;
     const rowFence = {
       _id: row._id, projectId: config.projectId, campaignId: config._id, userId: config.userId,
       status: 'paused', updatedAt: row.updatedAt,
       pauseOrigin: row.pauseOrigin ?? { $exists: false },
     };
+    const continuation = batch ? row.recoveryContinuation : undefined;
+    let keepContinuation = false;
+    try {
     const customer = await Customer.findOne({
       _id: row.customerId,
       projectId: config.projectId,
@@ -1183,6 +1230,12 @@ export async function reconcileOutreachEnrollmentsForCampaign(
 
     const latestLetter = nonSuperseded.find((l) => l.status === 'draft') ?? nonSuperseded[0];
     if (!latestLetter) { skip('没有可检查的邮件草稿'); continue; }
+    if (batch?.continuationOnly && (!continuation || continuation.step !== nextStep
+      || latestLetter.status !== 'draft' || String(continuation.letterId) !== String(latestLetter._id)
+      || continuation.letterUpdatedAt.getTime() !== latestLetter.updatedAt.getTime())) {
+      skip('邮件或跟进进度已变化，请重新检查');
+      continue;
+    }
 
     // Case A: System-paused enrollment whose current draft now passes ALL checks -> auto-return to normal scheduling
     if (row.status === 'paused' && latestLetter.status === 'draft') {
@@ -1225,7 +1278,8 @@ export async function reconcileOutreachEnrollmentsForCampaign(
         skip('客户不再适合自动发信');
         continue;
       }
-      if (await hasActiveTask(config.projectId, customer._id, nextStep)) { skip('已在准备新邮件'); continue; }
+      const existingDraftTask = { userId: config.userId, letterId: latestLetter._id, taskId: latestLetter.agentTaskId };
+      if (await hasActiveTask(config.projectId, customer._id, nextStep, existingDraftTask)) { skip('已有其他草稿任务尚未结束'); continue; }
       try {
         const freshness = await knowledgeFreshness(latestLetter.knowledgeReview, targetActor);
         if (freshness.failed) { skip('暂时无法核对邮件依据'); continue; }
@@ -1239,15 +1293,29 @@ export async function reconcileOutreachEnrollmentsForCampaign(
             projectId: config.projectId, userId: config.userId, outreachStep: { $in: [1, 2, 3] },
             status: { $in: ['queued', 'running'] },
           });
-          if (requeuedWebsiteDrafts >= MAX_INFLIGHT_OUTREACH_TASKS || inFlight >= MAX_INFLIGHT_OUTREACH_TASKS) {
-            skip('正在准备其他邮件，稍后可再次检查');
-            continue;
-          }
           if (row.queuedAt && row.queuedAt.getTime() > now.getTime() - BATCH_REBUILD_COOLDOWN_MS) {
             skip('近期已安排重新准备，请先查看结果');
             continue;
           }
           if (!await currentConfigStillOpen()) { skip('发送设置已变化，请刷新后再检查'); continue; }
+          if (requeuedWebsiteDrafts >= MAX_INFLIGHT_OUTREACH_TASKS || inFlight >= MAX_INFLIGHT_OUTREACH_TASKS) {
+            if (batch.continuationOnly) {
+              keepContinuation = true;
+              deferred += 1;
+              continue;
+            }
+            const recorded = await OutreachAutomationEnrollment.updateOne(rowFence, {
+              $set: { recoveryContinuation: {
+                requestedAt: now, configVersion: config.version, step: nextStep,
+                letterId: latestLetter._id, letterUpdatedAt: latestLetter.updatedAt,
+              } },
+            });
+            if (recorded.matchedCount) {
+              keepContinuation = true;
+              deferred += 1;
+            } else skip('跟进状态已变化，请刷新后再检查');
+            continue;
+          }
           // Claim this exact paused snapshot. An overlapping request cannot claim it again;
           // the job prepares a draft only and does not reactivate this row or send mail.
           const claim = await OutreachAutomationEnrollment.updateOne(rowFence, {
@@ -1258,7 +1326,7 @@ export async function reconcileOutreachEnrollmentsForCampaign(
             status: { $in: ['sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying', 'failed', 'cancelled'] },
           }).select('status needsReview error cancelOrigin').lean();
           if (hasOtherDelivery.some((letter) => !isSupersededArchiveCancellation(letter))
-            || await hasActiveTask(config.projectId, customer._id, nextStep) || !await currentConfigStillOpen()
+            || await hasActiveTask(config.projectId, customer._id, nextStep, existingDraftTask) || !await currentConfigStillOpen()
             || !await OutreachAutomationEnrollment.exists({ ...rowFence, pauseOrigin: 'system', queuedAt: now, updatedAt: { $ne: row.updatedAt } })) {
             skip('邮件或跟进状态已变化，请刷新后再检查');
             continue;
@@ -1279,7 +1347,7 @@ export async function reconcileOutreachEnrollmentsForCampaign(
           } catch {
             // Preserve the original if the planner could not accept a replacement.
           }
-          if (!taskId && !await hasActiveTask(config.projectId, customer._id, nextStep)) {
+          if (!taskId && !await hasActiveTask(config.projectId, customer._id, nextStep, existingDraftTask)) {
             const occupied = await DevelopmentLetter.exists({ ...stepLetterScope,
               status: { $in: ['draft', 'sent', 'opened', 'queued', 'scheduled', 'sending', 'retrying'] },
             });
@@ -1293,6 +1361,12 @@ export async function reconcileOutreachEnrollmentsForCampaign(
             skip('暂未能安排新邮件，请稍后再检查');
             continue;
           }
+          // The archived draft's review task must not block its replacement from resuming.
+          await AgentTask.updateMany({
+            projectId: config.projectId, userId: config.userId, customerId: customer._id,
+            outreachStep: nextStep, status: 'awaiting_review',
+            $or: [{ draftId: latestLetter._id }, ...(latestLetter.agentTaskId ? [{ _id: latestLetter.agentTaskId }] : [])],
+          }, { $set: { status: 'cancelled' }, $inc: { version: 1 } });
           if (taskId) await OutreachAutomationEnrollment.updateOne({ _id: row._id, status: 'paused',
             pauseOrigin: 'system', queuedAt: now,
           }, { $addToSet: { taskIds: new Types.ObjectId(taskId) } });
@@ -1410,13 +1484,24 @@ export async function reconcileOutreachEnrollmentsForCampaign(
         keptCancelled += 1;
       }
     }
+    } finally {
+      if (continuation && !keepContinuation) {
+        // Do not erase a replacement opt-in from a later explicit request.
+        await OutreachAutomationEnrollment.updateOne({
+          _id: row._id, projectId: config.projectId, userId: config.userId, campaignId: config._id,
+          'recoveryContinuation.requestedAt': continuation.requestedAt,
+          'recoveryContinuation.configVersion': continuation.configVersion,
+          'recoveryContinuation.letterId': continuation.letterId,
+        }, { $unset: { recoveryContinuation: 1 } }, { timestamps: false });
+      }
+    }
   }
 
   return {
     scanned: candidateRows.length,
     resumedPaused,
     requeuedCancelled,
-    ...(batch ? { requeuedWebsiteDrafts, reasons } : {}),
+    ...(batch ? { requeuedWebsiteDrafts, deferred, reasons } : {}),
     keptPausedManualOrUnknown,
     keptCancelled,
     keptUncertain,
@@ -1432,28 +1517,48 @@ export async function checkAndResumeOutreach(
   const target = await resolveTargetUser(actor, targetUserId);
   const config = await getConfig(actor, target.id);
   if (!config.enabled) throw ApiError.conflict('自动开发已暂停，请先开启自动开发');
-  const key = String(config._id);
-  if (activeRecoveryBatches.has(key)) throw ApiError.conflict('正在检查这批客户，请稍后查看');
   if (options.enrollmentIds && (options.enrollmentIds.length > MAX_CHECK_AND_RESUME_ROWS
     || options.enrollmentIds.some((id) => !/^[a-f\d]{24}$/i.test(id)))) {
     throw ApiError.badRequest('请选择有效的客户记录');
   }
-  activeRecoveryBatches.add(key);
+  const leaseToken = await acquireRecoveryBatchLease(config);
+  if (!leaseToken) throw ApiError.conflict('正在检查这批客户，或发送设置已变化，请稍后查看');
   try {
     if (config.rolloutMode !== 'shadow') await assertMailboxReady(actor, target.id);
     const targetActor = await getActorForConfig(config);
     const enrollmentIds = options.enrollmentIds ? [...new Set(options.enrollmentIds.map((id) => id.toLowerCase()))] : undefined;
-    const result = await reconcileOutreachEnrollmentsForCampaign(config, targetActor, new Date(), { enrollmentIds });
+    const result = await reconcileOutreachEnrollmentsForCampaign(config, targetActor, new Date(), { enrollmentIds, leaseToken });
     const overview = await getOutreachAutomationOverview(actor, target.id, { skipAutoReconcile: true });
     const resumed = result.resumedPaused;
     const requeued = result.requeuedWebsiteDrafts ?? 0;
-    const skipped = (enrollmentIds?.length ?? result.scanned) - resumed - requeued;
+    const deferred = result.deferred ?? 0;
+    const skipped = (enrollmentIds?.length ?? result.scanned) - resumed - requeued - deferred;
     const reasons = result.reasons ?? {};
     const noLongerPaused = (enrollmentIds?.length ?? result.scanned) - result.scanned;
     if (noLongerPaused > 0) reasons['记录不可用或已不在暂停列表'] = noLongerPaused;
-    return { resumed, requeued, skipped, reasons, overview };
+    return { resumed, requeued, deferred, skipped, reasons, overview };
   } finally {
-    activeRecoveryBatches.delete(key);
+    await releaseRecoveryBatchLease(config, leaseToken);
+  }
+}
+
+/** Drain only rows that an explicit check deferred; do not adopt historical pauses. */
+export async function drainOutreachRecoveryContinuation(
+  config: InstanceType<typeof OutreachAutomationConfig>, actor: AuthUser, now = new Date(),
+) {
+  if (!config.enabled) return;
+  const scope = { projectId: config.projectId, userId: config.userId, campaignId: config._id };
+  if (!await OutreachAutomationEnrollment.exists({ ...scope, recoveryContinuation: { $exists: true } })) return;
+  const leaseToken = await acquireRecoveryBatchLease(config);
+  if (!leaseToken) return;
+  try {
+    await OutreachAutomationEnrollment.updateMany({ ...scope, recoveryContinuation: { $exists: true }, $or: [
+      { 'recoveryContinuation.configVersion': { $ne: config.version } },
+      { status: { $ne: 'paused' } }, { pauseOrigin: 'manual' },
+    ] }, { $unset: { recoveryContinuation: 1 } }, { timestamps: false });
+    return await reconcileOutreachEnrollmentsForCampaign(config, actor, now, { continuationOnly: true, leaseToken });
+  } finally {
+    await releaseRecoveryBatchLease(config, leaseToken);
   }
 }
 
@@ -1629,6 +1734,7 @@ export async function getOutreachAutomationOverview(
   let contextWarningDrafts = 0;
   let pausedReadyCount = 0;
   let checkAndResumeCount = 0;
+  let continuationPendingCount = 0;
   let deliveryUncertainCount = 0;
   let deliveryFailedCount = 0;
   let deliveryCancelledCount = 0;
@@ -1885,7 +1991,12 @@ export async function getOutreachAutomationOverview(
       && !isRuleStopped,
     );
     if (pausedReadyToResume) pausedReadyCount += 1;
-    const canCheckAndResume = Boolean(config.enabled && pauseOrigin === 'system' && actualStep < MAX_AUTO_STEPS
+    const continuationPending = Boolean(config.enabled && pauseOrigin === 'system' && row.recoveryContinuation
+      && row.recoveryContinuation.configVersion === config.version && row.recoveryContinuation.step === nextStep
+      && nextLetterStatus === 'draft' && String(row.recoveryContinuation.letterId) === String(nextLetter?._id)
+      && row.recoveryContinuation.letterUpdatedAt.getTime() === nextLetter?.updatedAt?.getTime());
+    if (continuationPending) continuationPendingCount += 1;
+    const canCheckAndResume = Boolean(config.enabled && !continuationPending && pauseOrigin === 'system' && actualStep < MAX_AUTO_STEPS
       && nextLetterStatus === 'draft' && !taskInFlight && !isRuleStopped && nextLetter?.review?.decision !== 'rejected');
     if (canCheckAndResume) checkAndResumeCount += 1;
     const pauseSummary = pauseOrigin === 'manual' ? '已手动暂停跟进，不会自动发信'
@@ -2002,6 +2113,7 @@ export async function getOutreachAutomationOverview(
       status: row.status,
       ...(pauseOrigin ? { pauseOrigin } : {}),
       ...(pauseSummary ? { pauseSummary, canCheckAndResume } : {}),
+      ...(continuationPending ? { continuationPending: true } : {}),
       currentStep: actualStep,
       actualStep,
       nextStep,
@@ -2084,6 +2196,7 @@ export async function getOutreachAutomationOverview(
       contextWarningDrafts,
       pausedReadyCount,
       checkAndResumeCount,
+      continuationPendingCount,
       deliveryUncertainCount,
       deliveryFailedCount,
       deliveryCancelledCount,
@@ -2338,7 +2451,11 @@ export async function pauseOutreachAutomation(
   );
   await OutreachAutomationEnrollment.updateMany(
     { campaignId: config._id, status: 'active' },
-    { $set: { status: 'paused', pauseOrigin: 'manual', pausedAt: now, pausedReason: reason, nextRunAt: now } },
+    { $set: { status: 'paused', pauseOrigin: 'manual', pausedAt: now, pausedReason: reason, nextRunAt: now }, $unset: { recoveryContinuation: 1 } },
+  );
+  await OutreachAutomationEnrollment.updateMany(
+    { campaignId: config._id, projectId: config.projectId, userId: config.userId, recoveryContinuation: { $exists: true } },
+    { $unset: { recoveryContinuation: 1 } }, { timestamps: false },
   );
   return getOutreachAutomationOverview(actor, target.id);
 }
@@ -2376,11 +2493,12 @@ export async function controlOutreachEnrollment(
   });
   if (!enrollment) throw ApiError.notFound('自动开发队列项不存在');
   if (action === 'pause') {
-    if (enrollment.status === 'active') {
+    if (enrollment.status === 'active' || enrollment.status === 'paused') {
       const now = new Date();
       await OutreachAutomationEnrollment.updateOne(
-        { _id: enrollment._id, status: 'active' },
-        { $set: { status: 'paused', pauseOrigin: 'manual', pausedAt: now, pausedReason: '业务员手动暂停', nextRunAt: now } },
+        { _id: enrollment._id, status: enrollment.status },
+        { $set: { status: 'paused', pauseOrigin: 'manual', pausedAt: now, pausedReason: '业务员手动暂停', nextRunAt: now },
+          $unset: { recoveryContinuation: 1 } },
       );
     }
   } else {
@@ -3884,12 +4002,20 @@ async function findDraft(projectId: Types.ObjectId, customerId: Types.ObjectId, 
   }).sort({ createdAt: -1 });
 }
 
-async function hasActiveTask(projectId: Types.ObjectId, customerId: Types.ObjectId, step: number) {
+async function hasActiveTask(
+  projectId: Types.ObjectId, customerId: Types.ObjectId, step: number,
+  savedDraft?: { userId: Types.ObjectId; letterId: Types.ObjectId; taskId?: Types.ObjectId },
+) {
   return AgentTask.exists({
     projectId,
     customerId,
     outreachStep: step,
     status: { $in: ['queued', 'running', 'paused', 'waiting_input', 'awaiting_review'] },
+    // The task that saved this exact draft is not preparing another email.
+    ...(savedDraft ? { $nor: [{
+      status: 'awaiting_review', userId: savedDraft.userId,
+      $or: [{ draftId: savedDraft.letterId }, ...(savedDraft.taskId ? [{ _id: savedDraft.taskId }] : [])],
+    }] } : {}),
   });
 }
 
@@ -4306,6 +4432,8 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
         return;
       }
 
+      // Honor durable explicit selections before generating more ordinary drafts.
+      await drainOutreachRecoveryContinuation(config, actor, now).catch(() => undefined);
       // Safe sweep for previously system-paused / transient-cancelled records so existing records recover cleanly
       await reconcileOutreachEnrollmentsForCampaign(config, actor, now).catch(() => undefined);
 

@@ -32,6 +32,8 @@ export interface IOutreachAutomationConfig {
   nextPacingAt?: Date;
   version: number;
   lastTickAt?: Date;
+  /** Serializes explicit recovery and its worker continuation across processes. */
+  recoveryBatchLease?: { token: Types.ObjectId; until: Date };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +56,8 @@ export interface IOutreachAutomationEnrollment {
   pauseOrigin?: 'manual' | 'system';
   pausedAt?: Date;
   pausedReason?: string;
+  /** Explicit batch request deferred solely because draft-generation capacity was full. */
+  recoveryContinuation?: { requestedAt: Date; configVersion: number; step: number; letterId: Types.ObjectId; letterUpdatedAt: Date };
   /** 已发出的开发信封数；以 Customer.outreachStep 为准，这里只做队列展示。 */
   currentStep: number;
   nextRunAt: Date;
@@ -90,6 +94,10 @@ const configSchema = new Schema<IOutreachAutomationConfig>(
     nextPacingAt: Date,
     version: { type: Number, default: 0, min: 0 },
     lastTickAt: Date,
+    recoveryBatchLease: {
+      type: new Schema({ token: { type: Schema.Types.ObjectId, required: true }, until: { type: Date, required: true } }, { _id: false }),
+      default: undefined,
+    },
   },
   { timestamps: true, versionKey: false },
 );
@@ -114,6 +122,14 @@ const enrollmentSchema = new Schema<IOutreachAutomationEnrollment>(
     },
     pausedAt: Date,
     pausedReason: { type: String, maxlength: 300 },
+    recoveryContinuation: {
+      type: new Schema({
+        requestedAt: { type: Date, required: true }, configVersion: { type: Number, required: true },
+        step: { type: Number, required: true, min: 1, max: 3 },
+        letterId: { type: Schema.Types.ObjectId, required: true }, letterUpdatedAt: { type: Date, required: true },
+      }, { _id: false }),
+      default: undefined,
+    },
     currentStep: { type: Number, default: 0, min: 0, max: 3 },
     nextRunAt: { type: Date, required: true, index: true },
     queuedStep: { type: Number, min: 1, max: 3 },

@@ -68,9 +68,10 @@ export function planForCustomer(
   activeTasks: SequenceTask[],
 ): OutreachSequencePlan {
   const customerId = String(customer._id);
-  const liveDraftIds = new Set(letters.map((letter) => String(letter._id)));
   const sent = letters.filter((letter) => SENT_STATUSES.has(String(letter.status)));
   const drafts = letters.filter((letter) => OCCUPIED_LETTER_STATUSES.has(String(letter.status)));
+  // Archived/cancelled drafts remain in history but no longer occupy a step.
+  const liveDraftIds = new Set([...drafts, ...sent].map((letter) => String(letter._id)));
   const sentSteps = new Set<number>();
   const draftSteps = new Set<number>();
   for (const letter of sent) {
