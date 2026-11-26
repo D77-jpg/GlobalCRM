@@ -2826,18 +2826,93 @@ test('Section 12: safe auto-resume of system pauses, cancelOrigin recovery, unce
         customerId: custLegacySysPaused.id,
         customerWebsites: [{ sourceId: 'website:expired-fictional-snapshot', sha256: '0'.repeat(64), url: 'https://example.test/', text: 'Fictional old evidence', collectedAt: new Date(0).toISOString() }],
       } } });
+      // The real worker leaves the task awaiting review after saving a draft.
+      const savedTask = await AgentTask.create({
+        projectId: projectAId, userId: rep._id, customerId: custLegacySysPaused._id,
+        sessionId: new Types.ObjectId(), actorRole: 'user', goal: 'Fictional saved draft',
+        requestKey: 'recovery-saved-draft-task', kind: 'first_outreach',
+        outreachStep: stale.outreachStep, status: 'awaiting_review', draftId: stale._id,
+      });
       const rebuild = await postBatch([enrLegacySysPaused.id]);
       assert.equal(rebuild.status, 200);
-      const rebuilt = await rebuild.json() as { data: { resumed: number; requeued: number; skipped: number } };
-      assert.deepEqual([rebuilt.data.resumed, rebuilt.data.requeued, rebuilt.data.skipped], [0, 1, 0]);
+      const rebuilt = await rebuild.json() as { data: { resumed: number; requeued: number; skipped: number; reasons?: Record<string, number> } };
+      assert.deepEqual([rebuilt.data.resumed, rebuilt.data.requeued, rebuilt.data.skipped], [0, 1, 0], JSON.stringify(rebuilt.data.reasons));
       assert.equal((await OutreachAutomationEnrollment.findById(enrLegacySysPaused._id))?.status, 'paused');
       assert.equal((await DevelopmentLetter.findById(stale._id))?.cancelOrigin, 'superseded');
+      assert.equal((await AgentTask.findById(savedTask._id))?.status, 'cancelled');
       const taskFilter = { customerId: custLegacySysPaused._id, status: 'queued' };
       assert.equal(await AgentTask.countDocuments(taskFilter), 1);
       const repeatRebuild = await postBatch([enrLegacySysPaused.id]);
       const repeatedRebuild = await repeatRebuild.json() as { data: { requeued: number } };
       assert.equal(repeatedRebuild.data.requeued, 0);
       assert.equal(await AgentTask.countDocuments(taskFilter), 1);
+
+      // Simulate the rest of a one-click batch waiting on the generation ceiling. The worker
+      // loads a fresh config and drains only selected, persisted rows without a second click.
+      const recoveryCustomers = await Customer.create(['deferred', 'untouched', 'replied', 'manual', 'changed', 'config'].map((key) => ({
+        projectId: projectAId, ownerId: rep._id, name: `Recovery ${key}`, country: 'United States',
+        email: `${key}-recovery@example.test`, status: 'pending',
+      })));
+      const recoveryRows = await OutreachAutomationEnrollment.create(recoveryCustomers.map((customer) => ({
+        projectId: projectAId, userId: rep._id, campaignId: campaign._id, customerId: customer._id,
+        status: 'paused', pauseOrigin: 'system', nextRunAt: new Date(),
+      })));
+      const recoveryDrafts = await DevelopmentLetter.create(recoveryCustomers.map((customer) => {
+        const draft = makeVerifiedDraft(customer._id, customer.email!);
+        return { ...draft, knowledgeReview: { ...draft.knowledgeReview, context: {
+          customerId: customer.id,
+          customerWebsites: [{ sourceId: 'website:expired-fictional-snapshot', sha256: '0'.repeat(64), url: 'https://example.test/', text: 'Fictional old evidence', collectedAt: new Date(0).toISOString() }],
+        } } };
+      }));
+      const capacityTasks = await AgentTask.create([0, 1, 2].map((i) => ({
+        projectId: projectAId, userId: rep._id, customerId: new Types.ObjectId(),
+        sessionId: new Types.ObjectId(), actorRole: 'user', goal: 'Fictional occupied capacity',
+        requestKey: `recovery-capacity-${i}`, kind: 'first_outreach', outreachStep: 1, status: 'queued',
+      })));
+      const selected = [0, 2, 3, 4].map((i) => recoveryRows[i]!.id);
+      const deferredResponse = await postBatch(selected);
+      assert.equal(deferredResponse.status, 200);
+      const deferredResult = await deferredResponse.json() as {data: {deferred: number; skipped: number; requeued: number; overview: {stats: {continuationPendingCount: number}}}};
+      assert.deepEqual([deferredResult.data.deferred, deferredResult.data.skipped, deferredResult.data.requeued], [4, 0, 0]);
+      assert.equal(deferredResult.data.overview.stats.continuationPendingCount, 4);
+      for (const i of [0, 2, 3, 4]) assert.ok((await OutreachAutomationEnrollment.findById(recoveryRows[i]!._id))?.recoveryContinuation);
+      assert.equal((await OutreachAutomationEnrollment.findById(recoveryRows[1]!._id))?.recoveryContinuation, undefined);
+      const { drainOutreachRecoveryContinuation, controlOutreachEnrollment } = await import('../src/services/outreach-automation.service');
+      const confirmedActor = { ...actorA, id: rep.id, role: 'user' as const };
+      const loadedConfig = await OutreachAutomationConfig.findById(campaign._id);
+      assert.ok(loadedConfig);
+      assert.equal((await drainOutreachRecoveryContinuation(loadedConfig, confirmedActor))?.deferred, 4);
+      await Customer.updateOne({ _id: recoveryCustomers[2]!._id }, { $set: { status: 'replied' } });
+      await controlOutreachEnrollment(confirmedActor, recoveryRows[3]!.id, 'pause');
+      await DevelopmentLetter.updateOne({ _id: recoveryDrafts[4]!._id }, { $set: { subject: 'Changed fictional draft' } });
+      await AgentTask.updateMany({ _id: { $in: capacityTasks.map((t) => t._id) } }, { $set: { status: 'cancelled' } });
+      const drained = await drainOutreachRecoveryContinuation(loadedConfig, confirmedActor);
+      assert.equal(drained?.requeuedWebsiteDrafts, 1);
+      assert.equal((await DevelopmentLetter.findById(recoveryDrafts[0]!._id))?.cancelOrigin, 'superseded');
+      for (const i of [1, 2, 3, 4]) assert.equal((await DevelopmentLetter.findById(recoveryDrafts[i]!._id))?.status, 'draft');
+      for (const row of recoveryRows) {
+        const current = await OutreachAutomationEnrollment.findById(row._id);
+        assert.equal(current?.status, 'paused');
+        assert.equal(current?.recoveryContinuation, undefined);
+      }
+      assert.equal((await OutreachAutomationEnrollment.findById(recoveryRows[3]!._id))?.pauseOrigin, 'manual');
+      assert.equal(await AgentTask.countDocuments({ customerId: recoveryCustomers[0]!._id, status: 'queued' }), 1);
+      assert.equal(await DevelopmentLetter.countDocuments({ customerId: { $in: recoveryCustomers.map((x) => x._id) }, status: 'sent' }), 0);
+      assert.equal(await drainOutreachRecoveryContinuation(loadedConfig, confirmedActor), undefined);
+
+      // A pause/resume or other config revision invalidates older opt-ins.
+      await AgentTask.updateMany({ _id: { $in: capacityTasks.map((t) => t._id) } }, { $set: { status: 'queued' } });
+      const configDeferral = await postBatch([recoveryRows[5]!.id]);
+      assert.equal(configDeferral.status, 200);
+      assert.equal((await configDeferral.json() as {data: {deferred: number}}).data.deferred, 1);
+      await OutreachAutomationConfig.updateOne({ _id: loadedConfig._id }, { $set: { enabled: false }, $inc: { version: 1 } });
+      assert.equal(await drainOutreachRecoveryContinuation(loadedConfig, confirmedActor), undefined);
+      await OutreachAutomationConfig.updateOne({ _id: loadedConfig._id }, { $set: { enabled: true }, $inc: { version: 1 } });
+      const revisedConfig = await OutreachAutomationConfig.findById(loadedConfig._id);
+      assert.ok(revisedConfig);
+      await drainOutreachRecoveryContinuation(revisedConfig, confirmedActor);
+      assert.equal((await OutreachAutomationEnrollment.findById(recoveryRows[5]!._id))?.recoveryContinuation, undefined);
+      assert.equal((await DevelopmentLetter.findById(recoveryDrafts[5]!._id))?.status, 'draft');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
