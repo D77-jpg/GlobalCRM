@@ -334,7 +334,7 @@ function nextActionLabel(row: OutreachAutomationQueueRow, windowOpen: boolean, w
     return '先核对发件邮箱的「已发送」；确认前不会重发';
   }
   if (row.draftStage === 'delivery_failed') {
-    return `第 ${row.nextStep} 封未发出，请检查客户邮箱或发件记录后再决定是否重新安排`;
+    return `第 ${row.nextStep} 封未发出；在邮件中心核实为未投递后系统会自动重新安排，仍卡住时点「重新生成」`;
   }
   if (row.draftStage === 'delivery_cancelled') {
     return '无需操作；如需继续跟进可点「重新安排」';

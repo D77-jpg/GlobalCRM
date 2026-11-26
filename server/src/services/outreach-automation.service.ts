@@ -211,6 +211,8 @@ export function humanizeTaskError(error?: { code?: string; message?: string } | 
 }
 
 const SUPERSEDED_ARCHIVE_ERROR = '已发起重新生成并核验，原未核验草稿归档保留';
+/** Exact error an admin sets when they confirm in the mail center that a letter never went out. */
+export const CONFIRMED_UNDELIVERED_LETTER_ERROR = '管理员已核实未投递，可重新发送';
 const STALE_SAVED_SEND_ERROR = '发送任务已保存，可在邮件中心查看进度';
 const ACTIVE_LETTER_STATUSES = new Set(['draft', 'queued', 'scheduled', 'sending', 'retrying']);
 const WAITING_DELIVERY_STATUSES = new Set(['queued', 'scheduled', 'sending', 'retrying']);
@@ -1562,6 +1564,146 @@ export async function drainOutreachRecoveryContinuation(
   }
 }
 
+/**
+ * Resume the queue immediately after a safe in-place recovery/regeneration instead of waiting
+ * for the next worker tick. Never sends email: it only runs the existing check-and-resume logic.
+ */
+async function runImmediateRecoveryCheck(
+  config: InstanceType<typeof OutreachAutomationConfig>,
+  enrollmentId: Types.ObjectId,
+  now: Date,
+): Promise<boolean> {
+  try {
+    const targetActor = await getActorForConfig(config);
+    const leaseToken = await acquireRecoveryBatchLease(config);
+    if (!leaseToken) return false;
+    try {
+      const result = await reconcileOutreachEnrollmentsForCampaign(config, targetActor, now, { enrollmentIds: [String(enrollmentId)], leaseToken });
+      return result.resumedPaused > 0;
+    } finally {
+      await releaseRecoveryBatchLease(config, leaseToken);
+    }
+  } catch {
+    // The worker tick retries; the row stays paused and visible for an explicit check.
+    return false;
+  }
+}
+
+/**
+ * An administrator confirmed in the mail center that a letter was NOT delivered. Leaving the
+ * customer on a "failed" row until someone clicks again is what made the queue look stuck, so:
+ *  - when the existing content still passes the body audit, revive it as a draft and hand it to
+ *    the normal resume check (freshness / replies / window / quota still apply), or
+ *  - otherwise archive it (never delete) and queue a fresh verified draft automatically.
+ * Both paths are automatic; sending still only happens through the normal guarded send path.
+ */
+async function recoverConfirmedUndeliveredLetter(
+  config: InstanceType<typeof OutreachAutomationConfig>,
+  letter: InstanceType<typeof DevelopmentLetter>,
+  now: Date,
+): Promise<{ recovered: boolean; mode?: 'resend' | 'regenerate'; reason?: string; step?: number }> {
+  const step = Number(letter.outreachStep ?? 0);
+  if (!Number.isInteger(step) || step < 1 || step > MAX_AUTO_STEPS) return { recovered: false, reason: '这封邮件不属于自动开发' };
+  if (String(letter.automationCampaignId ?? '') !== String(config._id)) return { recovered: false, reason: '这封邮件不属于当前自动开发设置' };
+  const enrollment = await OutreachAutomationEnrollment.findOne({
+    _id: letter.automationEnrollmentId, projectId: config.projectId, userId: config.userId, campaignId: config._id,
+  });
+  if (!enrollment) return { recovered: false, reason: '这封邮件不在自动开发队列中' };
+  const customer = await Customer.findOne({ _id: letter.customerId, projectId: config.projectId, ownerId: config.userId })
+    .select('outreachStep letterCount status email outreachRepliedAt outreachAbandonedAt outreachLastAt createdAt').lean();
+  if (!customer || !customer.email) return { recovered: false, reason: '客户已删除或缺少邮箱' };
+  if (!AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number])
+    || customer.outreachAbandonedAt || customer.outreachRepliedAt) {
+    return { recovered: false, reason: '客户已回复或不再符合跟进条件' };
+  }
+  const nextStep = Math.min(MAX_AUTO_STEPS, Math.max(
+    Number(customer.outreachStep ?? 0), Number(customer.letterCount ?? 0), Number(enrollment.currentStep ?? 0),
+  )) + 1;
+  if (nextStep > MAX_AUTO_STEPS || nextStep !== step) return { recovered: false, reason: '跟进进度已变化，请刷新后查看' };
+  const latest = await DevelopmentLetter.findOne({
+    projectId: config.projectId, customerId: letter.customerId, outreachStep: step,
+    status: { $in: ['failed', 'draft', 'queued', 'scheduled', 'sending', 'retrying', 'sent', 'opened'] },
+  }).sort({ createdAt: -1 }).select('_id').lean();
+  if (!latest || String(latest._id) !== String(letter._id)) return { recovered: false, reason: '这一步已有更新的邮件，请查看详情' };
+
+  const bodyAudit = inspectBodyFactAudit(
+    letter.knowledgeReview as Parameters<typeof inspectBodyFactAudit>[0],
+    { needsReview: Boolean(letter.needsReview), approved: letter.review?.decision === 'approved' },
+  );
+  const contentChanged = Boolean(letter.knowledgeReview?.bodyHash && letter.knowledgeReview.bodyHash !== draftHash(letter.contentText ?? ''));
+  const canResend = bodyAudit.passed && !contentChanged && letter.review?.decision !== 'rejected';
+
+  if (canResend) {
+    const revived = await DevelopmentLetter.updateOne({
+      _id: letter._id, projectId: config.projectId, customerId: letter.customerId, outreachStep: step,
+      status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+    }, {
+      $set: { status: 'draft', error: '', effectsPending: false },
+      $push: { history: { at: now, status: 'draft', error: '管理员已核实未投递，自动开发将重新检查后发送' } },
+    });
+    if (!revived.modifiedCount) return { recovered: false, reason: '邮件状态已变化，请刷新后查看' };
+    await OutreachAutomationEnrollment.updateOne({
+      _id: enrollment._id, projectId: config.projectId, userId: config.userId, campaignId: config._id,
+    }, {
+      $set: {
+        status: 'paused', pauseOrigin: 'system', pausedAt: now, nextRunAt: now, lastError: null, attempts: 0,
+        pausedReason: '上一封邮件已核实未投递，正在重新检查',
+      },
+      $unset: { recoveryContinuation: 1 },
+    });
+    return { recovered: true, mode: 'resend', step };
+  }
+  // The existing content cannot pass the body audit as-is: archive it and prepare a fresh draft.
+  // supersedeUnverifiedDraftAndRequeue owns the enrollment bookkeeping for that flow.
+  const targetActor = await getActorForConfig(config);
+  const regen = await supersedeUnverifiedDraftAndRequeue(config, enrollment, targetActor, now, { onlyIfUnverified: false });
+  if (!regen.queued) return { recovered: false, reason: regen.skippedReason || '暂时无法重新准备这封邮件' };
+  return { recovered: true, mode: 'regenerate', step };
+}
+
+/** Worker sweep: pick up admin-confirmed undelivered letters that were resolved while the app was off. */
+export async function recoverConfirmedUndeliveredOutreach(
+  config: InstanceType<typeof OutreachAutomationConfig>,
+  now = new Date(),
+): Promise<number> {
+  if (!config.enabled) return 0;
+  const letters = await DevelopmentLetter.find({
+    projectId: config.projectId, automationCampaignId: config._id,
+    status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+    outreachStep: { $in: [1, 2, 3] },
+  }).sort({ updatedAt: 1 }).limit(10);
+  let recovered = 0;
+  for (const letter of letters) {
+    const result = await recoverConfirmedUndeliveredLetter(config, letter, now).catch(() => ({ recovered: false }));
+    if (result.recovered) recovered += 1;
+  }
+  return recovered;
+}
+
+/** Called right after an admin confirms "未发出" in the mail center. */
+export async function retryConfirmedUndeliveredOutreachLetter(
+  letterId: string,
+): Promise<{ recovered: boolean; resumed: boolean; mode?: 'resend' | 'regenerate'; reason?: string }> {
+  const now = new Date();
+  const letter = await DevelopmentLetter.findOne({
+    _id: letterId, status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+  });
+  if (!letter) return { recovered: false, resumed: false, reason: '邮件不在可重新发送状态' };
+  const config = await OutreachAutomationConfig.findOne({
+    _id: letter.automationCampaignId, projectId: letter.projectId, enabled: true,
+  });
+  if (!config) return { recovered: false, resumed: false, reason: '自动开发未开启' };
+  const result = await recoverConfirmedUndeliveredLetter(config, letter, now);
+  if (!result.recovered) return { recovered: false, resumed: false, reason: result.reason };
+  const enrollment = await OutreachAutomationEnrollment.findOne({
+    _id: letter.automationEnrollmentId, campaignId: config._id,
+  }).select('_id').lean();
+  const resumed = result.mode === 'resend' && enrollment
+    ? await runImmediateRecoveryCheck(config, enrollment._id, now)
+    : false;
+  return { recovered: true, resumed, mode: result.mode };
+}
+
 export async function reconcileOutreachCampaign(
   actor: AuthUser,
   targetUserId?: string,
@@ -2507,18 +2649,34 @@ export async function controlOutreachEnrollment(
     if (!['paused', 'failed'].includes(enrollment.status) && !canRecoverBlocked) {
       throw ApiError.conflict('当前客户不在可继续跟进的状态');
     }
-    // If the current next-step draft is unverified/partial, supersede it and queue a fresh verified draft
-    // instead of looping back into the exact same verification block.
-    const targetActor = await getActorForConfig(config);
-    const regen = await supersedeUnverifiedDraftAndRequeue(config, enrollment, targetActor, new Date(), { onlyIfUnverified: true });
-    if (!regen.queued) {
-      await OutreachAutomationEnrollment.updateOne(
-        { _id: enrollment._id },
-        {
-          $set: { status: 'active', nextRunAt: new Date(), lastError: null, attempts: 0 },
-          $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1 },
-        },
-      );
+    const now = new Date();
+    // An admin already confirmed this letter never went out: bring it straight back into the
+    // automatic flow (resend the verified content, or prepare a fresh draft) instead of bouncing
+    // between "active" and "failed" on the next tick.
+    const confirmedUndelivered = await DevelopmentLetter.findOne({
+      projectId: config.projectId, customerId: enrollment.customerId, automationEnrollmentId: enrollment._id,
+      status: 'failed', needsReview: false, error: CONFIRMED_UNDELIVERED_LETTER_ERROR,
+    }).sort({ createdAt: -1 });
+    const recovered = confirmedUndelivered
+      ? await recoverConfirmedUndeliveredLetter(config, confirmedUndelivered, now)
+      : undefined;
+    if (recovered?.recovered) {
+      if (recovered.mode === 'resend') await runImmediateRecoveryCheck(config, enrollment._id, now);
+    } else {
+      // If the current next-step draft is unverified/partial, supersede it and queue a fresh verified draft
+      // instead of looping back into the exact same verification block. A confirmed-undelivered letter
+      // is archived here as well, so the row no longer bounces back to "failed" on the next tick.
+      const targetActor = await getActorForConfig(config);
+      const regen = await supersedeUnverifiedDraftAndRequeue(config, enrollment, targetActor, now, { onlyIfUnverified: true });
+      if (!regen.queued) {
+        await OutreachAutomationEnrollment.updateOne(
+          { _id: enrollment._id },
+          {
+            $set: { status: 'active', nextRunAt: new Date(), lastError: null, attempts: 0 },
+            $unset: { pauseOrigin: 1, pausedAt: 1, pausedReason: 1 },
+          },
+        );
+      }
     }
   }
   return getOutreachAutomationOverview(actor, target.id);
@@ -2530,7 +2688,7 @@ async function supersedeUnverifiedDraftAndRequeue(
   targetActor: AuthUser,
   now: Date,
   options: { onlyIfUnverified: boolean },
-): Promise<{ queued: boolean; taskId?: string; skippedReason?: string }> {
+): Promise<{ queued: boolean; taskId?: string; step?: number; skippedReason?: string }> {
   const customer = await Customer.findOne({
     _id: enrollment.customerId,
     projectId: config.projectId,
@@ -2575,48 +2733,58 @@ async function supersedeUnverifiedDraftAndRequeue(
 
   const draft = await findDraft(config.projectId, customer._id, nextStep);
   if (draft) {
-    if (draft.status !== 'draft') {
-      return { queued: false, skippedReason: `第 ${nextStep} 封当前状态为 ${draft.status}，跳过重建` };
-    }
-    if (draft.review?.decision === 'approved') {
-      return { queued: false, skippedReason: '草稿已人工审核通过，保留不覆盖' };
-    }
-    const audit = inspectOutreachDraftAudit(draft);
-    if (options.onlyIfUnverified && !audit.needsReverify) {
-      return {
-        queued: false,
-        skippedReason: audit.contextWarnings.length > 0
-          ? '正文核验已通过（仅有背景资料缺口提醒，不拦截发送，无需重建）'
-          : '正文核验已完成（如有其他发送拦截请按对应入口处理）',
-      };
-    }
-    // Item 5: Do not repeatedly regenerate Step-1 drafts that already failed for missing published
-    // supplier capability evidence when the project STILL has no published capability knowledge/proof blocks.
-    if (nextStep === 1) {
-      const hasMissingEvidenceFailure = Boolean(
-        draft.knowledgeReview?.issues?.some((i) => i.code === 'missing_supplier_evidence')
-        || (!audit.needsReverify && automatedReviewIssue(draft.knowledgeReview, 1)?.includes('首封缺少已发布的我方能力依据')),
+    if (draft.status === 'failed') {
+      // A previous attempt was confirmed not delivered (or the transport rejected it). Keep the
+      // record as an archive instead of letting "failed" permanently block this step.
+      await DevelopmentLetter.updateOne(
+        { _id: draft._id, projectId: config.projectId, status: 'failed', needsReview: false },
+        {
+          $set: { status: 'cancelled', cancelOrigin: 'superseded', error: SUPERSEDED_ARCHIVE_ERROR },
+          $push: { history: { at: now, status: 'cancelled', error: '原先未发出的邮件已归档，重新生成新稿' } },
+        },
       );
-      if (hasMissingEvidenceFailure && !(await hasProjectStep1CapabilityEvidence(config.projectId))) {
+    } else if (draft.status !== 'draft') {
+      return { queued: false, skippedReason: `第 ${nextStep} 封当前状态为 ${draft.status}，跳过重建` };
+    } else if (draft.review?.decision === 'approved') {
+      return { queued: false, skippedReason: '草稿已人工审核通过，保留不覆盖' };
+    } else {
+      const audit = inspectOutreachDraftAudit(draft);
+      if (options.onlyIfUnverified && !audit.needsReverify) {
         return {
           queued: false,
-          skippedReason: '缺少已发布的我方能力依据（需至少 1 条已发布的公司简介/工厂产能、产品规格、资质认证文档，或启用英文预审卖点块）；请先补充后再重建，避免重复生成同样被拦的稿件',
+          skippedReason: audit.contextWarnings.length > 0
+            ? '正文核验已通过（仅有背景资料缺口提醒，不拦截发送，无需重建）'
+            : '正文核验已完成（如有其他发送拦截请按对应入口处理）',
         };
       }
-    }
-    // Archive the stale/unverified draft as cancelled (never hard-delete) so audit history is preserved
-    // and queueOutreachStep / findDraft treat this step as cleanly ready for fresh generation.
-    await DevelopmentLetter.updateOne(
-      { _id: draft._id, projectId: config.projectId, status: 'draft' },
-      {
-        $set: {
-          status: 'cancelled',
-          cancelOrigin: 'superseded',
-          error: SUPERSEDED_ARCHIVE_ERROR,
+      // Item 5: Do not repeatedly regenerate Step-1 drafts that already failed for missing published
+      // supplier capability evidence when the project STILL has no published capability knowledge/proof blocks.
+      if (nextStep === 1) {
+        const hasMissingEvidenceFailure = Boolean(
+          draft.knowledgeReview?.issues?.some((i) => i.code === 'missing_supplier_evidence')
+          || (!audit.needsReverify && automatedReviewIssue(draft.knowledgeReview, 1)?.includes('首封缺少已发布的我方能力依据')),
+        );
+        if (hasMissingEvidenceFailure && !(await hasProjectStep1CapabilityEvidence(config.projectId))) {
+          return {
+            queued: false,
+            skippedReason: '缺少已发布的我方能力依据（需至少 1 条已发布的公司简介/工厂产能、产品规格、资质认证文档，或启用英文预审卖点块）；请先补充后再重建，避免重复生成同样被拦的稿件',
+          };
+        }
+      }
+      // Archive the stale/unverified draft as cancelled (never hard-delete) so audit history is preserved
+      // and queueOutreachStep / findDraft treat this step as cleanly ready for fresh generation.
+      await DevelopmentLetter.updateOne(
+        { _id: draft._id, projectId: config.projectId, status: 'draft' },
+        {
+          $set: {
+            status: 'cancelled',
+            cancelOrigin: 'superseded',
+            error: SUPERSEDED_ARCHIVE_ERROR,
+          },
+          $push: { history: { at: now, status: 'cancelled' } },
         },
-        $push: { history: { at: now, status: 'cancelled' } },
-      },
-    );
+      );
+    }
   } else if (options.onlyIfUnverified) {
     return { queued: false, skippedReason: '当前无待重核验草稿' };
   }
@@ -2683,7 +2851,7 @@ async function supersedeUnverifiedDraftAndRequeue(
     });
   }
 
-  return { queued: true, taskId: queued.taskId };
+  return { queued: true, taskId: queued.taskId, step: nextStep };
 }
 
 /**
@@ -4434,6 +4602,8 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
 
       // Honor durable explicit selections before generating more ordinary drafts.
       await drainOutreachRecoveryContinuation(config, actor, now).catch(() => undefined);
+      // Admin-confirmed "未投递" letters re-enter the safe flow without another click.
+      await recoverConfirmedUndeliveredOutreach(config, now).catch(() => undefined);
       // Safe sweep for previously system-paused / transient-cancelled records so existing records recover cleanly
       await reconcileOutreachEnrollmentsForCampaign(config, actor, now).catch(() => undefined);
 

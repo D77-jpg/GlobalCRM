@@ -728,10 +728,26 @@ export function MailPage(): React.JSX.Element {
       title="确认这封邮件是否已发出"
       description={resolve === 'sent'
         ? '请先在发件邮箱确认客户已收到或已发出。确认后会标记为「已发送」。'
-        : '请先在发件邮箱确认这封邮件确实未发出。确认后会解除锁定，之后可以重新编辑发送。'}
+        : '请先在发件邮箱确认这封邮件确实未发出。确认后，属于自动开发的邮件会自动重新检查并安排发送；其他邮件可以重新编辑发送。'}
       confirmText={resolve === 'sent' ? '确认已发出' : '确认未发出'}
       loading={busy}
-      onConfirm={() => action(async () => { await apiPost(`/mail/${detail?.mail.id}/resolve`, { outcome: resolve }); setResolve(null); }, resolve === 'sent' ? '已标记为已发送' : '已确认未发出，现在可以重新编辑发送')}
+      onConfirm={() => action(async () => {
+        const res = await apiPost<{ autoFollowUp?: { recovered: boolean; mode?: 'resend' | 'regenerate' } }>(
+          `/mail/${detail?.mail.id}/resolve`, { outcome: resolve },
+        );
+        setResolve(null);
+        if (resolve === 'sent') {
+          toast.success('已标记为已发送');
+        } else if (res.autoFollowUp?.recovered) {
+          toast.success('已确认未发出', {
+            description: res.autoFollowUp.mode === 'resend'
+              ? '系统会自动重新检查并安排发送，无需再操作。'
+              : '系统正在重新准备这封邮件，稍后可在「自动开发」查看进度。',
+          });
+        } else {
+          toast.success('已确认未发出', { description: '可以重新编辑发送，或稍后在「自动开发」中处理。' });
+        }
+      })}
     />
   </div>;
 }
