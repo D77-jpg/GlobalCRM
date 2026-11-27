@@ -319,74 +319,37 @@ export function UsersPage(): React.JSX.Element {
         }
       />
 
-      {/* 顶部 3 维团队统计卡 */}
-      <div className="grid gap-3.5 sm:grid-cols-3">
-        <div className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <div className="flex items-start gap-3">
-            <span
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground"
-              aria-hidden
-            >
-              <Users className="h-4 w-4" />
-            </span>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">团队账号</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em] text-foreground">
-                {items.length}
-              </p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">当前系统的团队成员总数</p>
+      {/* Unified Team & Permission Telemetry Strip */}
+      <div className="os-telemetry-strip">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex flex-wrap items-center divide-x divide-border/70">
+            <div className="flex items-baseline gap-2 pr-4">
+              <Users className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">团队账号</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{items.length}</span>
+              <span className="text-[11px] text-emerald-700 dark:text-emerald-300">启用 {items.filter((u) => u.status === 'active').length}</span>
+            </div>
+            <div className="flex items-baseline gap-2 px-4">
+              <ShieldCheck className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">系统管理员</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{adminCount}</span>
+            </div>
+            <div className="flex items-baseline gap-2 px-4">
+              <Briefcase className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">业务成员</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{salesCount}</span>
+            </div>
+            <div className="flex items-baseline gap-2 pl-4">
+              <span className="text-xs text-muted-foreground">已验证发件邮箱</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{verifiedMailCount}</span>
             </div>
           </div>
-          <span className="shrink-0 whitespace-nowrap rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium tabular-nums text-foreground">
-            启用 {items.filter((u) => u.status === 'active').length}
-          </span>
-        </div>
-
-        <div className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <div className="flex items-start gap-3">
-            <span
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground"
-              aria-hidden
-            >
-              <ShieldCheck className="h-4 w-4" />
-            </span>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">系统管理员</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em] text-foreground">
-                {adminCount}
-              </p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">可管理系统设置、用户与项目权限</p>
-            </div>
-          </div>
-          <span className="shrink-0 whitespace-nowrap rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-            全局权限
-          </span>
-        </div>
-
-        <div className="flex items-start justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <div className="flex items-start gap-3">
-            <span
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground"
-              aria-hidden
-            >
-              <Briefcase className="h-4 w-4" />
-            </span>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">业务成员账号</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em] text-foreground">
-                {salesCount}
-              </p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">独立分配客户与个人发件邮箱</p>
-            </div>
-          </div>
-          <span className="shrink-0 whitespace-nowrap rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium tabular-nums text-foreground">
-            已配邮箱 {verifiedMailCount}
-          </span>
+          <span className="text-[11px] text-muted-foreground">客户与项目数据按账号权限严格隔离</span>
         </div>
       </div>
 
       {/* 左表 + 右详情双栏工作台 */}
-      <div className={cn('grid gap-4', selectedUser && 'xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start')}>
+      <div className={cn('grid gap-4', selectedUser && 'xl:grid-cols-[minmax(0,1fr)_340px] xl:items-stretch')}>
         <Card className="min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 px-4 py-3">
             <div>
@@ -534,7 +497,7 @@ export function UsersPage(): React.JSX.Element {
         </Card>
 
         {selectedUser ? (
-          <Card className="p-5 xl:sticky xl:top-4">
+          <Card className="flex flex-col p-5">
             <div className="flex items-center justify-between border-b border-border/75 pb-3">
               <h2 className="text-sm font-semibold text-foreground">成员详情</h2>
               <RowActions

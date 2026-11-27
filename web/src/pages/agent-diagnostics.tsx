@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { GuardSelftestCard } from '@/components/workbench/guard-selftest-card';
 import { DonutChart } from '@/components/common/charts';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, StatCard } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableSkeleton } from '@/components/ui/separator';
 import { usePageTitle } from '@/hooks/use-ui';
@@ -175,36 +175,46 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
         }
       />
 
-      {/* 顶部 4 维核心指标 */}
-      <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="AI 调用次数"
-          value={tokens(data.totals.runs)}
-          hint={`${data.totals.failed} 次失败 · 成功率 ${overallSuccessRate}%`}
-          icon={<Activity className="h-4 w-4" aria-hidden />}
-          tone="primary"
-        />
-        <StatCard
-          label="Token 用量"
-          value={tokens(data.totals.totalTokens)}
-          hint={`每人每日上限 ${tokens(data.limits.dailyTokensPerUser)}`}
-          icon={<ShieldCheck className="h-4 w-4" aria-hidden />}
-          tone="developed"
-        />
-        <StatCard
-          label="估算花费"
-          value={money(data.totals.estimatedCostUsd)}
-          hint={data.pricing.configured ? '按配置单价估算' : '未配置模型单价'}
-          icon={<Coins className="h-4 w-4" aria-hidden />}
-          tone="gold"
-        />
-        <StatCard
-          label="自检通过率"
-          value={latestEval ? `${latestEval.passedCases} / ${latestEval.totalCases}` : '尚未运行'}
-          hint={latestEval ? `通过率 ${percent(latestEval.score)}` : `共 ${data.dataset.cases} 项标准检查`}
-          icon={<CheckCircle2 className="h-4 w-4" aria-hidden />}
-          tone={latestEval?.score === 1 ? 'developed' : 'pending'}
-        />
+      {/* Unified AI Observability Telemetry Strip */}
+      <div className="os-telemetry-strip">
+        <div className="grid divide-y divide-border/70 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground">AI 调用次数</p>
+              <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">{tokens(data.totals.runs)}</p>
+              <p className="text-[11px] text-muted-foreground">{data.totals.failed} 次失败 · 成功率 {overallSuccessRate}%</p>
+            </div>
+            <Activity className="h-4 w-4 text-muted-foreground" aria-hidden />
+          </div>
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground">Token 用量</p>
+              <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">{tokens(data.totals.totalTokens)}</p>
+              <p className="text-[11px] text-muted-foreground">单人日上限 {tokens(data.limits.dailyTokensPerUser)}</p>
+            </div>
+            <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden />
+          </div>
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground">估算花费</p>
+              <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">{money(data.totals.estimatedCostUsd)}</p>
+              <p className="text-[11px] text-muted-foreground">{data.pricing.configured ? '按配置单价估算' : '未配置模型单价'}</p>
+            </div>
+            <Coins className="h-4 w-4 text-muted-foreground" aria-hidden />
+          </div>
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-medium text-muted-foreground">安全自检通过率</p>
+              <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">
+                {latestEval ? `${latestEval.passedCases} / ${latestEval.totalCases}` : '尚未运行'}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {latestEval ? `得分 ${percent(latestEval.score)}` : `共 ${data.dataset.cases} 项护栏测试`}
+              </p>
+            </div>
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+          </div>
+        </div>
       </div>
 
       {/* 中部三栏可观测面板（对比排行 + 占比分布 + 运行诊断与安全事件） */}
@@ -215,7 +225,7 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
               <h2 className="section-title">成员用量对比</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">近 {data.periodDays} 天按成员聚合排行</p>
             </div>
-            <div className="inline-flex rounded-lg border border-border bg-surface p-0.5 text-xs">
+            <div className="os-segmented text-xs">
               {(
                 [
                   ['runs', '调用次数'],
@@ -227,10 +237,8 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
                   key={key}
                   type="button"
                   onClick={() => setMetricTab(key)}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                    metricTab === key
-                      ? 'bg-foreground text-background shadow-xs'
-                      : 'text-muted-foreground hover:text-foreground'
+                  className={`os-segmented-item text-[11px] ${
+                    metricTab === key ? 'os-segmented-item-active' : ''
                   }`}
                 >
                   {label}

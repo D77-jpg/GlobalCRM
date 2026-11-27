@@ -246,93 +246,55 @@ export function MailCompliancePage(): React.JSX.Element {
         }
       />
 
-      {/* 4 维合规运行指标卡 */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-            <ShieldAlert className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">抑制名单拦截</p>
-            <p className="mt-1 text-xl font-bold tabular-nums text-foreground">
-              {overview?.suppressionCount ?? suppressions.length}
-            </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">退订 / 退信 / 投诉自动拦截</p>
-          </div>
-        </div>
+      {/* Unified Mail Deliverability & Compliance Telemetry Strip */}
+      <div className="os-telemetry-strip">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <nav aria-label="邮件合规模块切换" className="os-segmented">
+            {(
+              [
+                ['all', '全部配置'],
+                ['suppression', '不再发送名单'],
+                ['dns', '域名认证检测'],
+                ['rules', '发送规则与预热'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSection(key)}
+                className={`os-segmented-item text-xs ${section === key ? 'os-segmented-item-active' : ''}`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
 
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-            <Gauge className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">{t('compliance.currentCap')}</p>
-            <p className="mt-1 text-xl font-bold tabular-nums text-foreground">
-              {overview?.effectiveDailyLimit ?? settings?.dailySendLimit ?? '—'}
-            </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {settings?.warmupEnabled ? '已启用渐进预热递增' : '按项目固定日上限控制'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-            <Globe className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">域名 DNS 认证</p>
-            <p className="mt-1 truncate text-sm font-bold text-foreground">
-              {domainHealth ? domainHealth.domain : domain || '待检测'}
-            </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {domainHealth
-                ? domainHealth.overall === 'ok'
-                  ? 'SPF / DKIM / DMARC 正常'
-                  : '存在待完善解析项'
-                : '点击右侧按钮实时检测'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-            <ShieldCheck className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">打开与点击追踪</p>
-            <p className="mt-1 text-base font-bold text-foreground">
-              {settings?.trackingEnabled ? '已启用' : '已关闭'}
-            </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">内置退订头与合规留痕</p>
+          <div className="flex flex-wrap items-center divide-x divide-border/70">
+            <div className="flex items-baseline gap-2 pr-4">
+              <ShieldAlert className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">抑制名单拦截</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{overview?.suppressionCount ?? suppressions.length}</span>
+            </div>
+            <div className="flex items-baseline gap-2 px-4">
+              <Gauge className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">{t('compliance.currentCap')}</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{overview?.effectiveDailyLimit ?? settings?.dailySendLimit ?? '—'}</span>
+            </div>
+            <div className="flex items-baseline gap-2 px-4">
+              <Globe className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">DNS 认证</span>
+              <span className="text-xs font-semibold text-foreground">
+                {domainHealth ? (domainHealth.overall === 'ok' ? `${domainHealth.domain} · 正常` : `${domainHealth.domain} · 待完善`) : domain || '待检测'}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2 pl-4">
+              <ShieldCheck className="h-3.5 w-3.5 self-center text-emerald-600" aria-hidden />
+              <span className="text-xs text-muted-foreground">追踪与退订头</span>
+              <span className="text-xs font-semibold text-foreground">{settings?.trackingEnabled ? '已启用' : '已关闭'}</span>
+            </div>
           </div>
         </div>
       </div>
-
-      {/* 模块切换栏 */}
-      <nav aria-label="邮件合规模块切换" className="flex flex-wrap items-center gap-5 border-b border-border">
-        {(
-          [
-            ['all', '全部配置'],
-            ['suppression', '不再发送名单'],
-            ['dns', '域名认证检测'],
-            ['rules', '发送规则与预热'],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setSection(key)}
-            className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
-              section === key
-                ? 'border-foreground font-semibold text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
 
       {loading && !overview ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">

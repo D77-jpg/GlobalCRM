@@ -13,16 +13,16 @@
 @layer base {
   :root {
     --background: 40 18% 97.6%;
-    --foreground: 40 7% 9%;
+    --foreground: 38 6% 13%;
 
     --card: 0 0% 100%;
-    --card-foreground: 40 7% 9%;
+    --card-foreground: 38 6% 13%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 40 7% 9%;
+    --popover-foreground: 38 6% 13%;
 
-    /* Deep Charcoal Ink (#181716) */
-    --primary: 40 7% 9.5%;
+    /* Refined Warm Slate-Graphite (#363431 — silky modern business charcoal, never harsh pitch-black) */
+    --primary: 36 5% 20.5%;
     --primary-foreground: 40 20% 98.5%;
     --primary-soft: 40 11% 93.5%;
 
@@ -330,6 +330,27 @@
   }
 
   /* ---------------------------- Brand + Avatars ---------------------------- */
+  /* Trade OS 3.0 Unified Telemetry Strip & Tactile Segmented Controls */
+  .os-telemetry-strip {
+    @apply grid rounded-xl border border-border bg-card shadow-card divide-y divide-border/80 sm:divide-y-0 sm:divide-x;
+  }
+
+  .os-segmented {
+    @apply inline-flex items-center gap-0.5 rounded-lg border border-border/85 bg-surface p-0.5;
+  }
+
+  .os-segmented-item {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition-all hover:text-foreground;
+  }
+
+  .os-segmented-item-active {
+    @apply bg-card font-semibold text-foreground shadow-[0_1px_2px_hsl(30_10%_10%_/_0.06)] ring-1 ring-border/80;
+  }
+
+  .os-pill-active {
+    @apply border-foreground/30 bg-foreground/[0.075] font-semibold text-foreground;
+  }
+
   .brand-mark {
     background: hsl(var(--primary));
     color: hsl(var(--primary-foreground));

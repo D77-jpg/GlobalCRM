@@ -33,13 +33,13 @@ import {
   X,
 } from 'lucide-react';
 import { ROUTES, USER_ROLE_LABEL } from '@/constants';
-import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/constants/brand';
+import { PRODUCT_NAME } from '@/constants/brand';
 import { selectDeploymentFeatures, useMetaStore } from '@/store/meta.store';
 import { selectCanManageProjects, selectIsAdmin, selectIsPlatformAdmin, useAuthStore } from '@/store/auth.store';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/format';
 import { useProjectStore } from '@/store/project.store';
-import { ProjectLogo, projectLogoSrc } from '@/components/projects/project-logo';
+import { ProjectLogo } from '@/components/projects/project-logo';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -120,11 +120,7 @@ function BrandMark(): React.JSX.Element {
 }
 
 function Brand({ collapsed }: { collapsed: boolean }): React.JSX.Element {
-  const { t } = useI18n();
-  const fallbackCompanyName = useMetaStore((state) => state.meta?.company?.name);
-  const project = useProjectStore((state) => state.activeProject);
-  const subtitle = project?.companyName || fallbackCompanyName || PRODUCT_TAGLINE;
-  const hasLogo = Boolean(project && projectLogoSrc(project));
+  const { t, language } = useI18n();
 
   return (
     <div className={cn('flex h-14 shrink-0 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
@@ -133,23 +129,19 @@ function Brand({ collapsed }: { collapsed: boolean }): React.JSX.Element {
         className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         aria-label={t('nav.backDashboard')}
       >
-        {project && hasLogo ? (
-          <ProjectLogo
-            project={project}
-            size={collapsed ? 'sm' : 'md'}
-            compact={collapsed}
-            className={collapsed ? undefined : 'dark:[&_img]:invert dark:[&_img]:hue-rotate-180'}
-          />
-        ) : (
-          <BrandMark />
-        )}
-        {!collapsed && !hasLogo ? (
+        <BrandMark />
+        {!collapsed ? (
           <span className="min-w-0">
-            <span className="block truncate text-[0.9375rem] font-bold leading-tight tracking-[-0.02em] text-foreground">
-              {PRODUCT_NAME}
+            <span className="flex items-center gap-1.5">
+              <span className="truncate text-[0.9375rem] font-bold leading-tight tracking-[-0.025em] text-foreground">
+                {PRODUCT_NAME}
+              </span>
+              <span className="rounded border border-border bg-card px-1 py-0 font-mono text-[9.5px] font-semibold text-muted-foreground">
+                3.0
+              </span>
             </span>
-            <span className="mt-0.5 block truncate text-[10.5px] leading-tight text-muted-foreground" title={subtitle}>
-              {subtitle}
+            <span className="mt-0.5 block truncate text-[10.5px] font-medium tracking-[0.02em] text-muted-foreground">
+              {language === 'zh' ? 'Trade OS · 智能外贸操作系统' : 'Intelligent Trade OS'}
             </span>
           </span>
         ) : null}

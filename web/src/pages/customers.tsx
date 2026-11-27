@@ -339,18 +339,18 @@ export function CustomersPage(): React.JSX.Element {
         }
         actions={
           <>
-            <div className="inline-flex items-center rounded-lg border border-border bg-surface p-0.5 text-xs">
+            <div className="os-segmented text-xs">
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
-                className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors', viewMode === 'table' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+                className={cn('os-segmented-item inline-flex items-center gap-1.5 text-xs', viewMode === 'table' && 'os-segmented-item-active')}
               >
                 <Table2 className="h-3.5 w-3.5" aria-hidden />表格
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('kanban')}
-                className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors', viewMode === 'kanban' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+                className={cn('os-segmented-item inline-flex items-center gap-1.5 text-xs', viewMode === 'kanban' && 'os-segmented-item-active')}
               >
                 <Columns3 className="h-3.5 w-3.5" aria-hidden />漏斗看板
               </button>

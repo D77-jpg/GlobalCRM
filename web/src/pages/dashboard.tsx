@@ -38,7 +38,6 @@ import {
   customerDetailPath,
   FOLLOW_UP_METHOD_LABEL,
   FOLLOW_UP_RESULT_LABEL,
-  MAIL_CHANNEL_LABEL,
   ROUTES,
 } from '@/constants';
 import { formatDate, formatMoney, formatRelative, initials } from '@/lib/format';
@@ -244,147 +243,193 @@ function EmbeddedAiDock({
   };
 
   return (
-    <aside aria-label="AI 外贸助手工作舱" className="panel flex flex-col xl:sticky xl:top-4">
-      <div className="flex items-start justify-between gap-2 border-b border-border p-4">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Sparkles className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-[0.9375rem] font-semibold leading-snug tracking-[-0.015em] text-foreground">
-              AI 外贸助手
-            </h2>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              协助处理客户、邮件、开发与报价
-            </p>
+    <aside aria-label="AI 外贸助手工作舱" className="flex flex-col gap-4 xl:h-full">
+      <div className="panel flex flex-col overflow-hidden">
+        <div className="flex items-start justify-between gap-2 border-b border-border p-4">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Sparkles className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-[0.9375rem] font-semibold leading-snug tracking-[-0.015em] text-foreground">
+                AI 外贸副驾驶
+              </h2>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                联动客户、邮件、知识库与核价单
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setAgentOpen(true)}
+            title="展开完整助手抽屉"
+            aria-label="展开完整助手抽屉"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+
+        {/* Category Switcher Pills */}
+        <div className="grid grid-cols-4 gap-1 border-b border-border bg-surface/80 px-2.5 py-1.5">
+          {([
+            ['suggest', '建议执行'],
+            ['write', '写邮件'],
+            ['knowledge', '查资料'],
+            ['analyze', '分析'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={cn(
+                'rounded-md px-2 py-1 text-xs font-medium transition-all',
+                tab === key
+                  ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border/80'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Actionable Prompt Cards */}
+        <div className="space-y-2 p-3.5">
+          {cardsByTab[tab].map((card) => (
+            <button
+              key={card.title}
+              type="button"
+              onClick={() => openAgentWithPrompt(card.prompt)}
+              className="group flex w-full items-center gap-3 rounded-lg border border-border bg-surface/45 p-2.5 text-left transition-all hover:border-foreground/25 hover:bg-card hover:shadow-sm"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card text-foreground">
+                <card.icon className="h-4 w-4" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[0.8125rem] font-semibold text-foreground">
+                  {card.title}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                  {card.subtitle}
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
+            </button>
+          ))}
+        </div>
+
+        {/* Direct Inline Composer */}
+        <form onSubmit={handleSubmit} className="border-t border-border p-3.5">
+          <div className="rounded-lg border border-border bg-surface/50 p-2.5 transition-colors focus-within:border-foreground/35 focus-within:bg-card">
+            <textarea
+              rows={2}
+              value={promptInput}
+              onChange={(e) => setPromptInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+              placeholder="输入外贸任务指令，例如：梳理今日逾期客户…"
+              aria-label="向 AI 外贸助手输入指令"
+              className="w-full resize-none bg-transparent text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[10.5px] text-muted-foreground">结合当前项目资料 · 人工审核发送</span>
+              <Button type="submit" size="icon-xs" className="h-7 w-7 rounded-md" aria-label="发送到 AI 助手">
+                <Send className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      {/* Trade OS Live Dispatch & Execution Rail — Stretches cleanly to eliminate bottom void */}
+      <div className="panel flex flex-1 flex-col justify-between p-4">
+        <div>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-foreground">待办脉冲与风险队列</h3>
+            <span className="text-[11px] text-muted-foreground">{projectName}</span>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onOpenCustomers({ followUp: 'overdue' })}
+              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
+            >
+              <span className="text-[11px] text-muted-foreground">逾期跟进</span>
+              <strong className={cn('mt-1 text-lg font-bold tabular-nums', stats.workspace.followUpOverdue > 0 ? 'text-rose' : 'text-foreground')}>
+                {stats.workspace.followUpOverdue}
+              </strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenLetters('draft')}
+              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
+            >
+              <span className="text-[11px] text-muted-foreground">待审草稿</span>
+              <strong className="mt-1 text-lg font-bold tabular-nums text-foreground">{stats.letter.draft}</strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenCustomers({ hasEmail: 'false' })}
+              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
+            >
+              <span className="text-[11px] text-muted-foreground">待补邮箱</span>
+              <strong className="mt-1 text-lg font-bold tabular-nums text-foreground">{stats.customer.withoutEmail}</strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenLetters('failed')}
+              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
+            >
+              <span className="text-[11px] text-muted-foreground">发送异常</span>
+              <strong className={cn('mt-1 text-lg font-bold tabular-nums', stats.letter.failed > 0 ? 'text-rose' : 'text-foreground')}>
+                {stats.letter.failed}
+              </strong>
+            </button>
+          </div>
+
+          <div className="mt-4 border-t border-border/75 pt-3.5">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-foreground">Trade OS 业务中枢直达</h3>
+            <div className="mt-2.5 space-y-1.5 text-xs">
+              {[
+                { label: '客户发现与公海线索', sub: 'AI 官网抓取 · 邮箱补全', to: ROUTES.prospecting, icon: Target },
+                { label: '全渠道客户会话', sub: 'WhatsApp · 阿里 · 双语副驾驶', to: ROUTES.channels, icon: Globe2 },
+                { label: '外贸报价与 RFQ 核价', sub: '阶梯价校验 · 一键导出 PDF', to: ROUTES.quotations, icon: ReceiptText },
+                { label: '多轮自动开发节律', sub: '0 / 3 / 7 天买方时区触达', to: ROUTES.outreachAutomation, icon: Send },
+                { label: '企业知识大脑与红线', sub: '已审事实依据 · 对外口径护栏', to: '/knowledge', icon: BookOpen },
+              ].map((nav) => (
+                <Link
+                  key={nav.to}
+                  to={nav.to}
+                  className="group flex items-center justify-between gap-2.5 rounded-lg border border-transparent px-2.5 py-2 transition-colors hover:border-border hover:bg-surface/75"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/80 bg-surface text-foreground">
+                      <nav.icon className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">{nav.label}</p>
+                      <p className="truncate text-[10.5px] text-muted-foreground">{nav.sub}</p>
+                    </div>
+                  </div>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60 transition-all group-hover:translate-x-0.5 group-hover:text-foreground group-hover:opacity-100" aria-hidden />
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => setAgentOpen(true)}
-          title="展开完整助手抽屉"
-          aria-label="展开完整助手抽屉"
-        >
-          <Maximize2 className="h-3.5 w-3.5" />
-        </Button>
-      </div>
 
-      {/* Category Switcher Pills */}
-      <div className="grid grid-cols-4 gap-1 border-b border-border bg-surface/60 px-3 py-2">
-        {([
-          ['suggest', '建议执行'],
-          ['write', '写邮件'],
-          ['knowledge', '查资料'],
-          ['analyze', '分析'],
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={cn(
-              'rounded-md px-2 py-1 text-xs font-medium transition-colors',
-              tab === key
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:bg-card hover:text-foreground',
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Actionable Prompt Cards */}
-      <div className="space-y-2 p-3.5">
-        {cardsByTab[tab].map((card) => (
-          <button
-            key={card.title}
-            type="button"
-            onClick={() => openAgentWithPrompt(card.prompt)}
-            className="group flex w-full items-center gap-3 rounded-lg border border-border bg-surface/45 p-3 text-left transition-all hover:border-foreground/25 hover:bg-card hover:shadow-sm"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card text-foreground">
-              <card.icon className="h-4 w-4" aria-hidden />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[0.8125rem] font-semibold text-foreground">
-                {card.title}
-              </span>
-              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                {card.subtitle}
-              </span>
-            </span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
-          </button>
-        ))}
-      </div>
-
-      {/* Compact Action Queue Counters */}
-      <div className="mx-3.5 mb-3 grid grid-cols-2 gap-1.5 rounded-lg border border-border/80 bg-surface/70 p-2 text-xs">
-        <button
-          type="button"
-          onClick={() => onOpenCustomers({ followUp: 'overdue' })}
-          className="flex items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors hover:bg-card"
-        >
-          <span className="text-muted-foreground">逾期跟进</span>
-          <strong className={cn('tabular-nums', stats.workspace.followUpOverdue > 0 ? 'text-rose' : 'text-foreground')}>
-            {stats.workspace.followUpOverdue}
-          </strong>
-        </button>
-        <button
-          type="button"
-          onClick={() => onOpenLetters('draft')}
-          className="flex items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors hover:bg-card"
-        >
-          <span className="text-muted-foreground">待审草稿</span>
-          <strong className="tabular-nums text-foreground">{stats.letter.draft}</strong>
-        </button>
-        <button
-          type="button"
-          onClick={() => onOpenCustomers({ hasEmail: 'false' })}
-          className="flex items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors hover:bg-card"
-        >
-          <span className="text-muted-foreground">缺少邮箱</span>
-          <strong className="tabular-nums text-foreground">{stats.customer.withoutEmail}</strong>
-        </button>
-        <button
-          type="button"
-          onClick={() => onOpenLetters('failed')}
-          className="flex items-center justify-between rounded-md px-2 py-1.5 text-left transition-colors hover:bg-card"
-        >
-          <span className="text-muted-foreground">发送失败</span>
-          <strong className={cn('tabular-nums', stats.letter.failed > 0 ? 'text-rose' : 'text-foreground')}>
-            {stats.letter.failed}
-          </strong>
-        </button>
-      </div>
-
-      {/* Direct Inline Composer */}
-      <form onSubmit={handleSubmit} className="border-t border-border p-3.5">
-        <div className="rounded-lg border border-border bg-surface/50 p-2.5 transition-colors focus-within:border-foreground/35 focus-within:bg-card">
-          <textarea
-            rows={2}
-            value={promptInput}
-            onChange={(e) => setPromptInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-            placeholder="告诉我想完成的工作…"
-            aria-label="向 AI 外贸助手输入指令"
-            className="w-full resize-none bg-transparent text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[10.5px] text-muted-foreground">结合当前项目资料 · 人工审核发送</span>
-            <Button type="submit" size="icon-xs" className="h-7 w-7 rounded-md" aria-label="发送到 AI 助手">
-              <Send className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+        <div className="mt-4 rounded-lg border border-border/75 bg-surface/55 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-semibold text-foreground">Trade OS 护栏已激活：</span>
+          所有跨项目数据严格物理隔离，AI 生成草稿均经口径核验并需人工确认后发出。
         </div>
-      </form>
+      </div>
     </aside>
   );
 }
@@ -576,35 +621,49 @@ export function DashboardPage(): React.JSX.Element {
 
   return (
     <div className="workspace-page dashboard-page">
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_312px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_316px] xl:items-stretch 2xl:grid-cols-[minmax(0,1fr)_344px]">
         {/* Left Main Workspace Column */}
-        <div className="min-w-0 space-y-4">
-          {/* Clean Gallery Executive Greeting Card */}
-          <section className="panel p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* Unified Trade OS Command Header + Integrated Telemetry Ribbon */}
+          <section className="panel overflow-hidden">
+            <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-end lg:justify-between">
               <div className="min-w-0">
-                <p className="text-xs font-medium text-muted-foreground">
-                  {dateLabel} · <span className="font-semibold text-foreground">{project?.name || (language === 'zh' ? '当前项目' : 'Workspace')}</span>
-                </p>
-                <h1 className="mt-1 text-[1.5rem] font-semibold leading-tight tracking-[-0.03em] text-foreground sm:text-[1.7rem]">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <span>{dateLabel} · <strong className="font-semibold text-foreground">{project?.name || (language === 'zh' ? '当前项目' : 'Workspace')}</strong></span>
+                  {mailChannel === 'mock' ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/60 bg-amber-50/80 px-2 py-0.5 text-[10.5px] font-medium text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
+                      模拟发送模式
+                    </span>
+                  ) : null}
+                  {canManage && onboarding && !onboarding.completedAt ? (
+                    <Link
+                      to={ROUTES.onboarding}
+                      className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10.5px] font-medium text-foreground transition-colors hover:border-foreground/30"
+                    >
+                      <CheckCircle2 className="h-3 w-3" aria-hidden />
+                      初始化进度 {onboarding.doneCount}/{onboarding.totalCount} →
+                    </Link>
+                  ) : null}
+                </div>
+                <h1 className="mt-1.5 text-[1.45rem] font-semibold leading-tight tracking-[-0.03em] text-foreground sm:text-[1.65rem]">
                   {language === 'zh' ? `你好，${userName}` : `Hello, ${userName}`}
                 </h1>
                 <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
                   {data
                     ? language === 'zh'
                       ? dueCount > 0
-                        ? `这是 ${project?.name || '当前项目'} 的今日业务概览。专注高价值客户，当前有 ${dueCount} 位客户待跟进、${data.letter.draft} 封草稿待处理。`
-                        : `这是 ${project?.name || '当前项目'} 的今日业务概览。跟进计划井然有序，可推进客户发现与精准报价。`
+                        ? `智能外贸工作台已就绪：当前有 ${dueCount} 位客户待跟进、${data.letter.draft} 封草稿待审核。`
+                        : `智能外贸工作台已就绪：跟进计划井然有序，可推进客户发现与阶梯报价。`
                       : dueCount > 0
-                        ? `Today's overview for ${project?.name || 'workspace'}. ${dueCount} follow-ups and ${data.letter.draft} drafts await review.`
-                        : `Today's overview for ${project?.name || 'workspace'}. Follow-ups are on track.`
+                        ? `Trade OS ready: ${dueCount} follow-ups and ${data.letter.draft} drafts await review.`
+                        : `Trade OS ready: follow-ups are on track.`
                     : t('dashboard.subtitle')}
                 </p>
               </div>
 
               <div className="flex shrink-0 flex-col items-start gap-2 lg:items-end">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <div className="inline-flex items-center rounded-lg border border-border bg-surface p-0.5 text-xs">
+                  <div className="os-segmented">
                     {([
                       ['today', language === 'zh' ? '今日' : 'Today'],
                       ['7d', language === 'zh' ? '近7天' : '7d'],
@@ -616,10 +675,7 @@ export function DashboardPage(): React.JSX.Element {
                         key={key}
                         type="button"
                         onClick={() => setRange(key)}
-                        className={cn(
-                          'rounded-md px-2.5 py-1 font-medium transition-colors',
-                          range === key ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                        )}
+                        className={cn('os-segmented-item', range === key && 'os-segmented-item-active')}
                       >
                         {label}
                       </button>
@@ -644,44 +700,9 @@ export function DashboardPage(): React.JSX.Element {
                 </div>
               </div>
             </div>
-          </section>
 
-          {canManage && onboarding && !onboarding.completedAt ? (
-            <div className="callout-sage flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-foreground" aria-hidden />
-                <div>
-                  <p className="text-[0.8125rem] font-semibold text-foreground">{t('dashboard.onboardingTitle')}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{t('dashboard.onboardingDesc')}</p>
-                </div>
-              </div>
-              <Button size="sm" variant="outline" asChild>
-                <Link to={ROUTES.onboarding}>
-                  {t('dashboard.onboardingCta')} · {onboarding.doneCount}/{onboarding.totalCount}
-                </Link>
-              </Button>
-            </div>
-          ) : null}
-
-          {mailChannel === 'mock' ? (
-            <Alert variant="warning">
-              <AlertDescription>当前为「{MAIL_CHANNEL_LABEL.mock}」：开发信会完整记录并计入统计，不会真实投递。</AlertDescription>
-            </Alert>
-          ) : null}
-          {error ? (
-            <Alert variant="warning">
-              <AlertDescription>{data ? '刷新失败，以下保留上次加载的数据。' : '统计数据暂时无法加载。'}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          {error && !data ? (
-            <ErrorState title="工作台加载失败" description={error} onRetry={() => void run()} retrying={loading} />
-          ) : !data ? (
-            <div className="panel py-12"><InlineLoader label="正在加载销售工作台…" /></div>
-          ) : (
-            <>
-              {/* 5 Compact KPI Cards Row */}
-              <section aria-label="业务概览" className="dashboard-metrics">
+            {data ? (
+              <div aria-label="业务概览" className="dashboard-telemetry">
                 {metrics.map((metric) => (
                   <MetricCard
                     key={metric.label}
@@ -694,7 +715,22 @@ export function DashboardPage(): React.JSX.Element {
                     onClick={metric.action}
                   />
                 ))}
-              </section>
+              </div>
+            ) : null}
+          </section>
+
+          {error ? (
+            <Alert variant="warning">
+              <AlertDescription>{data ? '刷新失败，以下保留上次加载的数据。' : '统计数据暂时无法加载。'}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {error && !data ? (
+            <ErrorState title="工作台加载失败" description={error} onRetry={() => void run()} retrying={loading} />
+          ) : !data ? (
+            <div className="panel py-12"><InlineLoader label="正在加载销售工作台…" /></div>
+          ) : (
+            <>
 
               {/* Side-by-Side Dual Cards: 今日重点任务 + 业务动态 */}
               <section aria-label="今日重点任务与业务动态" className="grid gap-4 lg:grid-cols-2">
@@ -912,7 +948,7 @@ export function DashboardPage(): React.JSX.Element {
                         累计开发信 {data.letter.total} 封 · 已发送 {data.letter.sent} 封 · 草稿 {data.letter.draft} 封
                       </p>
                     </div>
-                    <div className="inline-flex items-center rounded-lg border border-border bg-surface p-0.5 text-[11.5px]">
+                    <div className="os-segmented">
                       {([
                         ['letters', '开发信发送'],
                         ['funnel', '阶段漏斗'],
@@ -922,10 +958,7 @@ export function DashboardPage(): React.JSX.Element {
                           key={key}
                           type="button"
                           onClick={() => setChartTab(key)}
-                          className={cn(
-                            'rounded-md px-2.5 py-1 font-medium transition-colors',
-                            chartTab === key ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-                          )}
+                          className={cn('os-segmented-item', chartTab === key && 'os-segmented-item-active')}
                         >
                           {label}
                         </button>

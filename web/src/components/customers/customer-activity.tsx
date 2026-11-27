@@ -18,6 +18,7 @@ import { FollowUpDialog } from '@/components/customers/follow-up-dialog';
 import { FollowUpList } from '@/components/customers/follow-up-list';
 import { CustomerTimeline } from '@/components/customers/customer-timeline';
 import { useFollowUpStore } from '@/store/followup.store';
+import { cn } from '@/lib/utils';
 import type { FollowUp } from '@/types';
 
 export interface CustomerActivityProps {
@@ -26,9 +27,10 @@ export interface CustomerActivityProps {
   onCustomerChanged?: () => void;
   /** 从时间线打开对应开发信的详情 */
   onViewLetter?: (letterId: string) => void;
+  className?: string;
 }
 
-export function CustomerActivity({ customerId, onCustomerChanged, onViewLetter }: CustomerActivityProps): React.JSX.Element {
+export function CustomerActivity({ customerId, onCustomerChanged, onViewLetter, className }: CustomerActivityProps): React.JSX.Element {
   const followUps = useFollowUpStore((state) => state.followUps);
   const timeline = useFollowUpStore((state) => state.timeline);
   const loadingFollowUps = useFollowUpStore((state) => state.loadingFollowUps);
@@ -88,7 +90,7 @@ export function CustomerActivity({ customerId, onCustomerChanged, onViewLetter }
 
   return (
     <>
-      <Card>
+      <Card className={cn('flex flex-col', className)}>
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -100,7 +102,7 @@ export function CustomerActivity({ customerId, onCustomerChanged, onViewLetter }
           </Button>
         </CardHeader>
 
-        <CardContent>
+        <CardContent className="flex flex-1 flex-col">
           <Tabs value={tab} onValueChange={(value) => setTab(value as 'followups' | 'timeline')}>
             <TabsList>
               <TabsTrigger value="followups">

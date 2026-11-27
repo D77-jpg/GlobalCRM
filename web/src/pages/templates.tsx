@@ -369,10 +369,10 @@ export function TemplatesPage(): React.JSX.Element {
       ) : (
         <section
           aria-label="开发信模板列表"
-          className="grid items-start gap-4 xl:grid-cols-[260px_minmax(0,1fr)_280px]"
+          className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_280px] xl:items-stretch"
         >
           {/* 左栏：搜索 + 场景模板目录 */}
-          <div className="rounded-xl border border-border bg-card p-3 shadow-xs">
+          <div className="flex flex-col rounded-xl border border-border bg-card p-3 shadow-xs">
             <div className="mb-2.5 flex items-center gap-2">
               <SearchInput
                 value={keyword}

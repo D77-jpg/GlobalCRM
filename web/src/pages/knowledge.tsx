@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { BookOpen, FileText, Layers, ShieldCheck } from 'lucide-react';
+import { BookOpen, Layers, Lock, ShieldCheck } from 'lucide-react';
 import { KnowledgeAdmin } from '@/components/agent/knowledge-admin';
 import { KnowledgeSalesLibrary } from '@/components/agent/knowledge-sales-library';
 import { KnowledgeTraining } from '@/components/agent/knowledge-training';
@@ -8,6 +8,7 @@ import { PolicyLedgerPanel } from '@/components/workbench/policy-ledger-panel';
 import { KnowledgeQaPanel } from '@/components/workbench/knowledge-qa-panel';
 import { PageHeader } from '@/components/common/page-header';
 import { apiGet } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { usePageTitle } from '@/hooks/use-ui';
 import { selectCanManageProjects, useAuthStore } from '@/store/auth.store';
 import { useProjectStore } from '@/store/project.store';
@@ -32,7 +33,7 @@ export function KnowledgePage() {
   React.useEffect(() => {
     let active = true;
     void Promise.allSettled([
-      apiGet<{ items?: unknown[]; total?: number } | unknown[]>('/knowledge/sales'),
+      apiGet<{ items?: unknown[]; total?: number } | unknown[]>('/agent/knowledge'),
       apiGet<ProjectPolicyDto[]>('/workbench/policies'),
       apiGet<Paginated<Product>>('/products', { params: { limit: 1 } }),
     ]).then(([kRes, polRes, prodRes]) => {
@@ -40,7 +41,7 @@ export function KnowledgePage() {
       const docs =
         kRes.status === 'fulfilled'
           ? Array.isArray(kRes.value)
-            ? kRes.value.length
+            ? kRes.value.filter((x) => !(x as { archived?: boolean }).archived).length
             : typeof kRes.value?.total === 'number'
               ? kRes.value.total
               : Array.isArray(kRes.value?.items)
@@ -81,100 +82,106 @@ export function KnowledgePage() {
   };
   const tabs: readonly (readonly [KnowledgeView, string])[] = admin
     ? ([
-        ['sales', '资料库'],
-        ['qa', 'AI 知识问答'],
+        ['sales', '事实资料库'],
+        ['qa', 'AI 检索问答'],
         ['policies', '对外口径与红线'],
-        ['manage', '资料管理'],
-        ['playbook', '行业卡'],
-        ['training', '质量与训练'],
+        ['manage', '资料审核管理'],
+        ['playbook', '行业话术卡'],
+        ['training', '检索质量校准'],
       ] as const)
     : ([
-        ['sales', '资料库'],
-        ['qa', 'AI 知识问答'],
+        ['sales', '事实资料库'],
+        ['qa', 'AI 检索问答'],
         ['policies', '对外口径与红线'],
       ] as const);
+
   const descriptions: Record<KnowledgeView, string> = {
-    sales: '公司、产品、交易政策与销售事实依据 · 按项目严格隔离。',
-    qa: '按目录树查阅并通过 AI 问答联动检索已审核资料、对外口径与产品参数卡。',
-    policies: canManage ? '统一维护项目对外口径、品牌禁忌与发信规则检查。' : '查看本项目已确认的对外口径与品牌禁忌，避免写信时超出授权。',
-    manage: '上传并审核企业销售文档，仅审核通过的资料会进入 AI 事实依据库。',
-    playbook: '维护行业切入策略与话术偏好，仅影响表达方式，不混入事实依据。',
-    training: '用真实审核反馈校准资料检索质量，不改动底层大模型。',
+    sales: '企业产品、包装选型、交易政策与对外事实依据中枢 · 仅已发布资料可供 AI 引用。',
+    qa: '基于当前项目已审核资料、对外口径与产品参数进行可溯源 AI 检索问答。',
+    policies: canManage ? '统一维护项目对外口径、品牌禁忌与发信前自动合规拦截规则。' : '查看本项目已确认的对外口径与品牌禁忌，避免沟通超出授权。',
+    manage: '上传、修订并审核企业销售文档，严格把控进入 AI 事实库的每一条依据。',
+    playbook: '维护细分行业切入角度与表达策略，仅指导行文风格，不混入事实承诺。',
+    training: '用真实业务审核反馈持续校准检索命中率，不触碰底层外部模型。',
   };
 
   return (
     <section className="workspace-page">
-      <PageHeader title="知识库" description={descriptions[active]} />
+      <PageHeader title="企业知识大脑" description={descriptions[active]} />
 
-      {/* 4 Compact Knowledge KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          { label: '已发布销售资料', value: stats.docs, sub: '审核通过后供 AI 引用', icon: BookOpen, view: 'sales' as KnowledgeView },
-          { label: '对外口径与红线', value: stats.policies, sub: '发信与回复前自动核验', icon: ShieldCheck, view: 'policies' as KnowledgeView },
-          { label: '关联产品参数', value: stats.products, sub: 'SKU 规格与阶梯价依据', icon: Layers, view: 'qa' as KnowledgeView },
-          { label: '项目隔离状态', value: project?.name || '当前项目', sub: '跨项目零串库共享', icon: FileText, view: active },
-        ].map((card) => (
+      {/* Trade OS Unified Brain Control Bar (Replaces 4 Generic KPI Boxes + Double Tab Bars) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-xs">
+        <nav aria-label="知识库视图" className="os-segmented flex-wrap">
+          {tabs.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-current={active === id ? 'page' : undefined}
+              onClick={() => tab(id)}
+              className={cn('os-segmented-item', active === id && 'os-segmented-item-active')}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
-            key={card.label}
             type="button"
-            onClick={() => tab(card.view)}
-            className="panel flex items-start gap-3 p-3.5 text-left transition-colors hover:border-foreground/25"
+            onClick={() => tab('sales')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-surface/65 px-2.5 py-1 text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
           >
-            <span className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-              <card.icon className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-xs font-medium text-muted-foreground">{card.label}</p>
-              <p className="mt-0.5 truncate text-lg font-bold leading-snug tracking-[-0.025em] tabular-nums text-foreground">
-                {card.value}
-              </p>
-              <p className="mt-1 truncate text-[11px] text-muted-foreground">{card.sub}</p>
-            </div>
+            <BookOpen className="h-3.5 w-3.5 text-foreground" aria-hidden />
+            <span>已审资料</span>
+            <strong className="font-mono font-semibold tabular-nums text-foreground">{stats.docs}</strong>
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={() => tab('policies')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-surface/65 px-2.5 py-1 text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
+          >
+            <ShieldCheck className="h-3.5 w-3.5 text-foreground" aria-hidden />
+            <span>口径红线</span>
+            <strong className="font-mono font-semibold tabular-nums text-foreground">{stats.policies}</strong>
+          </button>
+          <button
+            type="button"
+            onClick={() => tab('qa')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-surface/65 px-2.5 py-1 text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
+          >
+            <Layers className="h-3.5 w-3.5 text-foreground" aria-hidden />
+            <span>关联 SKU</span>
+            <strong className="font-mono font-semibold tabular-nums text-foreground">{stats.products}</strong>
+          </button>
+          <span className="hidden items-center gap-1 rounded-lg border border-border/70 bg-surface/40 px-2.5 py-1 text-[11px] text-muted-foreground 2xl:inline-flex">
+            <Lock className="h-3 w-3" aria-hidden />
+            {project?.name || '当前项目'} 物理隔离
+          </span>
+        </div>
       </div>
 
-      <nav aria-label="知识库视图" className="flex flex-wrap items-center gap-5 border-b border-border">
-        {tabs.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={active === id ? 'page' : undefined}
-            className={
-              '-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 ' +
-              (active === id ? 'border-foreground font-semibold text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')
-            }
-            onClick={() => tab(id)}
-          >
-            {label}
-          </button>
-        ))}
-        <span className="ml-auto hidden pr-1 text-xs text-muted-foreground sm:block">{project?.name} · 项目隔离资料库</span>
-      </nav>
-
-      <div className={full ? 'min-w-0' : 'panel min-w-0 overflow-hidden xl:flex xl:h-[calc(100dvh-16rem)] xl:flex-col'}>
+      <div className={full ? 'min-w-0' : 'panel min-w-0 overflow-hidden xl:flex xl:h-[calc(100dvh-12.5rem)] xl:min-h-[600px] xl:flex-col'}>
         {active === 'qa' ? (
           <KnowledgeQaPanel key={`qa:${key}`} admin={admin} />
         ) : active === 'policies' ? (
           <PolicyLedgerPanel key={`pol:${key}`} canManage={canManage} />
         ) : active === 'playbook' ? (
-          <PlaybookAdmin key={key} />
+          <PlaybookAdmin key={`pb:${key}`} />
         ) : active === 'training' ? (
-          <KnowledgeTraining />
+          <KnowledgeTraining key={`train:${key}`} />
         ) : active === 'manage' ? (
           <KnowledgeAdmin
-            key={key}
-            initialKnowledgeId={requested === 'manage' ? item : undefined}
+            key={`adm:${key}`}
+            initialKnowledgeId={item}
             initialDocumentId={params.get('document') ?? undefined}
             initialRevisionId={params.get('revision') ?? undefined}
             initialChunkId={params.get('chunk') ?? undefined}
           />
         ) : (
           <KnowledgeSalesLibrary
-            key={key}
+            key={`lib:${key}`}
             admin={admin}
             initialId={item}
-            onManage={(id) => setParams(id ? { view: 'manage', knowledge: id } : { view: 'manage' })}
+            onManage={(id) => setParams(id ? { view: 'manage', item: id } : { view: 'manage' })}
             onImport={() => setParams({ view: 'manage' })}
           />
         )}

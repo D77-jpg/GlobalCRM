@@ -92,7 +92,6 @@ import { useCustomerStore } from '@/store/customer.store';
 import { selectIsAdmin, useAuthStore } from '@/store/auth.store';
 import { useLetterStore } from '@/store/letter.store';
 import { useUiStore } from '@/store/ui.store';
-import { HealthRing } from '@/components/common/charts';
 import { countryInfo } from '@/lib/country';
 import { CountryFlag } from '@/components/common/country-flag';
 import { isCompanyOnlyCustomer, secondaryCompanyLabel } from '@/lib/customer-display';
@@ -103,12 +102,14 @@ import {
   CUSTOMER_LEAD_SOURCE_OPTIONS,
   CUSTOMER_PRIORITY_BADGE_CLASS,
   CUSTOMER_PRIORITY_OPTIONS,
+  CUSTOMER_STATUS_LABEL,
+  CUSTOMER_STATUS_VALUES,
   DEFAULT_PAGE_SIZE,
   EMAIL_PATTERN,
   ROUTES,
   STORAGE_KEYS,
 } from '@/constants';
-import type { Customer, CustomerInput, CustomerPriority, DevelopmentLetter } from '@/types';
+import type { Customer, CustomerInput, CustomerPriority, CustomerStatus, DevelopmentLetter } from '@/types';
 
 /** 负责人 Select 里表示「未分配」的哨兵值（Radix 不允许 value=""） */
 const OWNER_NONE = '__none__';
@@ -365,6 +366,8 @@ export function CustomerDetailPage(): React.JSX.Element {
   const [deleteLetterTarget, setDeleteLetterTarget] = React.useState<DevelopmentLetter | null>(null);
   const [deleteCustomerOpen, setDeleteCustomerOpen] = React.useState(false);
   const [detailTab, setDetailTab] = React.useState<'overview' | 'profile' | 'letters' | 'quotes' | 'files'>('overview');
+  const [copilotTab, setCopilotTab] = React.useState<'advisor' | 'workbench'>('advisor');
+  const [notesExpanded, setNotesExpanded] = React.useState(true);
   const openAgentWithPrompt = useUiStore((s) => s.openAgentWithPrompt);
   const setAgentOpen = useUiStore((s) => s.setAgentOpen);
   // 常用联系资料和跟进安排保持可见，补充档案的展开状态按浏览器记住
@@ -789,10 +792,68 @@ export function CustomerDetailPage(): React.JSX.Element {
           </dl>
         </div>
 
+        {/* Interactive Trade OS 8-Stage Deal Pipeline Stepper + Live Health Bar */}
+        <div className="mt-4 flex flex-col gap-3 rounded-xl border border-border/80 bg-surface/55 px-3.5 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5 lg:pb-0" role="group" aria-label="商机推进阶段">
+            {CUSTOMER_STATUS_VALUES.map((st: CustomerStatus, idx: number) => {
+              const currentIdx = CUSTOMER_STATUS_VALUES.indexOf(customer.status);
+              const isCurrent = customer.status === st;
+              const isPassed = customer.status !== 'lost' && st !== 'lost' && idx < currentIdx;
+              return (
+                <React.Fragment key={st}>
+                  {idx > 0 ? <span className="text-[10px] text-muted-foreground/45 select-none">›</span> : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isCurrent) void saveField({ status: st });
+                    }}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] transition-all ${
+                      isCurrent
+                        ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border'
+                        : isPassed
+                          ? 'font-medium text-foreground/75 hover:bg-card/70'
+                          : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        isCurrent
+                          ? st === 'lost'
+                            ? 'bg-rose-500'
+                            : 'bg-emerald-600'
+                          : isPassed
+                            ? 'bg-foreground/45'
+                            : 'bg-muted-foreground/30'
+                      }`}
+                      aria-hidden
+                    />
+                    {CUSTOMER_STATUS_LABEL[st]}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/70 pt-2 text-[11px] lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted-foreground">关系健康度</span>
+              <strong className="font-mono text-xs font-bold tabular-nums text-foreground">{healthOverall}</strong>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted-foreground">资料完整度</span>
+              <strong className="font-mono font-semibold tabular-nums text-foreground">{profileCompleteness}%</strong>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted-foreground">待审草稿</span>
+              <strong className="font-mono font-semibold tabular-nums text-foreground">{pendingDrafts.total}</strong>
+            </span>
+          </div>
+        </div>
+
         {/* Page-Level 360° Workspace View Tabs */}
-        <nav aria-label="客户 360 视图切换" className="-mb-5 mt-4 flex items-center gap-5 overflow-x-auto border-t border-border/75 pt-0.5 text-xs">
+        <nav aria-label="客户 360 视图切换" className="-mb-5 mt-3 flex items-center gap-5 overflow-x-auto border-t border-border/75 pt-0.5 text-xs">
           {([
-            ['overview', '关系概览'],
+            ['overview', '商机驾驶舱'],
             ['profile', '档案与采购需求'],
             ['letters', `开发信与草稿 (${letterTotal})`],
             ['quotes', '报价与交易'],
@@ -814,28 +875,31 @@ export function CustomerDetailPage(): React.JSX.Element {
         </nav>
       </section>
 
-      <PendingDrafts feed={pendingDrafts} onOpenDraft={letter => navigate('/customers/' + customer.id + '?knowledgeDraft=' + letter.id)} busy={letterBusy} />
+      {pendingDrafts.total > 0 || detailTab === 'letters' ? (
+        <PendingDrafts feed={pendingDrafts} onOpenDraft={letter => navigate('/customers/' + customer.id + '?knowledgeDraft=' + letter.id)} busy={letterBusy} />
+      ) : null}
 
       {/* ====================================================================
-         TAB 1: 关系概览 — True 3-Column Customer 360° Dashboard
+         TAB 1: 商机驾驶舱 — Unified Equal-Height 3-Pane Trade OS Cockpit
          ==================================================================== */}
       {detailTab === 'overview' ? (
-        <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[276px_minmax(0,1fr)_316px]">
-          {/* Column 1: Compact Customer Profile + Procurement Summary */}
-          <div className="min-w-0 space-y-4">
-            <Card>
-              <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm">客户基本信息</CardTitle>
+        <div className="grid min-w-0 gap-4 xl:grid-cols-[296px_minmax(0,1fr)_336px] xl:items-stretch">
+          {/* Column 1: Unified Continuous Customer Dossier Sheet (Zero Clipped Notes, Zero Bottom Blank Gap) */}
+          <Card className="flex min-w-0 flex-col justify-between overflow-hidden">
+            <div>
+              <div className="flex items-center justify-between border-b border-border/75 px-4 py-3">
+                <h2 className="text-sm font-semibold text-foreground">客户全息档案</h2>
                 <button
                   type="button"
                   onClick={() => setDetailTab('profile')}
                   className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                 >
-                  <Pencil className="h-3 w-3" aria-hidden />编辑
+                  <Pencil className="h-3 w-3" aria-hidden />完整编辑
                 </button>
-              </CardHeader>
-              <CardContent className="space-y-3 text-xs">
-                <dl className="divide-y divide-border/65">
+              </div>
+
+              <div className="space-y-4 p-4 text-xs">
+                <dl className="divide-y divide-border/60">
                   {[
                     ['公司名称', customer.company || '未填写'],
                     ['联系邮箱', customer.email || '未填写'],
@@ -846,7 +910,7 @@ export function CustomerDetailPage(): React.JSX.Element {
                     ['客户等级', customer.grade ? `${customer.grade} 级` : '未分级'],
                     ['客户来源', customer.leadSource || '未设置'],
                   ].map(([lbl, val]) => (
-                    <div key={lbl} className="flex items-baseline justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                    <div key={lbl} className="flex items-baseline justify-between gap-3 py-1.5 first:pt-0 last:pb-0">
                       <dt className="shrink-0 text-muted-foreground">{lbl}</dt>
                       <dd className="min-w-0 truncate text-right font-medium text-foreground" title={val}>{val}</dd>
                     </div>
@@ -855,7 +919,7 @@ export function CustomerDetailPage(): React.JSX.Element {
 
                 {customer.tags.length > 0 ? (
                   <div className="border-t border-border/65 pt-3">
-                    <p className="mb-1.5 text-[11px] text-muted-foreground">客户标签</p>
+                    <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">客户标签</p>
                     <div className="flex flex-wrap gap-1">
                       {customer.tags.map((tag) => (
                         <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>
@@ -864,124 +928,106 @@ export function CustomerDetailPage(): React.JSX.Element {
                   </div>
                 ) : null}
 
-                {customer.notes ? (
-                  <div className="border-t border-border/65 pt-3">
-                    <p className="mb-1 text-[11px] text-muted-foreground">背景备注</p>
-                    <p className="line-clamp-4 whitespace-pre-line rounded-lg bg-surface p-2.5 text-xs leading-relaxed text-foreground/85">
+                {/* Full Unclipped Notes Section with Expand/Collapse Toggle */}
+                <div className="border-t border-border/65 pt-3">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-muted-foreground">背景备注</span>
+                    {customer.notes && customer.notes.length > 180 ? (
+                      <button
+                        type="button"
+                        onClick={() => setNotesExpanded((v) => !v)}
+                        className="text-[11px] font-medium text-foreground underline-offset-2 hover:underline"
+                      >
+                        {notesExpanded ? '收起' : '展开全部'}
+                      </button>
+                    ) : null}
+                  </div>
+                  {customer.notes ? (
+                    <div
+                      className={`whitespace-pre-line break-words rounded-lg border border-border/75 bg-surface/65 p-3 text-xs leading-relaxed text-foreground/90 ${
+                        notesExpanded ? '' : 'line-clamp-4'
+                      }`}
+                    >
                       {customer.notes}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('profile')}
+                      className="w-full rounded-lg border border-dashed border-border px-3 py-2 text-left text-[11px] text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                    >
+                      + 点击补充客户背景与发现备注
+                    </button>
+                  )}
+                </div>
+
+                {/* Integrated Procurement Matrix inside the Same Sheet */}
+                <div className="border-t border-border/65 pt-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-muted-foreground">采购需求要素</span>
+                    <button
+                      type="button"
+                      onClick={() => setDetailTab('profile')}
+                      className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      补充 →
+                    </button>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg border border-border/60 bg-surface/60 p-2">
+                      <dt className="text-[10.5px] text-muted-foreground">意向品类</dt>
+                      <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.interestedProducts || '待确认'}</dd>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-surface/60 p-2">
+                      <dt className="text-[10.5px] text-muted-foreground">预计数量</dt>
+                      <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.expectedQuantity || '待确认'}</dd>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-surface/60 p-2">
+                      <dt className="text-[10.5px] text-muted-foreground">目标单价</dt>
+                      <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.targetPrice || '待确认'}</dd>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-surface/60 p-2">
+                      <dt className="text-[10.5px] text-muted-foreground">关注 MOQ</dt>
+                      <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.moq || '待确认'}</dd>
+                    </div>
+                  </dl>
+                  {customer.requirementNotes ? (
+                    <p className="mt-2 whitespace-pre-line break-words rounded-lg bg-surface/50 p-2.5 text-xs leading-relaxed text-muted-foreground">
+                      {customer.requirementNotes}
                     </p>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-sm">采购需求摘要</CardTitle>
-                <button
-                  type="button"
-                  onClick={() => setDetailTab('profile')}
-                  className="text-xs font-medium text-muted-foreground hover:text-foreground"
-                >
-                  补充需求 →
-                </button>
-              </CardHeader>
-              <CardContent className="space-y-2.5 text-xs">
-                <dl className="grid grid-cols-2 gap-2.5">
-                  <div className="rounded-lg bg-surface p-2.5">
-                    <dt className="text-[11px] text-muted-foreground">意向品类</dt>
-                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.interestedProducts || '待确认'}</dd>
-                  </div>
-                  <div className="rounded-lg bg-surface p-2.5">
-                    <dt className="text-[11px] text-muted-foreground">预计数量</dt>
-                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.expectedQuantity || '待确认'}</dd>
-                  </div>
-                  <div className="rounded-lg bg-surface p-2.5">
-                    <dt className="text-[11px] text-muted-foreground">目标单价</dt>
-                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.targetPrice || '待确认'}</dd>
-                  </div>
-                  <div className="rounded-lg bg-surface p-2.5">
-                    <dt className="text-[11px] text-muted-foreground">关注 MOQ</dt>
-                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.moq || '待确认'}</dd>
-                  </div>
-                </dl>
-                {customer.requirementNotes ? (
-                  <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">
-                    {customer.requirementNotes}
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Column 2: 业务总览 + 关系健康度 + GlobalSite 询盘 + 沟通时间线 */}
-          <div className="min-w-0 space-y-4">
-            <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
-              <div className="panel p-3.5">
-                <p className="text-[11px] text-muted-foreground">开发信往来</p>
-                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{customer.letterCount}</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">累计留档记录</p>
-              </div>
-              <div className="panel p-3.5">
-                <p className="text-[11px] text-muted-foreground">待审草稿</p>
-                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{pendingDrafts.total}</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">发送前人工审核</p>
-              </div>
-              <div className="panel p-3.5">
-                <p className="text-[11px] text-muted-foreground">档案完整度</p>
-                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{profileCompleteness}%</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">{customer.email ? '已含邮箱' : '缺少邮箱'}</p>
-              </div>
-              <div className="panel p-3.5">
-                <p className="text-[11px] text-muted-foreground">客户健康度</p>
-                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{healthOverall}</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">{healthOverall >= 70 ? '推进良好' : '建议跟进'}</p>
+                  ) : null}
+                </div>
               </div>
             </div>
 
-            {/* 4-Dimension Relationship Health Card */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">关系健康度与商机成熟度</CardTitle>
-                <CardDescription>基于真实档案完整度、沟通频次、需求明确度与商机阶段综合计算</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center gap-5 sm:flex-row">
-                  <HealthRing score={healthOverall} label={healthOverall >= 70 ? '良好' : '培育中'} size={92} strokeWidth={7} />
-                  <div className="w-full min-w-0 flex-1 space-y-2.5 text-xs">
-                    {[
-                      ['资料完整度', profileCompleteness],
-                      ['沟通活跃度', communicationScore],
-                      ['需求明确度', requirementClarity],
-                      ['阶段推进度', stageMomentum],
-                    ].map(([lbl, val]) => (
-                      <div key={String(lbl)}>
-                        <div className="mb-1 flex justify-between">
-                          <span className="text-muted-foreground">{lbl}</span>
-                          <span className="font-mono font-semibold tabular-nums text-foreground">{val}%</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${val}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="border-t border-border/75 bg-surface/45 px-4 py-2.5">
+              <button
+                type="button"
+                onClick={() => setDetailTab('profile')}
+                className="flex w-full items-center justify-between text-xs font-medium text-foreground hover:underline"
+              >
+                <span>管理社媒、时区与全部自定义字段</span>
+                <span>→</span>
+              </button>
+            </div>
+          </Card>
 
+          {/* Column 2: Clean Stream — GlobalSite Inquiries + Follow-up Timeline + Recent Letters */}
+          <div className="flex min-w-0 flex-col gap-4">
             {/* Always keep GlobalSiteInquiries mounted & visible on default load for real workflow + C3 UI test */}
             <GlobalSiteInquiries customerId={customer.id} onDraft={() => { void reloadLetters(); void refreshDrafts(); }} />
 
             {/* Customer Activity & Follow-up Timeline */}
-            <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} onViewLetter={openLetterById} />
+            <div className="flex flex-1 flex-col">
+              <CustomerActivity className="flex-1" customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} onViewLetter={openLetterById} />
+            </div>
 
             {/* Compact Recent Letters Preview */}
             {letters.length > 0 ? (
               <Card>
                 <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
                   <div>
-                    <CardTitle className="text-sm">最近开发信</CardTitle>
+                    <CardTitle className="text-sm">最近开发信往来</CardTitle>
                     <CardDescription>共 {letterTotal} 封记录</CardDescription>
                   </div>
                   <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDetailTab('letters')}>
@@ -1010,95 +1056,158 @@ export function CustomerDetailPage(): React.JSX.Element {
             ) : null}
           </div>
 
-          {/* Column 3: Sticky AI Customer Advisor + Workbench Sidebar */}
-          <div className="min-w-0 space-y-4 xl:sticky xl:top-4">
-            <Card>
-              <CardHeader className="pb-3">
+          {/* Column 3: Unified Tabbed AI Deal OS Copilot (Eliminates 4-Card Right Stack!) */}
+          <div className="panel flex min-w-0 flex-col justify-between overflow-hidden">
+            <div>
+              <div className="border-b border-border/80 bg-surface/55 p-3.5">
                 <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="flex items-center gap-1.5 text-sm">
-                    <Sparkles className="h-4 w-4 text-foreground" aria-hidden />
-                    AI 客户顾问
-                  </CardTitle>
-                  <Badge variant="outline" className="text-[10px]">基于项目知识库</Badge>
-                </div>
-                <CardDescription>分析当前客户状态与下一步最佳行动</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-xs">
-                <div className="callout-sage space-y-1.5">
-                  <p className="font-semibold text-foreground">当前推进建议</p>
-                  <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-                    {!customer.email ? (
-                      <li>当前缺少联系邮箱，建议先点击「补查联系人」从企业官网提取决策人地址。</li>
-                    ) : customer.letterCount === 0 ? (
-                      <li>已有联系邮箱但尚未发送开发信，建议生成结合行业背景的首封个性化草稿。</li>
-                    ) : (
-                      <li>已发送 {customer.letterCount} 封邮件，可结合样品进度或阶梯报价推进下一轮跟进。</li>
-                    )}
-                    {getFollowUpState(customer.nextFollowUpAt) === 'overdue' ? (
-                      <li className="text-rose">下次跟进日期已逾期（{formatDate(customer.nextFollowUpAt)}），建议今日优先触达。</li>
-                    ) : null}
-                    {!customer.interestedProducts && !customer.expectedQuantity ? (
-                      <li>采购品类与目标数量尚未登记，沟通中建议引导买家确认规格与打样需求。</li>
-                    ) : null}
-                  </ul>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold text-muted-foreground">快速操作</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 justify-start text-xs"
-                      disabled={quickGenerating}
-                      onClick={() => void quickGenerate()}
-                    >
-                      <Sparkles className="h-3.5 w-3.5" aria-hidden />生成首封草稿
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 justify-start text-xs"
-                      onClick={() => navigate(`${ROUTES.quotations}?customerId=${customer.id}`)}
-                    >
-                      <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />创建报价单
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 justify-start text-xs"
-                      onClick={() => { setResendTarget(null); setSendOpen(true); }}
-                    >
-                      <Mail className="h-3.5 w-3.5" aria-hidden />撰写开发信
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 justify-start text-xs"
-                      onClick={() => {
-                        setAgentOpen(true);
-                        openAgentWithPrompt('请结合当前客户的档案、官网与往来记录，给出下一步跟进策略并准备邮件草稿（不要直接发送）。');
-                      }}
-                    >
-                      <MessageSquareText className="h-3.5 w-3.5" aria-hidden />打开 AI 顾问
-                    </Button>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                    <div>
+                      <h2 className="text-sm font-semibold text-foreground">AI 商机驾驶舱</h2>
+                      <p className="text-[10.5px] text-muted-foreground">策略顾问 · 打样进度 · 未决承诺</p>
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
 
-            <CustomerWorkbenchSidebar
-              customer={customer}
-              onPatchCustomer={async (patch) => {
-                await updateCustomer(customer.id, patch as Partial<CustomerInput>);
-                await reloadCustomer();
-                toast.success('客户商机信息已更新');
-              }}
-            />
+                <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg border border-border/80 bg-surface p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setCopilotTab('advisor')}
+                    className={`rounded-md py-1 font-medium transition-all ${
+                      copilotTab === 'advisor'
+                        ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border/80'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    AI 推进顾问
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCopilotTab('workbench')}
+                    className={`rounded-md py-1 font-medium transition-all ${
+                      copilotTab === 'workbench'
+                        ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border/80'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    打样与未决台账
+                  </button>
+                </div>
+              </div>
+
+              {copilotTab === 'advisor' ? (
+                <div className="space-y-4 p-4 text-xs">
+                  <div className="callout-sage space-y-1.5">
+                    <p className="font-semibold text-foreground">下一步最佳行动建议</p>
+                    <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+                      {!customer.email ? (
+                        <li>当前缺少联系邮箱，建议先点击「补查联系人」从企业官网提取决策人地址。</li>
+                      ) : customer.letterCount === 0 ? (
+                        <li>已有联系邮箱但尚未发送开发信，建议生成结合行业背景的首封个性化草稿。</li>
+                      ) : (
+                        <li>已发送 {customer.letterCount} 封邮件，可结合样品进度或阶梯报价推进下一轮跟进。</li>
+                      )}
+                      {getFollowUpState(customer.nextFollowUpAt) === 'overdue' ? (
+                        <li className="text-rose">下次跟进日期已逾期（{formatDate(customer.nextFollowUpAt)}），建议今日优先触达。</li>
+                      ) : null}
+                      {!customer.interestedProducts && !customer.expectedQuantity ? (
+                        <li>采购品类与目标数量尚未登记，沟通中建议引导买家确认规格与打样需求。</li>
+                      ) : null}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[11px] font-semibold text-muted-foreground">一键指令调度</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 justify-start text-xs"
+                        disabled={quickGenerating}
+                        onClick={() => void quickGenerate()}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" aria-hidden />生成首封草稿
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 justify-start text-xs"
+                        onClick={() => navigate(`${ROUTES.quotations}?customerId=${customer.id}`)}
+                      >
+                        <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />创建报价单
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 justify-start text-xs"
+                        onClick={() => { setResendTarget(null); setSendOpen(true); }}
+                      >
+                        <Mail className="h-3.5 w-3.5" aria-hidden />撰写开发信
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 justify-start text-xs"
+                        onClick={() => {
+                          setAgentOpen(true);
+                          openAgentWithPrompt('请结合当前客户的档案、官网与往来记录，给出下一步跟进策略并准备邮件草稿（不要直接发送）。');
+                        }}
+                      >
+                        <MessageSquareText className="h-3.5 w-3.5" aria-hidden />深度策略分析
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Embedded 4-Dimension Health Matrix (Compact & Contextual) */}
+                  <div className="rounded-xl border border-border/75 bg-surface/50 p-3.5">
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <span className="font-semibold text-foreground">商机成熟度四维评估</span>
+                      <span className="font-mono text-xs font-bold tabular-nums text-foreground">{healthOverall} / 100</span>
+                    </div>
+                    <div className="space-y-2">
+                      {[
+                        ['资料完整度', profileCompleteness],
+                        ['沟通活跃度', communicationScore],
+                        ['需求明确度', requirementClarity],
+                        ['阶段推进度', stageMomentum],
+                      ].map(([lbl, val]) => (
+                        <div key={String(lbl)}>
+                          <div className="mb-1 flex justify-between text-[11px]">
+                            <span className="text-muted-foreground">{lbl}</span>
+                            <span className="font-mono font-semibold tabular-nums text-foreground">{val}%</span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-border/80">
+                            <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${val}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3.5 [&_.space-y-4]:space-y-3">
+                  <CustomerWorkbenchSidebar
+                    customer={customer}
+                    onPatchCustomer={async (patch) => {
+                      await updateCustomer(customer.id, patch as Partial<CustomerInput>);
+                      await reloadCustomer();
+                      toast.success('客户商机信息已更新');
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-border/75 bg-surface/45 px-4 py-2.5 text-[11px] text-muted-foreground">
+              切换上方「打样与未决台账」可实时登记寄样进度与买方待确认问题。
+            </div>
           </div>
         </div>
       ) : null}
