@@ -1,9 +1,16 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import {
+  BadgeDollarSign,
+  BookOpen,
+  Building2,
   CheckCircle2,
+  ChevronRight,
   FolderTree,
+  HelpCircle,
+  Layers,
   Loader2,
+  MessageSquareQuote,
   Package,
   Send,
   ShieldCheck,
@@ -21,15 +28,54 @@ import type { KnowledgeQaResult } from '@/types';
 import { AgentMessageContent } from '@/components/agent/agent-message-content';
 
 const TREE_CATEGORIES = [
-  { key: 'all', label: '全部资料' },
-  { key: 'product', label: '产品资料与工艺' },
-  { key: 'trade', label: '报价政策与 MOQ' },
-  { key: 'compliance', label: '出口合规与认证' },
-  { key: 'company', label: '工厂与公司实力' },
-  { key: 'sales_rules', label: '销售话术与红线' },
-  { key: 'faq', label: '历史经验与 FAQ' },
-  { key: 'reference', label: '外贸术语与参考' },
+  { key: 'all', label: '全部资料', icon: Layers, accent: 'text-indigo-600 dark:text-indigo-400' },
+  { key: 'product', label: '产品资料与工艺', icon: Package, accent: 'text-sky-600 dark:text-sky-400' },
+  { key: 'trade', label: '报价政策与 MOQ', icon: BadgeDollarSign, accent: 'text-amber-600 dark:text-amber-400' },
+  { key: 'compliance', label: '出口合规与认证', icon: ShieldCheck, accent: 'text-emerald-600 dark:text-emerald-400' },
+  { key: 'company', label: '工厂与公司实力', icon: Building2, accent: 'text-violet-600 dark:text-violet-400' },
+  { key: 'sales_rules', label: '销售话术与红线', icon: MessageSquareQuote, accent: 'text-rose-600 dark:text-rose-400' },
+  { key: 'faq', label: '历史经验与 FAQ', icon: HelpCircle, accent: 'text-teal-600 dark:text-teal-400' },
+  { key: 'reference', label: '外贸术语与参考', icon: BookOpen, accent: 'text-slate-500 dark:text-slate-400' },
 ] as const;
+
+const QUICK_SCENARIOS_BY_CAT: Record<string, Array<{ title: string; subtitle: string; prompt: string }>> = {
+  all: [
+    { title: 'MOQ、打样与大货交期', subtitle: '买家询盘最常问的基础商务口径', prompt: '我们定制产品的标准 MOQ、打样费用及大货交期分别是多少？回复客户时怎么准确表述？' },
+    { title: '按客户行业推荐款式', subtitle: '珠宝、美妆、礼品等场景快速选型', prompt: '不同行业（如珠宝、美妆、时尚礼品）的买家适合主推哪几类产品与材质搭配？' },
+    { title: '付款方式与贸易条款', subtitle: '定金比例、尾款及 FOB/DDP 规范', prompt: '我们标准的付款方式、定金尾款比例和贸易条款（FOB/CIF/DDP）口径是什么？' },
+    { title: '对外红线与禁承诺项', subtitle: '发信和报价前必查的合规边界', prompt: '汇总本项目对外沟通红线、绝对不能随意承诺的事项及合规注意事项。' },
+    { title: '免费寄样与压价应对', subtitle: '高频买家异议的标准专业回复', prompt: '遇到客户要求免费寄定制样品或压低起订量时，标准回复口径和替代方案是什么？' },
+  ],
+  product: [
+    { title: '主推品类与核心工艺清单', subtitle: '材质、烫金、丝印与环保选项', prompt: '列出当前已发布资料中的主推产品品类、常用材质和定制 Logo 工艺选项。' },
+    { title: '珠宝与美妆包装搭配建议', subtitle: '提升客单价的整套组合方案', prompt: '针对珠宝首饰和美妆护肤买家，有哪些推荐的包装结构、内托与组合方案？' },
+    { title: '尺寸与结构定制注意事项', subtitle: '打样前需要客户确认的参数', prompt: '客户咨询定制尺寸、内托结构或特殊材质时，业务员需要提前核对哪些关键参数？' },
+  ],
+  trade: [
+    { title: '起订量与阶梯价规则', subtitle: '小批量试单与大货数量档位', prompt: '整理不同品类的起订量（MOQ）、小批量试单政策以及阶梯报价核对口径。' },
+    { title: '打样周期与大货排产交期', subtitle: '旺季交期缓冲与物流方式说明', prompt: '打样周期、打样费退还条件和大货交期的标准对外回复口径是什么？' },
+    { title: '付款条件与报价有效期', subtitle: 'T/T 比例、币种与有效期规范', prompt: '标准付款方式、接受币种以及正式报价单有效期的口径要求是什么？' },
+  ],
+  compliance: [
+    { title: '出口欧美市场合规与税费', subtitle: '反倾销税、环保包装与清关提示', prompt: '出口美国、欧洲等重点市场有哪些合规、环保认证或关税/反倾销注意事项？' },
+    { title: '已有证书的准确表述方式', subtitle: '避免夸大认证范围引起纠纷', prompt: '我们具备哪些工厂或材料认证（如 FSC、BSCI、ISO 等）？对外邮件中应如何严谨表述？' },
+  ],
+  company: [
+    { title: '工厂产能与核心优势话术', subtitle: '开发信与新客破冰背书要点', prompt: '提炼最适合写进首封开发信的公司实力、自有工厂产能、品控与品牌服务经验要点。' },
+    { title: '验厂、视频看厂与寄样流程', subtitle: '增强海外大买家信任的标准流程', prompt: '海外大客户希望视频看厂、审核工厂资质或确认品控流程时，我们有哪些可展示依据？' },
+  ],
+  sales_rules: [
+    { title: '开发信核心撰写规范', subtitle: '结构、长度、语气与禁用词检查', prompt: '总结本项目的核心开发信撰写规范、推荐切入角度以及严禁出现的表述红线。' },
+    { title: '报价与交期承诺底线', subtitle: '避免越权承诺的内部审核规则', prompt: '哪些价格、交期、样品或售后条款必须先经内部核准，业务员不能直接对外承诺？' },
+  ],
+  faq: [
+    { title: '高频买家 FAQ 速查', subtitle: '起订量、样品费、Logo 文件格式', prompt: '汇总买家最常问的 5 个问题（MOQ、样品费、Logo 图稿、交期、物流）及标准回答。' },
+    { title: '客户资格判断与跟进优先级', subtitle: '识别高潜品牌买家与低质询盘', prompt: '收到新询盘后，如何根据资料中的买家资格核对清单判断客户潜力与回复策略？' },
+  ],
+  reference: [
+    { title: '常用贸易条款与包装术语', subtitle: 'FOB / CIF / DDP 与材质英文表达', prompt: '整理外贸沟通中高频使用的英文包装工艺术语和常用贸易条款说明。' },
+  ],
+};
 
 interface ChatTurn {
   id: string;
@@ -70,13 +116,15 @@ export function KnowledgeQaPanel({ admin }: { admin: boolean }): React.JSX.Eleme
     return map;
   }, [docs]);
 
-  const visibleDocs = React.useMemo(() => {
-    if (activeCat === 'all') return docs;
-    return docs.filter((d) => {
-      const rev = d.revisions.find((r) => r.version === d.approvedVersion) ?? d.revisions[0];
-      return (rev?.category || 'reference') === activeCat;
-    });
-  }, [docs, activeCat]);
+  const quickScenarios = React.useMemo(
+    () => QUICK_SCENARIOS_BY_CAT[activeCat] ?? QUICK_SCENARIOS_BY_CAT.all,
+    [activeCat],
+  );
+  const activeCatLabel = React.useMemo(
+    () => TREE_CATEGORIES.find((c) => c.key === activeCat)?.label ?? '全部资料',
+    [activeCat],
+  );
+  const activeCatDocCount = activeCat === 'all' ? docs.length : (catCounts.get(activeCat) ?? 0);
 
   const activeTurn = turns.find((t) => t.id === selectedTurnId) ?? turns[turns.length - 1] ?? null;
 
@@ -140,12 +188,12 @@ export function KnowledgeQaPanel({ admin }: { admin: boolean }): React.JSX.Eleme
   };
 
   return (
-    <div className="grid min-h-[540px] overflow-hidden rounded-lg border border-border bg-card xl:h-[calc(100dvh-13rem)] xl:grid-cols-[16.5rem_minmax(0,1fr)_21rem]">
-      {/* Left: Category tree */}
-      <aside className="flex min-w-0 flex-col border-b border-border xl:border-b-0 xl:border-r">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-          <span className="flex items-center gap-1.5 text-xs font-semibold">
-            <FolderTree className="h-3.5 w-3.5 text-primary" />知识库目录树
+    <div className="grid min-h-[540px] overflow-hidden rounded-xl border border-border bg-card shadow-xs xl:h-[calc(100dvh-13rem)] xl:grid-cols-[17.5rem_minmax(0,1fr)_20.5rem]">
+      {/* Left: Refined Category Filter + Sales High-Frequency Quick-Query Playbook */}
+      <aside className="flex min-w-0 flex-col border-b border-border bg-surface/35 xl:border-b-0 xl:border-r">
+        <div className="flex items-center justify-between gap-2 border-b border-border/80 bg-card/70 px-3.5 py-2.5">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+            <FolderTree className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />知识库目录
           </span>
           {admin ? (
             <>
@@ -163,58 +211,91 @@ export function KnowledgeQaPanel({ admin }: { admin: boolean }): React.JSX.Eleme
             </>
           ) : null}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
           <ul className="space-y-0.5 text-xs">
             {TREE_CATEGORIES.map((cat) => {
               const count = cat.key === 'all' ? docs.length : (catCounts.get(cat.key) ?? 0);
               const active = activeCat === cat.key;
+              const CatIcon = cat.icon;
               return (
                 <li key={cat.key}>
                   <button
                     type="button"
                     onClick={() => setActiveCat(cat.key)}
-                    className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left transition-colors ${
-                      active ? 'bg-primary text-primary-foreground font-medium' : 'text-foreground/85 hover:bg-muted'
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition-all ${
+                      active
+                        ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border'
+                        : count === 0
+                          ? 'text-muted-foreground/65 hover:bg-card/60 hover:text-foreground'
+                          : 'text-foreground/85 hover:bg-card/75 hover:text-foreground'
                     }`}
                   >
-                    <span className="truncate">{cat.label}</span>
-                    <span className={`tabular-nums text-[11px] ${active ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{count}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <CatIcon className={`h-3.5 w-3.5 shrink-0 ${active ? cat.accent : count === 0 ? 'opacity-50' : cat.accent}`} aria-hidden />
+                      <span className="truncate">{cat.label}</span>
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0 font-mono text-[10.5px] tabular-nums ${
+                        active
+                          ? 'bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      {count}
+                    </span>
                   </button>
                 </li>
               );
             })}
           </ul>
-          {visibleDocs.length > 0 ? (
-            <div className="mt-3 border-t border-border pt-2.5">
-              <p className="mb-1.5 px-2 text-[11px] font-medium text-muted-foreground">当前分类文档（点标题提问）</p>
-              <ul className="space-y-1 text-xs">
-                {visibleDocs.slice(0, 15).map((d) => {
-                  const rev = d.revisions.find((r) => r.version === d.approvedVersion) ?? d.revisions[0];
-                  return (
-                    <li key={d.id}>
-                      <button
-                        type="button"
-                        onClick={() => void ask(`请总结「${rev?.title ?? '该资料'}」里的关键规格、MOQ、交期和对外口径注意事项`)}
-                        className="block w-full truncate rounded px-2 py-1 text-left text-muted-foreground hover:bg-muted hover:text-foreground"
-                        title={rev?.title}
-                      >
-                        · {rev?.title || '未命名资料'}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+
+          {/* Sales High-Frequency Quick-Query Playbook (Replaces Truncated Raw Filenames) */}
+          <div className="mt-3.5 border-t border-border/75 pt-3">
+            <div className="mb-1.5 flex items-center justify-between px-2">
+              <span className="text-[11px] font-semibold text-foreground">业务高频速查</span>
+              <span className="text-[10.5px] text-muted-foreground">一键问口径</span>
             </div>
-          ) : null}
+            <div className="divide-y divide-border/50 px-1">
+              {quickScenarios.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  disabled={asking}
+                  onClick={() => void ask(item.prompt)}
+                  className="group flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-2 text-left transition-colors hover:bg-card disabled:opacity-50"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium text-foreground group-hover:text-indigo-700 dark:group-hover:text-indigo-300">
+                      {item.title}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">
+                      {item.subtitle}
+                    </span>
+                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
+                </button>
+              ))}
+            </div>
+            {activeCatDocCount > 0 ? (
+              <div className="mt-2.5 px-2">
+                <Link
+                  to="/knowledge"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                >
+                  浏览「{activeCatLabel}」{activeCatDocCount} 篇完整原文 →
+                </Link>
+              </div>
+            ) : null}
+          </div>
         </div>
       </aside>
 
       {/* Center: AI Q&A conversation */}
       <section className="flex min-w-0 flex-col overflow-hidden border-b border-border xl:border-b-0 xl:border-r">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <div className="flex items-center justify-between border-b border-border/80 px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold">AI 知识库与口径助手</span>
+            <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            <span className="text-sm font-semibold">AI 知识与口径问答</span>
           </div>
           <span className="text-[11px] text-muted-foreground">仅引用已审核资料、对外口径表与产品目录</span>
         </div>

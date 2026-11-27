@@ -836,20 +836,20 @@ export function ProspectingPage(): React.JSX.Element {
           </div>
 
           {data && (data.openTotal ?? 0) > pageSize ? (
-            <div className="border-t border-border px-2 py-1.5">
-              <DataPagination
-                page={page}
-                limit={pageSize}
-                total={data.openTotal ?? 0}
-                totalPages={Math.max(1, Math.ceil((data.openTotal ?? 0) / pageSize))}
-                onPageChange={setPage}
-                onLimitChange={(next) => {
-                  setPageSize(next);
-                  setPage(1);
-                }}
-                disabled={loading || Boolean(batch)}
-              />
-            </div>
+            <DataPagination
+              compact
+              className="shrink-0 bg-surface/30"
+              page={page}
+              limit={pageSize}
+              total={data.openTotal ?? 0}
+              totalPages={Math.max(1, Math.ceil((data.openTotal ?? 0) / pageSize))}
+              onPageChange={setPage}
+              onLimitChange={(next) => {
+                setPageSize(next);
+                setPage(1);
+              }}
+              disabled={loading || Boolean(batch)}
+            />
           ) : null}
         </section>
 
