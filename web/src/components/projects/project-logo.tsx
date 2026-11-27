@@ -39,8 +39,8 @@ export function ProjectLogo({ project, size = 'md', compact = false, className }
   const compactSrc = BUILTIN_ICONS[project.code.trim().toUpperCase()] ?? src;
   if (compactSrc && compact) {
     const compactFrame = size === 'xs' ? 'h-6 w-6' : size === 'sm' ? 'h-7 w-7' : 'h-9 w-9';
-    return <span className={cn('inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-white', compactFrame, className)} title={`${project.name} Logo`}>
-      <img src={compactSrc} alt={`${project.name} Logo`} className="h-full w-full object-contain p-0.5" loading="lazy" />
+    return <span className={cn('inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-white dark:bg-surface', compactFrame, className)} title={`${project.name} Logo`}>
+      <img src={compactSrc} alt={`${project.name} Logo`} className="h-full w-full object-contain p-0.5 dark:invert dark:hue-rotate-180" loading="lazy" />
     </span>;
   }
   if (src) {

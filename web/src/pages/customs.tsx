@@ -310,8 +310,8 @@ export function CustomsPage(): React.JSX.Element {
               { step: '03', title: '核实公司画像', desc: '查看采购频次、金额趋势与主要供应商结构' },
               { step: '04', title: '加入客户线索池', desc: '一键转入线索池补齐决策人邮箱并推进开发' },
             ].map((item) => (
-              <li key={item.step} className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/65 p-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-xs font-bold tabular-nums text-primary">
+              <li key={item.step} className="flex items-start gap-3 rounded-lg border border-border/85 bg-surface/55 p-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card font-mono text-[11px] font-semibold tabular-nums text-foreground">
                   {item.step}
                 </span>
                 <div className="min-w-0">

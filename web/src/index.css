@@ -3,122 +3,124 @@
 @tailwind utilities;
 
 /* ==========================================================================
-   GlobalCRM · Atelier Trade Design Tokens
+   GlobalCRM · Gallery White & Charcoal Design System
    ------------------------------------------------------------------
-   Warm linen-ivory canvas, parchment sidebar, crisp elevated white surfaces,
-   deep British forest-emerald brand accent, restrained antique-gold highlights.
-   Zero cheap neon or generic admin templates; calm executive clarity.
+   Inspired by Notion, Claude & Linear: warm gallery-white canvas (#FAF9F7),
+   subtle stone sidebar (#F5F4F0), pure white architectural cards (#FFFFFF),
+   crisp 1px hairline borders, and deep charcoal ink (#181716) primary actions.
+   Crisp 10px–12px corners, high contrast, restrained semantic indicators.
    ========================================================================== */
 @layer base {
   :root {
-    --background: 45 22% 96%;
-    --foreground: 150 18% 12%;
+    --background: 40 18% 97.6%;
+    --foreground: 40 7% 9%;
 
     --card: 0 0% 100%;
-    --card-foreground: 150 18% 12%;
+    --card-foreground: 40 7% 9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 150 18% 12%;
+    --popover-foreground: 40 7% 9%;
 
-    /* Deep Forest Emerald (#1E5B3A) */
-    --primary: 148 51% 24%;
-    --primary-foreground: 0 0% 100%;
-    --primary-soft: 146 34% 92%;
+    /* Deep Charcoal Ink (#181716) */
+    --primary: 40 7% 9.5%;
+    --primary-foreground: 40 20% 98.5%;
+    --primary-soft: 40 11% 93.5%;
 
-    --secondary: 44 18% 93%;
-    --secondary-foreground: 150 16% 20%;
+    --secondary: 40 12% 94.2%;
+    --secondary-foreground: 40 6% 16%;
 
-    --muted: 44 16% 93.5%;
-    --muted-foreground: 148 7% 43%;
+    --muted: 40 11% 94.4%;
+    --muted-foreground: 38 4% 43%;
 
-    --accent: 146 24% 93%;
-    --accent-foreground: 148 42% 20%;
+    --accent: 40 11% 93.5%;
+    --accent-foreground: 40 7% 9%;
 
     --destructive: 2 62% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 42 15% 88%;
-    --input: 42 14% 83%;
-    --ring: 148 48% 28%;
+    --border: 38 10% 89%;
+    --input: 38 10% 85%;
+    --ring: 40 7% 14%;
 
-    --surface: 45 20% 97%;
-    --surface-foreground: 150 18% 12%;
+    --surface: 40 15% 96.2%;
+    --surface-foreground: 40 7% 9%;
 
-    /* Harmonized botanical semantic palette */
-    --mint: 150 54% 28%;
-    --mint-soft: 146 38% 92%;
-    --rose: 356 60% 47%;
-    --rose-soft: 356 70% 96%;
-    --amber: 34 78% 36%;
-    --amber-soft: 40 82% 93%;
-    --violet-soft: 146 34% 92%;
-    --gold: 40 48% 44%;
-    --gold-soft: 43 60% 93%;
+    /* Restrained low-saturation semantic status palette */
+    --mint: 152 44% 30%;
+    --mint-soft: 150 28% 93.5%;
+    --rose: 356 58% 47%;
+    --rose-soft: 356 60% 96%;
+    --amber: 34 70% 37%;
+    --amber-soft: 38 66% 94%;
+    --violet-soft: 40 11% 93.5%;
+    --gold: 36 28% 38%;
+    --gold-soft: 38 26% 93.5%;
 
-    --radius: 0.75rem;
+    /* Crisp modern business geometry: 10px base radius, 12px cards */
+    --radius: 0.625rem;
     --workspace-content-width: 100%;
-    --workspace-shadow: 0 1px 2px hsl(150 20% 12% / 0.04);
-    --workspace-panel-shadow: 0 10px 30px -16px hsl(150 20% 12% / 0.16);
-    --workspace-motion: 150ms;
+    --workspace-shadow: 0 1px 2px hsl(40 10% 8% / 0.035);
+    --workspace-panel-shadow: 0 8px 24px -14px hsl(40 10% 8% / 0.12);
+    --workspace-motion: 140ms;
 
-    --shadow-card: 0 1px 2px hsl(150 18% 14% / 0.04), 0 4px 14px -10px hsl(150 18% 14% / 0.08);
-    --shadow-island: 0 10px 28px -18px hsl(150 18% 14% / 0.16);
-    --shadow-pop: 0 14px 36px -16px hsl(150 20% 12% / 0.22), 0 2px 6px hsl(150 20% 12% / 0.06);
+    --shadow-card: 0 1px 2px hsl(40 10% 8% / 0.035), 0 3px 10px -8px hsl(40 10% 8% / 0.06);
+    --shadow-island: 0 8px 24px -16px hsl(40 10% 8% / 0.14);
+    --shadow-pop: 0 14px 34px -14px hsl(40 10% 8% / 0.2), 0 2px 6px hsl(40 10% 8% / 0.06);
 
-    /* Parchment stone sidebar */
-    --sidebar: 44 20% 94%;
-    --sidebar-foreground: 150 16% 16%;
-    --sidebar-accent: 146 32% 89%;
-    --sidebar-border: 42 16% 87%;
+    /* Warm gallery stone sidebar */
+    --sidebar: 40 15% 95.3%;
+    --sidebar-foreground: 40 6% 15%;
+    --sidebar-accent: 40 11% 91.5%;
+    --sidebar-border: 38 10% 88.5%;
 
-    --status-pending: 204 52% 38%;
-    --status-developed: 150 54% 28%;
-    --status-failed: 356 60% 47%;
+    --status-pending: 215 28% 36%;
+    --status-developed: 152 44% 30%;
+    --status-failed: 356 58% 47%;
   }
 
   .dark {
-    --background: 150 10% 7%;
-    --foreground: 44 14% 94%;
+    --background: 40 5% 6.5%;
+    --foreground: 40 12% 93.5%;
 
-    --card: 150 10% 10.5%;
-    --card-foreground: 44 14% 94%;
+    --card: 40 5% 9.5%;
+    --card-foreground: 40 12% 93.5%;
 
-    --popover: 150 10% 12%;
-    --popover-foreground: 44 14% 94%;
+    --popover: 40 5% 11%;
+    --popover-foreground: 40 12% 93.5%;
 
-    /* Luminous Sage Emerald for dark surfaces */
-    --primary: 148 44% 46%;
-    --primary-foreground: 150 25% 7%;
-    --primary-soft: 148 28% 16%;
+    /* Crisp Warm Alabaster on Carbon Dark */
+    --primary: 40 14% 93%;
+    --primary-foreground: 40 8% 8%;
+    --primary-soft: 40 5% 16%;
 
-    --secondary: 150 8% 15%;
-    --secondary-foreground: 44 12% 92%;
+    --secondary: 40 5% 14.5%;
+    --secondary-foreground: 40 10% 92%;
 
-    --muted: 150 8% 15%;
-    --muted-foreground: 145 7% 62%;
+    --muted: 40 5% 14.5%;
+    --muted-foreground: 38 5% 60%;
 
-    --accent: 148 20% 17%;
-    --accent-foreground: 148 42% 76%;
+    --accent: 40 5% 16%;
+    --accent-foreground: 40 12% 94%;
 
     --destructive: 2 62% 58%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 150 8% 19%;
-    --input: 150 8% 24%;
-    --ring: 148 44% 48%;
+    --border: 40 5% 17.5%;
+    --input: 40 5% 22%;
+    --ring: 40 12% 82%;
 
-    --surface: 150 9% 12.5%;
-    --surface-foreground: 44 14% 94%;
+    --surface: 40 5% 11.8%;
+    --surface-foreground: 40 12% 93.5%;
 
-    --mint: 150 52% 56%;
-    --mint-soft: 150 28% 16%;
-    --rose: 356 68% 66%;
-    --rose-soft: 356 30% 18%;
-    --amber: 38 78% 62%;
-    --amber-soft: 36 30% 17%;
-    --violet-soft: 148 28% 16%;
-    --gold: 42 56% 62%;
-    --gold-soft: 42 28% 17%;
+    --mint: 152 46% 56%;
+    --mint-soft: 152 24% 16%;
+    --rose: 356 66% 66%;
+    --rose-soft: 356 28% 18%;
+    --amber: 38 74% 62%;
+    --amber-soft: 36 28% 17%;
+    --violet-soft: 40 5% 16%;
+    --gold: 38 36% 66%;
+    --gold-soft: 38 18% 17%;
 
     --workspace-shadow: 0 1px 2px hsl(0 0% 0% / 0.35);
     --workspace-panel-shadow: 0 12px 32px -18px hsl(0 0% 0% / 0.72);
@@ -126,14 +128,14 @@
     --shadow-island: 0 14px 32px -20px hsl(0 0% 0% / 0.72);
     --shadow-pop: 0 16px 38px -18px hsl(0 0% 0% / 0.78), 0 1px 4px hsl(0 0% 0% / 0.4);
 
-    --sidebar: 150 11% 9%;
-    --sidebar-foreground: 44 12% 92%;
-    --sidebar-accent: 148 24% 16%;
-    --sidebar-border: 150 8% 17%;
+    --sidebar: 40 6% 8%;
+    --sidebar-foreground: 40 10% 90%;
+    --sidebar-accent: 40 5% 14.5%;
+    --sidebar-border: 40 5% 16.5%;
 
-    --status-pending: 204 60% 62%;
-    --status-developed: 150 52% 54%;
-    --status-failed: 356 68% 66%;
+    --status-pending: 215 36% 68%;
+    --status-developed: 152 46% 54%;
+    --status-failed: 356 66% 66%;
   }
 
   * {
@@ -148,7 +150,7 @@
     @apply bg-background text-foreground font-sans antialiased;
     line-height: 1.5;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-    letter-spacing: -0.008em;
+    letter-spacing: -0.011em;
     background-color: hsl(var(--background));
     background-image: none;
     scrollbar-gutter: stable;
@@ -160,11 +162,11 @@
   }
 
   ::selection {
-    background: hsl(var(--primary) / 0.18);
+    background: hsl(var(--foreground) / 0.14);
   }
 
   :focus-visible {
-    @apply outline-none ring-2 ring-ring/35 ring-offset-2 ring-offset-background;
+    @apply outline-none ring-2 ring-ring/30 ring-offset-2 ring-offset-background;
   }
 
   ::-webkit-scrollbar {
@@ -179,7 +181,7 @@
     background: hsl(var(--foreground) / 0.14);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--foreground) / 0.26);
+    background: hsl(var(--foreground) / 0.28);
   }
 }
 
@@ -205,7 +207,7 @@
 }
 
 /* ==========================================================================
-   工作区共享节奏 & 高级材质表面
+   工作区共享节奏 & 建筑感黑白材质表面
    ========================================================================== */
 @layer components {
   .workspace-shell {
@@ -225,7 +227,7 @@
       min-height: 100vh;
     }
   }
-  .workspace-page { @apply min-w-0 space-y-5; }
+  .workspace-page { @apply min-w-0 space-y-4; }
   .workspace-surface { box-shadow: none; }
 
   .sidebar-project-list {
@@ -240,7 +242,7 @@
   }
   .sidebar-project-list::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.35); }
 
-  /* Atelier Surfaces: refined 12px-14px corners, warm hairline borders, subtle paper elevation */
+  /* Crisp Gallery Surfaces: 12px tailored corners, 1px hairline border, whisper-light elevation */
   .panel {
     @apply min-w-0 rounded-xl border border-border bg-card text-card-foreground;
     box-shadow: var(--shadow-card);
@@ -252,22 +254,20 @@
     @apply rounded-xl border border-border/80 bg-surface;
   }
 
-  /* Subtle warm editorial backdrop for executive hero areas (brand-neutral, never gaudy) */
+  /* Subtle monochrome architectural sheen (zero colored wash) */
   .hero-wash {
-    background: radial-gradient(62% 140% at 92% 10%, hsl(var(--primary) / 0.08) 0%, transparent 64%),
-                radial-gradient(40% 120% at 72% 95%, hsl(var(--gold) / 0.09) 0%, transparent 65%),
-                hsl(var(--card));
+    background:
+      linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--surface)) 100%);
   }
   .dark .hero-wash {
-    background: radial-gradient(62% 140% at 92% 10%, hsl(var(--primary) / 0.14) 0%, transparent 64%),
-                radial-gradient(40% 120% at 72% 95%, hsl(var(--gold) / 0.08) 0%, transparent 65%),
-                hsl(var(--card));
+    background:
+      linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--surface)) 100%);
   }
 
-  /* Green-accented editorial callout strip (matching reference knowledge/compliance/isolation callouts) */
+  /* Crisp architectural callout strip */
   .callout-sage {
-    @apply rounded-lg border border-primary/15 bg-primary-soft/60 px-3.5 py-2.5 text-xs leading-relaxed text-foreground;
-    border-left: 3px solid hsl(var(--primary));
+    @apply rounded-lg border border-border bg-surface px-3.5 py-2.5 text-xs leading-relaxed text-foreground;
+    border-left: 2.5px solid hsl(var(--foreground));
   }
 
   .workspace-toolbar {
@@ -308,21 +308,21 @@
   .workspace-page :is(dl, article, section) { min-width: 0; }
   .workspace-page :is(dd, article p) { overflow-wrap: anywhere; }
   .workspace-page select:not([aria-hidden="true"]) {
-    @apply min-h-9 rounded-lg border border-input bg-card px-2.5 py-1 text-sm transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15;
+    @apply min-h-9 rounded-lg border border-input bg-card px-2.5 py-1 text-sm transition-colors focus:border-foreground/40 focus:outline-none focus:ring-2 focus:ring-foreground/10;
   }
   .workspace-page details > summary {
     @apply rounded-md transition-colors hover:text-foreground;
   }
   .workspace-page-actions > button { flex-shrink: 0; }
 
-  /* ---------------------------- Botanical Semantic Chips ---------------------------- */
+  /* ---------------------------- Crisp Semantic Chips ---------------------------- */
   .chip {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-tight;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium leading-tight;
   }
   .chip-mint { background: hsl(var(--mint-soft)); color: hsl(var(--mint)); }
   .chip-rose { background: hsl(var(--rose-soft)); color: hsl(var(--rose)); }
   .chip-amber { background: hsl(var(--amber-soft)); color: hsl(var(--amber)); }
-  .chip-violet { background: hsl(var(--primary-soft)); color: hsl(var(--primary)); }
+  .chip-violet { background: hsl(var(--primary-soft)); color: hsl(var(--foreground)); }
   .chip-gold { background: hsl(var(--gold-soft)); color: hsl(var(--gold)); }
   .chip-muted { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
   .chip-outline {
@@ -331,42 +331,46 @@
 
   /* ---------------------------- Brand + Avatars ---------------------------- */
   .brand-mark {
-    background: linear-gradient(145deg, hsl(148 52% 26%) 0%, hsl(150 54% 19%) 100%);
-    box-shadow: 0 2px 6px -2px hsl(148 52% 18% / 0.38);
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 1px 2px hsl(40 10% 8% / 0.22), inset 0 1px 0 hsl(0 0% 100% / 0.12);
   }
   .avatar-bubble {
     background-color: hsl(var(--primary-soft));
-    color: hsl(var(--primary));
+    color: hsl(var(--foreground));
   }
   .dark .avatar-bubble {
     background-color: hsl(var(--primary-soft));
-    color: hsl(var(--primary));
+    color: hsl(var(--foreground));
   }
   .avatar-stack > * + * { margin-left: -0.5rem; }
 
-  /* Deep Forest Emerald Primary CTA */
+  /* Deep Charcoal Primary CTA */
   .btn-gradient {
     background-color: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
-    box-shadow: 0 1px 2px hsl(var(--primary) / 0.25), inset 0 1px 0 hsl(0 0% 100% / 0.12);
+    box-shadow: 0 1px 2px hsl(40 10% 8% / 0.18), inset 0 1px 0 hsl(0 0% 100% / 0.1);
   }
   .btn-gradient:hover {
-    background-color: hsl(148 52% 20%);
+    background-color: hsl(40 6% 18%);
   }
   .dark .btn-gradient:hover {
-    background-color: hsl(148 44% 51%);
+    background-color: hsl(40 16% 86%);
   }
 
   .login-submit {
-    background: linear-gradient(135deg, hsl(148 52% 24%) 0%, hsl(152 56% 19%) 100%);
-    color: #ffffff;
-    box-shadow: 0 8px 20px -10px hsl(148 52% 18% / 0.55);
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 4px 14px -6px hsl(40 10% 8% / 0.38);
   }
   .login-submit:hover {
-    background: linear-gradient(135deg, hsl(148 52% 21%) 0%, hsl(152 56% 16%) 100%);
+    background-color: hsl(40 6% 18%);
+  }
+  .dark .login-submit:hover {
+    background-color: hsl(40 16% 86%);
   }
 
-  /* AI Surfaces: warm botanical editorial feel, zero cheap purple glow */
+  /* AI Surfaces: refined Notion/Claude stone dock */
   .assistant-surface {
     background-color: hsl(var(--surface));
     border: 1px solid hsl(var(--border));
@@ -377,7 +381,7 @@
   }
 
   .section-title {
-    @apply text-[0.9375rem] font-semibold tracking-[-0.015em] text-foreground;
+    @apply text-[0.9375rem] font-semibold tracking-[-0.018em] text-foreground;
   }
   .section-subtitle {
     @apply text-xs leading-relaxed text-muted-foreground;
@@ -454,22 +458,22 @@
 .ql-snow .ql-picker-label { @apply text-foreground; }
 .ql-snow .ql-picker-label:hover,
 .ql-snow .ql-active .ql-stroke,
-.ql-snow .ql-picker-label.ql-active { @apply text-primary; }
+.ql-snow .ql-picker-label.ql-active { @apply text-foreground font-semibold; }
 .ql-snow .ql-stroke-miter { @apply stroke-foreground; }
 .ql-snow .ql-picker-options { @apply rounded-lg border border-border bg-popover shadow-md; }
 .ql-snow .ql-picker-item { @apply text-popover-foreground; }
 .ql-snow .ql-picker-item:hover,
-.ql-snow .ql-picker-item.ql-selected { @apply text-primary; }
+.ql-snow .ql-picker-item.ql-selected { @apply text-foreground font-semibold; }
 .ql-snow .ql-tooltip {
   @apply rounded-lg border-border bg-popover text-popover-foreground shadow-md;
   z-index: 60;
 }
 .ql-snow .ql-tooltip input[type='text'] { @apply rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground; }
 .ql-snow .ql-tooltip a.ql-action,
-.ql-snow .ql-tooltip a.ql-remove { @apply text-primary; }
+.ql-snow .ql-tooltip a.ql-remove { @apply text-foreground font-medium; }
 
-.ql-editor a { @apply text-primary underline underline-offset-2; }
-.ql-editor blockquote { @apply border-l-4 border-primary/35 pl-3 italic text-muted-foreground; }
+.ql-editor a { @apply text-foreground underline underline-offset-2; }
+.ql-editor blockquote { @apply border-l-2 border-foreground/40 pl-3 italic text-muted-foreground; }
 .ql-editor h1 { @apply text-2xl font-bold; }
 .ql-editor h2 { @apply text-xl font-semibold; }
 .ql-editor ul,
@@ -482,12 +486,12 @@
    ========================================================================== */
 .mail-preview { @apply text-sm leading-relaxed; }
 .mail-preview p { @apply my-2; }
-.mail-preview a { @apply text-primary underline underline-offset-2 break-all; }
+.mail-preview a { @apply text-foreground font-medium underline underline-offset-2 break-all; }
 .mail-preview img { @apply my-1.5 block h-auto max-w-full rounded-md; }
 .mail-preview img + hr { display: none; }
 .mail-preview ul { @apply my-2 list-disc pl-6; }
 .mail-preview ol { @apply my-2 list-decimal pl-6; }
-.mail-preview blockquote { @apply my-2 border-l-4 border-primary/30 pl-3 italic text-muted-foreground; }
+.mail-preview blockquote { @apply my-2 border-l-2 border-foreground/30 pl-3 italic text-muted-foreground; }
 .mail-preview h1,
 .mail-preview h2,
 .mail-preview h3 { @apply mb-2 mt-4 font-semibold; }
@@ -529,13 +533,13 @@
 .agent-message-content li :is(ul, ol) { margin: 0.25rem 0; }
 .agent-message-content blockquote {
   margin: 0.875rem 0; padding: 0.5rem 0.875rem;
-  border-left: 3px solid hsl(var(--primary) / 0.55);
+  border-left: 2.5px solid hsl(var(--foreground) / 0.55);
   border-radius: 0 0.5rem 0.5rem 0;
-  background: hsl(var(--primary-soft) / 0.5);
-  color: hsl(var(--foreground) / 0.85);
+  background: hsl(var(--surface));
+  color: hsl(var(--foreground) / 0.88);
 }
 .agent-message-content blockquote p { margin: 0; }
-.agent-message-content a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 3px; }
+.agent-message-content a { color: hsl(var(--foreground)); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
 .agent-message-content code { border-radius: 0.25rem; background: hsl(var(--muted)); padding: 0.125rem 0.35rem; font-size: 0.88em; }
 .agent-message-content pre { max-width: 100%; overflow-x: auto; margin: 0.875rem 0; border: 1px solid hsl(var(--border)); border-radius: 0.625rem; background: hsl(var(--surface)); padding: 0.75rem; line-height: 1.6; }
 .agent-message-content pre code { padding: 0; background: transparent; white-space: pre; }
@@ -582,18 +586,18 @@
   font-weight: 500;
 }
 .knowledge-sales-library nav[aria-label="销售资料分类"] button[aria-pressed="true"] {
-  border-bottom-color: hsl(var(--primary));
+  border-bottom-color: hsl(var(--foreground));
   background: transparent;
-  color: hsl(var(--primary));
+  color: hsl(var(--foreground));
   font-weight: 600;
 }
 .knowledge-sales-library [aria-current="true"] {
-  border-left-color: hsl(var(--primary)) !important;
-  background: hsl(var(--primary-soft) / 0.7) !important;
+  border-left-color: hsl(var(--foreground)) !important;
+  background: hsl(var(--surface)) !important;
 }
 .knowledge-sales-library .bg-primary\/5 {
-  background: hsl(var(--primary-soft) / 0.55);
+  background: hsl(var(--surface));
 }
 .knowledge-sales-library .border-primary {
-  border-left-color: hsl(var(--primary));
+  border-left-color: hsl(var(--foreground));
 }

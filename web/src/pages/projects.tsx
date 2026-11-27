@@ -209,12 +209,12 @@ export function ProjectsPage(): React.JSX.Element {
         {items.map((project, idx) => {
           const isCurrent = project.id === activeProject?.id;
           const bannerTone = idx % 3 === 0
-            ? 'from-[#EFE6D4] via-[#F6F1E5] to-[#E2ECE5] text-[#223B2D]'
+            ? 'from-[#F4F2ED] via-[#FAF9F6] to-[#ECE9E2] text-[#181716] border-b border-border/75'
             : idx % 3 === 1
-              ? 'from-[#1F2421] via-[#282E2A] to-[#1A2620] text-[#F5F2EA]'
-              : 'from-[#E9E6DF] via-[#F3F1EB] to-[#E5EBE7] text-[#283B35]';
+              ? 'from-[#181716] via-[#222120] to-[#131312] text-[#FAF9F7]'
+              : 'from-[#EDEDEA] via-[#F6F5F2] to-[#E5E4DF] text-[#181716] border-b border-border/75';
           return (
-          <Card key={project.id} className={'flex flex-col overflow-hidden transition-[border-color,box-shadow] ' + (project.status === 'archived' ? 'opacity-70' : isCurrent ? 'border-primary/45 ring-1 ring-primary/15' : 'hover:border-primary/30')}>
+          <Card key={project.id} className={'flex flex-col overflow-hidden transition-[border-color,box-shadow] ' + (project.status === 'archived' ? 'opacity-70' : isCurrent ? 'border-foreground/55 ring-1 ring-foreground/15' : 'hover:border-foreground/30')}>
             {project.coverImage ? (
               <div className="relative h-36 w-full overflow-hidden bg-muted">
                 <img src={project.coverImage} alt={`${project.name} 封面`} className="h-full w-full object-cover" loading="lazy" />
@@ -222,12 +222,12 @@ export function ProjectsPage(): React.JSX.Element {
             ) : (
               <div className={`relative flex h-36 w-full flex-col justify-between bg-gradient-to-br p-5 ${bannerTone}`}>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.18em] opacity-75">{project.code}</span>
+                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.18em] opacity-70">{project.code}</span>
                   <ProjectLogo project={project} size="sm" compact />
                 </div>
                 <div>
-                  <p className="truncate text-lg font-bold tracking-[0.04em]">{project.name.toUpperCase()}</p>
-                  <p className="mt-0.5 truncate text-[11px] opacity-75">{project.industry || project.companyName}</p>
+                  <p className="truncate text-lg font-bold tracking-[0.03em]">{project.name.toUpperCase()}</p>
+                  <p className="mt-0.5 truncate text-[11px] opacity-70">{project.industry || project.companyName}</p>
                 </div>
               </div>
             )}
@@ -238,8 +238,8 @@ export function ProjectsPage(): React.JSX.Element {
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.code} · {project.industry || '未设置行业'}</p>
                 </div>
               </div>
-              <Badge variant={isCurrent && project.status !== 'archived' ? 'developed' : 'outline'} className="shrink-0 gap-1.5">
-                <span className={isCurrent && project.status !== 'archived' ? 'h-1.5 w-1.5 rounded-full bg-status-developed' : 'h-1.5 w-1.5 rounded-full bg-muted-foreground/45'} aria-hidden />
+              <Badge variant="outline" className="shrink-0 gap-1.5">
+                <span className={isCurrent && project.status !== 'archived' ? 'h-1.5 w-1.5 rounded-full bg-emerald-600' : 'h-1.5 w-1.5 rounded-full bg-muted-foreground/45'} aria-hidden />
                 {project.status === 'archived' ? '已归档' : isCurrent ? '当前使用' : '可切换'}
               </Badge>
             </CardHeader>
@@ -249,11 +249,17 @@ export function ProjectsPage(): React.JSX.Element {
                   <dt className="shrink-0 text-muted-foreground">公司主体</dt>
                   <dd className="min-w-0 truncate font-medium text-foreground" title={project.companyName}>{project.companyName}</dd>
                 </div>
+                {project.moq ? (
+                  <div className="flex items-baseline justify-between gap-2">
+                    <dt className="shrink-0 text-muted-foreground">默认 MOQ</dt>
+                    <dd className="min-w-0 truncate font-medium tabular-nums text-foreground">{project.moq}</dd>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-2">
                   <dt className="shrink-0 text-muted-foreground">发送模式</dt>
                   <dd className="flex items-center gap-1.5">
-                    <Badge variant={project.mailChannel === 'smtp' ? 'developed' : 'muted'}>{project.mailChannel === 'smtp' ? '邮箱直发' : '模拟发送'}</Badge>
-                    {project.isDefault ? <Badge variant="gold">默认</Badge> : null}
+                    <Badge variant={project.mailChannel === 'smtp' ? 'outline' : 'muted'}>{project.mailChannel === 'smtp' ? '邮箱直发' : '模拟发送'}</Badge>
+                    {project.isDefault ? <Badge variant="secondary">默认</Badge> : null}
                   </dd>
                 </div>
               </dl>
@@ -266,7 +272,7 @@ export function ProjectsPage(): React.JSX.Element {
                 ) : null}
                 <div className="flex flex-wrap gap-1.5">
                   <Button type="button" variant="outline" size="sm" disabled={project.status !== 'active'} onClick={() => { writeStorage(STORAGE_KEYS.activeProject, project.id); window.location.assign('/projects/integrations'); }}>{t('integrations.title')}</Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => openBrand(project)}><Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />{t('projects.brandTitle')}</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => openBrand(project)}><Sparkles className="h-3.5 w-3.5" aria-hidden />{t('projects.brandTitle')}</Button>
                   <Button type="button" variant="outline" size="sm" onClick={() => openEdit(project)}><Pencil className="h-3.5 w-3.5" aria-hidden />{t('common.edit')}</Button>
                   <Button type="button" variant="ghost" size="sm"
                     disabled={project.isDefault || (isCurrent && project.status === 'active')}
@@ -293,7 +299,7 @@ export function ProjectsPage(): React.JSX.Element {
       </div>
 
       <div role="note" className="callout-sage flex items-center gap-3">
-        <CircleHelp className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+        <CircleHelp className="h-4 w-4 shrink-0 text-foreground" aria-hidden />
         <span>
           <strong className="font-semibold text-foreground">项目隔离保护：</strong>
           项目切换只改变当前工作上下文；各品牌的客户档案、知识库、产品价格、报价单及发送策略严格隔离，互不混淆。

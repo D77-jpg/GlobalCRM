@@ -112,6 +112,7 @@ export function ChannelsPage(): React.JSX.Element {
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [centerTab, setCenterTab] = React.useState<'chat' | 'customer' | 'quotations' | 'items'>('chat');
   const [copilotOpen, setCopilotOpen] = React.useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= 1440));
+  const [rightTab, setRightTab] = React.useState<'copilot' | 'profile'>('copilot');
 
   // Composer state
   const [composerDirection, setComposerDirection] = React.useState<'outbound' | 'inbound'>('outbound');
@@ -449,29 +450,29 @@ export function ChannelsPage(): React.JSX.Element {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="hidden items-center gap-2 text-xs lg:flex">
-            <div className="rounded-xl border border-border bg-card px-3 py-1.5 shadow-card">
+          <div className="hidden items-center gap-1.5 text-xs lg:flex">
+            <div className="rounded-lg border border-border bg-card px-2.5 py-1">
               <span className="text-muted-foreground">今日消息 </span>
-              <span className="font-bold tabular-nums text-foreground">{stats.todayMessages}</span>
+              <span className="font-semibold tabular-nums text-foreground">{stats.todayMessages}</span>
             </div>
-            <div className="rounded-xl border border-border bg-card px-3 py-1.5 shadow-card">
+            <div className="rounded-lg border border-border bg-card px-2.5 py-1">
               <span className="text-muted-foreground">在谈会话 </span>
-              <span className="font-bold tabular-nums text-foreground">{stats.activeConversations}</span>
+              <span className="font-semibold tabular-nums text-foreground">{stats.activeConversations}</span>
             </div>
-            <div className="rounded-xl border border-primary/20 bg-primary-soft/60 px-3 py-1.5">
-              <span className="text-primary/80">未读 </span>
-              <span className="font-bold tabular-nums text-primary">{stats.unreadTotal}</span>
+            <div className="rounded-lg border border-border bg-surface px-2.5 py-1">
+              <span className="text-muted-foreground">未读 </span>
+              <span className="font-semibold tabular-nums text-foreground">{stats.unreadTotal}</span>
             </div>
-            <div className="rounded-xl border border-amberx/25 bg-amberx-soft/70 px-3 py-1.5">
-              <span className="text-amberx/85">待跟进 </span>
-              <span className="font-bold tabular-nums text-amberx">{stats.pendingFollowup}</span>
+            <div className="rounded-lg border border-border bg-surface px-2.5 py-1">
+              <span className="text-muted-foreground">待跟进 </span>
+              <span className="font-semibold tabular-nums text-foreground">{stats.pendingFollowup}</span>
             </div>
           </div>
 
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-xs border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300"
+            className="h-8 text-xs"
             onClick={() => void syncAlibabaFromMail()}
             disabled={syncingAlibaba}
           >
@@ -1051,27 +1052,114 @@ export function ChannelsPage(): React.JSX.Element {
           )}
         </section>
 
-        {/* RIGHT PANE: Persistent AI Copilot */}
+        {/* RIGHT PANE: Persistent AI Copilot & Customer Quick Actions */}
         {copilotOpen ? (
           <aside className="flex min-h-0 flex-col overflow-hidden border-t border-border xl:border-t-0" aria-label="AI 客服副驾驶">
-            <MailCopilotPane
-              mode="mail"
-              channel={toCopilotChannel(detail?.conversation.channel)}
-              applyLabel="填入聊天回复框"
-              customerId={detail?.customer?.id}
-              contactName={detail?.conversation.contactName}
-              subject=""
-              inboundText={latestInbound}
-              threadText={chatTranscript}
-              sourceMailId={detail?.conversation.id}
-              onApplyReply={(draft) => {
-                setComposerDirection('outbound');
-                setComposerText(draft.content);
-                setComposerZh(draft.zh || '');
-                setCenterTab('chat');
-                toast.success('已填入聊天回复框，核对后可发送或复制');
-              }}
-            />
+            <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-border bg-surface/60 p-1.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setRightTab('copilot')}
+                className={cn(
+                  'rounded-md py-1 font-medium transition-colors',
+                  rightTab === 'copilot' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                AI 回复副驾驶
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightTab('profile')}
+                className={cn(
+                  'rounded-md py-1 font-medium transition-colors',
+                  rightTab === 'profile' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                客户资料与操作
+              </button>
+            </div>
+
+            {rightTab === 'copilot' ? (
+              <MailCopilotPane
+                mode="mail"
+                channel={toCopilotChannel(detail?.conversation.channel)}
+                applyLabel="填入聊天回复框"
+                customerId={detail?.customer?.id}
+                contactName={detail?.conversation.contactName}
+                subject=""
+                inboundText={latestInbound}
+                threadText={chatTranscript}
+                sourceMailId={detail?.conversation.id}
+                onApplyReply={(draft) => {
+                  setComposerDirection('outbound');
+                  setComposerText(draft.content);
+                  setComposerZh(draft.zh || '');
+                  setCenterTab('chat');
+                  toast.success('已填入聊天回复框，核对后可发送或复制');
+                }}
+              />
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col justify-between overflow-y-auto p-3.5 text-xs">
+                {detail ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="avatar-bubble flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border font-semibold">
+                        {initialsOf(detail.conversation.contactName)}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-foreground">{detail.conversation.contactName}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {[detail.conversation.contactCompany, detail.conversation.contactCountry, CHANNEL_META[detail.conversation.channel].label].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                    </div>
+
+                    <dl className="divide-y divide-border/70 rounded-lg border border-border bg-surface/50 px-3 py-2">
+                      {[
+                        ['公司', detail.customer?.company || detail.conversation.contactCompany || '—'],
+                        ['邮箱', detail.customer?.email || detail.conversation.contactEmail || '—'],
+                        ['电话/WA', detail.customer?.phone || detail.conversation.contactPhone || '—'],
+                        ['会话状态', STATUS_LABELS[detail.conversation.status]],
+                      ].map(([k, v]) => (
+                        <div key={k} className="flex items-baseline justify-between gap-2 py-1.5">
+                          <dt className="text-muted-foreground">{k}</dt>
+                          <dd className="truncate font-medium text-foreground">{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ) : (
+                  <p className="py-10 text-center text-muted-foreground">先在左侧选择一条会话查看买家档案与快捷操作。</p>
+                )}
+
+                <div className="mt-4 border-t border-border pt-3">
+                  <p className="mb-2 text-[11px] font-semibold text-muted-foreground">快捷操作</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button asChild variant="outline" size="sm" className="h-9 justify-start text-xs">
+                      <Link to={detail?.customer ? `/quotations?customerId=${detail.customer.id}` : '/quotations'}>
+                        <FileText className="h-3.5 w-3.5" />新建报价
+                      </Link>
+                    </Button>
+                    {detail?.customer ? (
+                      <Button asChild variant="outline" size="sm" className="h-9 justify-start text-xs">
+                        <Link to={`/customers/${detail.customer.id}`}>
+                          <ExternalLink className="h-3.5 w-3.5" />客户 360°
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button variant="outline" size="sm" className="h-9 justify-start text-xs" disabled={!detail} onClick={() => void convertToCustomer()}>
+                        <UserPlus className="h-3.5 w-3.5" />转为客户
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" className="h-9 justify-start text-xs" onClick={() => setRightTab('copilot')}>
+                      <Sparkles className="h-3.5 w-3.5" />AI 起草回复
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-9 justify-start text-xs" onClick={() => void openNewDialog()}>
+                      <MessageSquarePlus className="h-3.5 w-3.5" />新会话录入
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </aside>
         ) : null}
       </div>

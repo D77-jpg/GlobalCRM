@@ -104,16 +104,16 @@ export function CustomerPreviewPanel({
     <aside
       aria-label={`客户速览：${customer.name}`}
       className={cn(
-        'panel hidden h-full min-h-0 flex-col overflow-hidden min-[1360px]:flex',
+        'panel hidden h-full min-h-0 flex-col overflow-hidden xl:flex',
         className,
       )}
     >
       <header className="flex shrink-0 items-start gap-3 border-b border-border bg-surface/65 px-4 py-3.5">
-        <span className="avatar-bubble flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold ring-1 ring-primary/15" aria-hidden>
+        <span className="avatar-bubble flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/80 text-xs font-bold" aria-hidden>
           {initials(customer.name)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">客户速览</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">客户速览</p>
           <h2 className="mt-0.5 truncate text-[15px] font-semibold leading-5 text-foreground">{customer.name}</h2>
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
             {customer.country ? <CountryFlag value={customer.country} /> : null}
@@ -137,7 +137,7 @@ export function CustomerPreviewPanel({
             优先级 {CUSTOMER_PRIORITY_LABEL[customer.priority]}
           </Badge>
         ) : null}
-        {customer.grade ? <Badge variant="gold">{customer.grade} 级客户</Badge> : null}
+        {customer.grade ? <Badge variant="outline">{customer.grade} 级客户</Badge> : null}
       </div>
 
       <div className="flex shrink-0 gap-2 border-b border-border/80 px-4 py-3">

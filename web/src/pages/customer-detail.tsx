@@ -91,6 +91,8 @@ import { useFollowUpStore } from '@/store/followup.store';
 import { useCustomerStore } from '@/store/customer.store';
 import { selectIsAdmin, useAuthStore } from '@/store/auth.store';
 import { useLetterStore } from '@/store/letter.store';
+import { useUiStore } from '@/store/ui.store';
+import { HealthRing } from '@/components/common/charts';
 import { countryInfo } from '@/lib/country';
 import { CountryFlag } from '@/components/common/country-flag';
 import { isCompanyOnlyCustomer, secondaryCompanyLabel } from '@/lib/customer-display';
@@ -362,6 +364,9 @@ export function CustomerDetailPage(): React.JSX.Element {
   }, [lettersQuery.data?.items]);
   const [deleteLetterTarget, setDeleteLetterTarget] = React.useState<DevelopmentLetter | null>(null);
   const [deleteCustomerOpen, setDeleteCustomerOpen] = React.useState(false);
+  const [detailTab, setDetailTab] = React.useState<'overview' | 'profile' | 'letters' | 'quotes' | 'files'>('overview');
+  const openAgentWithPrompt = useUiStore((s) => s.openAgentWithPrompt);
+  const setAgentOpen = useUiStore((s) => s.setAgentOpen);
   // 常用联系资料和跟进安排保持可见，补充档案的展开状态按浏览器记住
   const [infoExpanded, setInfoExpanded] = React.useState(() =>
     readStorage<boolean>(STORAGE_KEYS.customerInfoExpanded, false),
@@ -530,19 +535,25 @@ export function CustomerDetailPage(): React.JSX.Element {
   const { hash, key: navigationKey } = location;
   const loadedCustomerId = customer?.id;
   React.useEffect(() => {
-    if (hash !== '#letters' || loading || !id || loadedCustomerId !== id) return;
+    if (hash === '#letters') {
+      setDetailTab('letters');
+    } else if (hash === '#globalsite-inquiries') {
+      setDetailTab('overview');
+    }
+  }, [hash]);
+
+  React.useEffect(() => {
+    if (hash !== '#letters' || detailTab !== 'letters' || loading || !id || loadedCustomerId !== id) return;
     const frame = window.requestAnimationFrame(() => {
       const target = lettersAnchor.current;
       const main = target?.closest<HTMLElement>('#workspace-main');
       if (!target || !main) return;
-      // Keep the shell/header fixed: scrollIntoView can scroll every ancestor,
-      // including the overflow-hidden shell. Let only the workspace move.
       const top = target.getBoundingClientRect().top - main.getBoundingClientRect().top
         + main.scrollTop - main.clientTop - 16;
       main.scrollTo({ top, behavior: 'instant' });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [hash, id, loadedCustomerId, loading, navigationKey]);
+  }, [hash, detailTab, id, loadedCustomerId, loading, navigationKey]);
 
   /* ---------------------------- 动作 ---------------------------- */
 
@@ -621,10 +632,27 @@ export function CustomerDetailPage(): React.JSX.Element {
   const letterTotal = lettersQuery.data?.total ?? 0;
   const letterTotalPages = lettersQuery.data?.totalPages ?? 0;
 
+  // Deterministic 4-dimension relationship health calculation from real customer data
+  const profileCompleteness = Math.min(
+    100,
+    [customer.email, customer.company, customer.country, customer.industry, customer.website || customer.phone]
+      .filter(Boolean).length * 20,
+  );
+  const communicationScore = customer.letterCount > 0 ? Math.min(100, 45 + customer.letterCount * 15) : customer.lastContactAt ? 40 : 15;
+  const requirementClarity = Math.min(
+    100,
+    20 + [customer.interestedProducts, customer.expectedQuantity, customer.targetPrice, customer.moq].filter(Boolean).length * 20,
+  );
+  const stageScoreMap: Record<string, number> = {
+    pending: 25, contacted: 42, replied: 65, interested: 76, quoting: 84, negotiating: 92, won: 100, lost: 10,
+  };
+  const stageMomentum = typeof customer.intentScore === 'number' ? customer.intentScore : (stageScoreMap[customer.status] ?? 30);
+  const healthOverall = Math.round((profileCompleteness + communicationScore + requirementClarity + stageMomentum) / 4);
+
   return (
     <div className="workspace-page">
-      {/* Executive Customer Identity Hero Card */}
-      <section className="hero-wash panel p-5">
+      {/* Executive Customer 360° Identity Header + View Tabs */}
+      <section className="panel p-5">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3.5">
           <Button
             type="button"
@@ -638,14 +666,23 @@ export function CustomerDetailPage(): React.JSX.Element {
           <div className="flex flex-wrap items-center gap-2">
             {isAdmin ? (
               <Button type="button" variant="outline" size="sm" onClick={() => setHandoffOpen(true)}>
-                <ArrowRightLeft className="h-4 w-4" aria-hidden />
+                <ArrowRightLeft className="h-3.5 w-3.5" aria-hidden />
                 转交跟进
               </Button>
             ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`${ROUTES.quotations}?customerId=${customer.id}`)}
+            >
+              <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />
+              创建报价
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" size="sm" disabled={quickGenerating}>
-                  {quickGenerating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4 text-primary" aria-hidden />}
+                  {quickGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Sparkles className="h-3.5 w-3.5" aria-hidden />}
                   {quickGenerating ? '生成中…' : '生成草稿'}
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                 </Button>
@@ -678,7 +715,7 @@ export function CustomerDetailPage(): React.JSX.Element {
                 setSendOpen(true);
               }}
             >
-              <Send className="h-4 w-4" aria-hidden />
+              <Send className="h-3.5 w-3.5" aria-hidden />
               发送开发信
             </Button>
           </div>
@@ -687,7 +724,7 @@ export function CustomerDetailPage(): React.JSX.Element {
         <div className="flex flex-col gap-4 border-t border-border/75 pt-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-start gap-3.5">
             <span
-              className="avatar-bubble flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ring-1 ring-primary/15"
+              className="avatar-bubble flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border text-sm font-bold"
               aria-hidden
             >
               {initials(customer.name)}
@@ -698,7 +735,7 @@ export function CustomerDetailPage(): React.JSX.Element {
                   <EditableCustomerName name={customer.name} onSave={saveName} />
                 </h1>
                 <CustomerStatusBadge status={customer.status} />
-                {customer.grade ? <Badge variant="gold">{customer.grade} 级客户</Badge> : null}
+                {customer.grade ? <Badge variant="secondary">{customer.grade} 级客户</Badge> : null}
                 {customer.priority ? (
                   <Badge variant="outline" className={CUSTOMER_PRIORITY_BADGE_CLASS[customer.priority]}>
                     优先级 · {customer.priority === 'high' ? '高' : customer.priority === 'medium' ? '中' : '低'}
@@ -706,7 +743,7 @@ export function CustomerDetailPage(): React.JSX.Element {
                 ) : null}
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
-                {companyText ? <span className="font-medium text-foreground/80">{companyText}{customer.title ? ` · ${customer.title}` : ''}</span> : null}
+                {companyText ? <span className="font-medium text-foreground/85">{companyText}{customer.title ? ` · ${customer.title}` : ''}</span> : null}
                 {companyOnly ? <span className="chip chip-muted"><UserX className="h-3 w-3" aria-hidden />未填联系人</span> : null}
                 {customer.country ? (
                   <span className="inline-flex items-center gap-1">
@@ -720,11 +757,16 @@ export function CustomerDetailPage(): React.JSX.Element {
                     {customer.industry}
                   </span>
                 ) : null}
+                {customer.email ? (
+                  <a href={`mailto:${customer.email}`} className="inline-flex items-center gap-1 text-foreground hover:underline">
+                    <Mail className="h-3 w-3" aria-hidden />
+                    {customer.email}
+                  </a>
+                ) : null}
               </div>
             </div>
           </div>
 
-          {/* Key Metadata Columns */}
           <dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-2 border-t border-border/75 pt-3 text-xs sm:grid-cols-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
             <div>
               <dt className="text-[11px] text-muted-foreground">跟进负责人</dt>
@@ -747,33 +789,328 @@ export function CustomerDetailPage(): React.JSX.Element {
           </dl>
         </div>
 
-        {/* Quick Section Navigation Strip */}
-        <nav aria-label="客户资料分区" className="-mb-5 mt-4 flex items-center gap-4 overflow-x-auto border-t border-border/75 pt-0.5 text-xs">
-          {[
-            { label: '客户概览', href: '#customer-contact-title' },
-            { label: '采购需求', href: '#customer-needs-section' },
-            { label: '询盘与动态', href: '#globalsite-inquiries' },
-            { label: '开发信记录', href: '#customer-letter-history' },
-          ].map((item, idx) => (
-            <a
-              key={item.href}
-              href={item.href}
+        {/* Page-Level 360° Workspace View Tabs */}
+        <nav aria-label="客户 360 视图切换" className="-mb-5 mt-4 flex items-center gap-5 overflow-x-auto border-t border-border/75 pt-0.5 text-xs">
+          {([
+            ['overview', '关系概览'],
+            ['profile', '档案与采购需求'],
+            ['letters', `开发信与草稿 (${letterTotal})`],
+            ['quotes', '报价与交易'],
+            ['files', '跟进记录与附件'],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setDetailTab(key)}
               className={`inline-flex h-10 shrink-0 items-center border-b-2 px-1 font-medium transition-colors ${
-                idx === 0
-                  ? 'border-primary font-semibold text-primary'
+                detailTab === key
+                  ? 'border-foreground font-semibold text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              {item.label}
-            </a>
+              {label}
+            </button>
           ))}
         </nav>
       </section>
 
-      <PendingDrafts feed={pendingDrafts} onOpenDraft={letter=>navigate('/customers/'+customer.id+'?knowledgeDraft='+letter.id)} busy={letterBusy}/>
+      <PendingDrafts feed={pendingDrafts} onOpenDraft={letter => navigate('/customers/' + customer.id + '?knowledgeDraft=' + letter.id)} busy={letterBusy} />
 
+      {/* ====================================================================
+         TAB 1: 关系概览 — True 3-Column Customer 360° Dashboard
+         ==================================================================== */}
+      {detailTab === 'overview' ? (
+        <div className="grid min-w-0 items-start gap-4 xl:grid-cols-[276px_minmax(0,1fr)_316px]">
+          {/* Column 1: Compact Customer Profile + Procurement Summary */}
+          <div className="min-w-0 space-y-4">
+            <Card>
+              <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm">客户基本信息</CardTitle>
+                <button
+                  type="button"
+                  onClick={() => setDetailTab('profile')}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil className="h-3 w-3" aria-hidden />编辑
+                </button>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                <dl className="divide-y divide-border/65">
+                  {[
+                    ['公司名称', customer.company || '未填写'],
+                    ['联系邮箱', customer.email || '未填写'],
+                    ['联系电话', customer.phone || '未填写'],
+                    ['企业官网', customer.website || '未填写'],
+                    ['所属行业', customer.industry || '未填写'],
+                    ['国家/地区', customer.country ? countryInfo(customer.country)?.name ?? customer.country : '未填写'],
+                    ['客户等级', customer.grade ? `${customer.grade} 级` : '未分级'],
+                    ['客户来源', customer.leadSource || '未设置'],
+                  ].map(([lbl, val]) => (
+                    <div key={lbl} className="flex items-baseline justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                      <dt className="shrink-0 text-muted-foreground">{lbl}</dt>
+                      <dd className="min-w-0 truncate text-right font-medium text-foreground" title={val}>{val}</dd>
+                    </div>
+                  ))}
+                </dl>
+
+                {customer.tags.length > 0 ? (
+                  <div className="border-t border-border/65 pt-3">
+                    <p className="mb-1.5 text-[11px] text-muted-foreground">客户标签</p>
+                    <div className="flex flex-wrap gap-1">
+                      {customer.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className="font-normal">{tag}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {customer.notes ? (
+                  <div className="border-t border-border/65 pt-3">
+                    <p className="mb-1 text-[11px] text-muted-foreground">背景备注</p>
+                    <p className="line-clamp-4 whitespace-pre-line rounded-lg bg-surface p-2.5 text-xs leading-relaxed text-foreground/85">
+                      {customer.notes}
+                    </p>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm">采购需求摘要</CardTitle>
+                <button
+                  type="button"
+                  onClick={() => setDetailTab('profile')}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  补充需求 →
+                </button>
+              </CardHeader>
+              <CardContent className="space-y-2.5 text-xs">
+                <dl className="grid grid-cols-2 gap-2.5">
+                  <div className="rounded-lg bg-surface p-2.5">
+                    <dt className="text-[11px] text-muted-foreground">意向品类</dt>
+                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.interestedProducts || '待确认'}</dd>
+                  </div>
+                  <div className="rounded-lg bg-surface p-2.5">
+                    <dt className="text-[11px] text-muted-foreground">预计数量</dt>
+                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.expectedQuantity || '待确认'}</dd>
+                  </div>
+                  <div className="rounded-lg bg-surface p-2.5">
+                    <dt className="text-[11px] text-muted-foreground">目标单价</dt>
+                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.targetPrice || '待确认'}</dd>
+                  </div>
+                  <div className="rounded-lg bg-surface p-2.5">
+                    <dt className="text-[11px] text-muted-foreground">关注 MOQ</dt>
+                    <dd className="mt-0.5 truncate font-semibold text-foreground">{customer.moq || '待确认'}</dd>
+                  </div>
+                </dl>
+                {customer.requirementNotes ? (
+                  <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">
+                    {customer.requirementNotes}
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Column 2: 业务总览 + 关系健康度 + GlobalSite 询盘 + 沟通时间线 */}
+          <div className="min-w-0 space-y-4">
+            <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
+              <div className="panel p-3.5">
+                <p className="text-[11px] text-muted-foreground">开发信往来</p>
+                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{customer.letterCount}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">累计留档记录</p>
+              </div>
+              <div className="panel p-3.5">
+                <p className="text-[11px] text-muted-foreground">待审草稿</p>
+                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{pendingDrafts.total}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">发送前人工审核</p>
+              </div>
+              <div className="panel p-3.5">
+                <p className="text-[11px] text-muted-foreground">档案完整度</p>
+                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{profileCompleteness}%</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{customer.email ? '已含邮箱' : '缺少邮箱'}</p>
+              </div>
+              <div className="panel p-3.5">
+                <p className="text-[11px] text-muted-foreground">客户健康度</p>
+                <p className="mt-1 text-xl font-bold tabular-nums text-foreground">{healthOverall}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{healthOverall >= 70 ? '推进良好' : '建议跟进'}</p>
+              </div>
+            </div>
+
+            {/* 4-Dimension Relationship Health Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">关系健康度与商机成熟度</CardTitle>
+                <CardDescription>基于真实档案完整度、沟通频次、需求明确度与商机阶段综合计算</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-col items-center gap-5 sm:flex-row">
+                  <HealthRing score={healthOverall} label={healthOverall >= 70 ? '良好' : '培育中'} size={92} strokeWidth={7} />
+                  <div className="w-full min-w-0 flex-1 space-y-2.5 text-xs">
+                    {[
+                      ['资料完整度', profileCompleteness],
+                      ['沟通活跃度', communicationScore],
+                      ['需求明确度', requirementClarity],
+                      ['阶段推进度', stageMomentum],
+                    ].map(([lbl, val]) => (
+                      <div key={String(lbl)}>
+                        <div className="mb-1 flex justify-between">
+                          <span className="text-muted-foreground">{lbl}</span>
+                          <span className="font-mono font-semibold tabular-nums text-foreground">{val}%</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${val}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Always keep GlobalSiteInquiries mounted & visible on default load for real workflow + C3 UI test */}
+            <GlobalSiteInquiries customerId={customer.id} onDraft={() => { void reloadLetters(); void refreshDrafts(); }} />
+
+            {/* Customer Activity & Follow-up Timeline */}
+            <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} onViewLetter={openLetterById} />
+
+            {/* Compact Recent Letters Preview */}
+            {letters.length > 0 ? (
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+                  <div>
+                    <CardTitle className="text-sm">最近开发信</CardTitle>
+                    <CardDescription>共 {letterTotal} 封记录</CardDescription>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDetailTab('letters')}>
+                    查看全部 →
+                  </Button>
+                </CardHeader>
+                <CardContent className="divide-y divide-border/70 pt-0 text-xs">
+                  {letters.slice(0, 3).map((lt) => (
+                    <button
+                      key={lt.id}
+                      type="button"
+                      onClick={() => { setViewTarget(lt); setViewOpen(true); }}
+                      className="flex w-full items-center justify-between gap-3 py-2.5 text-left transition-colors hover:bg-surface/60"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-foreground">{lt.subject || '（无主题）'}</p>
+                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{lt.recipientEmail}</p>
+                      </div>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {lt.sentAt ? formatRelative(lt.sentAt) : '草稿'}
+                      </span>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+
+          {/* Column 3: Sticky AI Customer Advisor + Workbench Sidebar */}
+          <div className="min-w-0 space-y-4 xl:sticky xl:top-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="flex items-center gap-1.5 text-sm">
+                    <Sparkles className="h-4 w-4 text-foreground" aria-hidden />
+                    AI 客户顾问
+                  </CardTitle>
+                  <Badge variant="outline" className="text-[10px]">基于项目知识库</Badge>
+                </div>
+                <CardDescription>分析当前客户状态与下一步最佳行动</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                <div className="callout-sage space-y-1.5">
+                  <p className="font-semibold text-foreground">当前推进建议</p>
+                  <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
+                    {!customer.email ? (
+                      <li>当前缺少联系邮箱，建议先点击「补查联系人」从企业官网提取决策人地址。</li>
+                    ) : customer.letterCount === 0 ? (
+                      <li>已有联系邮箱但尚未发送开发信，建议生成结合行业背景的首封个性化草稿。</li>
+                    ) : (
+                      <li>已发送 {customer.letterCount} 封邮件，可结合样品进度或阶梯报价推进下一轮跟进。</li>
+                    )}
+                    {getFollowUpState(customer.nextFollowUpAt) === 'overdue' ? (
+                      <li className="text-rose">下次跟进日期已逾期（{formatDate(customer.nextFollowUpAt)}），建议今日优先触达。</li>
+                    ) : null}
+                    {!customer.interestedProducts && !customer.expectedQuantity ? (
+                      <li>采购品类与目标数量尚未登记，沟通中建议引导买家确认规格与打样需求。</li>
+                    ) : null}
+                  </ul>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-[11px] font-semibold text-muted-foreground">快速操作</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 justify-start text-xs"
+                      disabled={quickGenerating}
+                      onClick={() => void quickGenerate()}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden />生成首封草稿
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 justify-start text-xs"
+                      onClick={() => navigate(`${ROUTES.quotations}?customerId=${customer.id}`)}
+                    >
+                      <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />创建报价单
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 justify-start text-xs"
+                      onClick={() => { setResendTarget(null); setSendOpen(true); }}
+                    >
+                      <Mail className="h-3.5 w-3.5" aria-hidden />撰写开发信
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 justify-start text-xs"
+                      onClick={() => {
+                        setAgentOpen(true);
+                        openAgentWithPrompt('请结合当前客户的档案、官网与往来记录，给出下一步跟进策略并准备邮件草稿（不要直接发送）。');
+                      }}
+                    >
+                      <MessageSquareText className="h-3.5 w-3.5" aria-hidden />打开 AI 顾问
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <CustomerWorkbenchSidebar
+              customer={customer}
+              onPatchCustomer={async (patch) => {
+                await updateCustomer(customer.id, patch as Partial<CustomerInput>);
+                await reloadCustomer();
+                toast.success('客户商机信息已更新');
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {/* ====================================================================
+         TAB 2 / 3 / 4 / 5: Dedicated Deep Workspaces (100% Editable & Intact)
+         ==================================================================== */}
+      {detailTab !== 'overview' ? (
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_19.5rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_21.5rem]">
       <div className="min-w-0 space-y-4">
+      {detailTab === 'profile' ? (
+      <>
       {/* ---------------------------- 客户档案 ---------------------------- */}
 
       <Card>
@@ -1239,81 +1576,85 @@ export function CustomerDetailPage(): React.JSX.Element {
           </dl>
         </CardContent>
       </Card>
+      </>
+      ) : null}
 
       {/* ---------------------------- 跟进记录 / 客户动态 ---------------------------- */}
-
-      <GlobalSiteInquiries customerId={customer.id} onDraft={()=>{void reloadLetters();void refreshDrafts();}} />
-      <CustomerTradePanel customerId={customer.id} />
-      <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} onViewLetter={openLetterById} />
+      {detailTab === 'files' ? (
+        <>
+          <CustomerActivity customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} onViewLetter={openLetterById} />
+          <CustomerAttachments customerId={customer.id} />
+        </>
+      ) : null}
 
       {/* ---------------------------- 报价单 ---------------------------- */}
-
-      <CustomerQuotations customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} />
-      <CustomerAgreements customerId={customer.id} admin={isAdmin}/>
+      {detailTab === 'quotes' ? (
+        <>
+          <CustomerQuotations customerId={customer.id} onCustomerChanged={() => void reloadCustomer()} />
+          <CustomerAgreements customerId={customer.id} admin={isAdmin} />
+          <CustomerTradePanel customerId={customer.id} />
+        </>
+      ) : null}
 
       {/* ---------------------------- 开发信历史 ---------------------------- */}
+      {detailTab === 'letters' ? (
+        <div ref={lettersAnchor} id="customer-letter-history">
+          <Card>
+            <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <MessageSquareText className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  开发信记录
+                </CardTitle>
+                <CardDescription>
+                  {letterTotal > 0
+                    ? `共 ${letterTotal.toLocaleString('zh-CN')} 条，每次发送都会自动留档`
+                    : '发送后的开发信会同步记录在这里'}
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setResendTarget(null);
+                  setSendOpen(true);
+                }}
+              >
+                <Send className="h-4 w-4" aria-hidden />
+                发送开发信
+              </Button>
+            </CardHeader>
 
-      {/* The #letters route is handled above, without native scrolling of the outer shell. */}
-      <div ref={lettersAnchor} id="customer-letter-history">
-        <Card>
-          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquareText className="h-4 w-4 text-muted-foreground" aria-hidden />
-                开发信记录
-              </CardTitle>
-              <CardDescription>
-                {letterTotal > 0
-                  ? `共 ${letterTotal.toLocaleString('zh-CN')} 条，每次发送都会自动留档`
-                  : '发送后的开发信会同步记录在这里'}
-              </CardDescription>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
+            <LetterHistoryTable
+              letters={letters}
+              sequenceOrder
+              loading={lettersQuery.loading}
+              error={lettersQuery.error}
+              page={letterPage}
+              limit={letterLimit}
+              total={letterTotal}
+              totalPages={letterTotalPages}
+              onPageChange={setLetterPage}
+              onLimitChange={(next) => {
+                setLetterLimit(next);
+                setLetterPage(1);
+              }}
+              onView={(letter) => {
+                setViewTarget(letter);
+                setViewOpen(true);
+              }}
+              onResend={openResend}
+              onDelete={setDeleteLetterTarget}
+              onRetry={() => void reloadLetters()}
+              onSendFirst={() => {
                 setResendTarget(null);
                 setSendOpen(true);
               }}
-            >
-              <Send className="h-4 w-4" aria-hidden />
-              发送开发信
-            </Button>
-          </CardHeader>
-
-          <LetterHistoryTable
-            letters={letters}
-            sequenceOrder
-            loading={lettersQuery.loading}
-            error={lettersQuery.error}
-            page={letterPage}
-            limit={letterLimit}
-            total={letterTotal}
-            totalPages={letterTotalPages}
-            onPageChange={setLetterPage}
-            onLimitChange={(next) => {
-              setLetterLimit(next);
-              setLetterPage(1);
-            }}
-            onView={(letter) => {
-              setViewTarget(letter);
-              setViewOpen(true);
-            }}
-            onResend={openResend}
-            onDelete={setDeleteLetterTarget}
-            onRetry={() => void reloadLetters()}
-            onSendFirst={() => {
-              setResendTarget(null);
-              setSendOpen(true);
-            }}
-            busy={letterBusy}
-          />
-        </Card>
-      </div>
-
-      {/* ---------------------------- 客户附件 ---------------------------- */}
-
-      <CustomerAttachments customerId={customer.id} />
+              busy={letterBusy}
+            />
+          </Card>
+        </div>
+      ) : null}
       </div>
       <div className="min-w-0 xl:sticky xl:top-4">
         <CustomerWorkbenchSidebar
@@ -1326,6 +1667,7 @@ export function CustomerDetailPage(): React.JSX.Element {
         />
       </div>
       </div>
+      ) : null}
 
       {/* ---------------------------- 弹窗 ---------------------------- */}
 

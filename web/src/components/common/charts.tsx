@@ -101,8 +101,8 @@ export function AreaTrendChart({
       >
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.22" />
-            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0.01" />
+            <stop offset="0%" stopColor="hsl(var(--foreground))" stopOpacity="0.14" />
+            <stop offset="100%" stopColor="hsl(var(--foreground))" stopOpacity="0.01" />
           </linearGradient>
         </defs>
 
@@ -271,13 +271,13 @@ export interface DonutSlice {
   color?: string;
 }
 
-const BOTANICAL_PALETTE = [
-  'hsl(148 51% 24%)',
-  'hsl(150 42% 38%)',
-  'hsl(154 30% 54%)',
-  'hsl(40 46% 52%)',
-  'hsl(146 20% 72%)',
-  'hsl(42 14% 82%)',
+const MONOCHROME_PALETTE = [
+  'hsl(var(--foreground))',
+  'hsl(40 6% 32%)',
+  'hsl(38 5% 50%)',
+  'hsl(38 6% 66%)',
+  'hsl(38 8% 78%)',
+  'hsl(38 10% 87%)',
 ];
 
 export function DonutChart({
@@ -301,7 +301,7 @@ export function DonutChart({
   let offset = 0;
 
   return (
-    <div className={cn('flex flex-col items-center gap-4 sm:flex-row sm:items-center', className)}>
+    <div className={cn('flex w-full min-w-0 flex-col items-center gap-3.5 sm:flex-row sm:items-center', className)}>
       <div className="relative shrink-0" style={{ width: size, height: size }}>
         <svg viewBox={`0 0 ${size} ${size}`} className="-rotate-90" width={size} height={size} role="img" aria-label={centerLabel || '分布图表'}>
           <circle
@@ -325,7 +325,7 @@ export function DonutChart({
                     cy={size / 2}
                     r={radius}
                     fill="none"
-                    stroke={slice.color ?? BOTANICAL_PALETTE[idx % BOTANICAL_PALETTE.length]}
+                    stroke={slice.color ?? MONOCHROME_PALETTE[idx % MONOCHROME_PALETTE.length]}
                     strokeWidth={strokeWidth}
                     strokeDasharray={`${Math.max(0, dash - 1.5)} ${circumference}`}
                     strokeDashoffset={-currentOffset}
@@ -350,7 +350,7 @@ export function DonutChart({
               <span className="flex min-w-0 items-center gap-2">
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: slice.color ?? BOTANICAL_PALETTE[idx % BOTANICAL_PALETTE.length] }}
+                  style={{ backgroundColor: slice.color ?? MONOCHROME_PALETTE[idx % MONOCHROME_PALETTE.length] }}
                   aria-hidden
                 />
                 <span className="truncate font-medium text-foreground/85">{slice.label}</span>

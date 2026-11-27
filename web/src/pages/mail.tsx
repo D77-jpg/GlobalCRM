@@ -120,7 +120,7 @@ function initialsOf(value: string): string {
  */
 function mailSrcdoc(html: string): string {
   const csp = "default-src 'none'; img-src http: https: data: cid:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
-  const style = 'body{margin:0;padding:18px;font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere;color:#1c2620;background:#fff}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}a{color:#1e5b3a}img+hr{display:none}';
+  const style = 'body{margin:0;padding:18px;font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere;color:#181716;background:#fff}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}a{color:#181716;font-weight:500;text-decoration:underline}img+hr{display:none}';
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${style}</style>${html}`;
 }
 
@@ -463,12 +463,12 @@ export function MailPage(): React.JSX.Element {
               onClick={() => open(item)}
               className={cn(
                 'block w-full border-b border-border/75 border-l-2 border-l-transparent px-3.5 py-3 text-left transition-colors',
-                'hover:bg-primary-soft/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset',
-                selected && 'border-l-primary bg-primary-soft/65',
+                'hover:bg-surface/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset',
+                selected && 'border-l-foreground bg-surface',
               )}
             >
               <span className="flex items-start gap-2.5">
-                <span className="avatar-bubble mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold" aria-hidden>
+                <span className="avatar-bubble mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 text-[11px] font-semibold" aria-hidden>
                   {initialsOf(who)}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -629,6 +629,25 @@ export function MailPage(): React.JSX.Element {
                 </details>
               </article>
             ))}
+
+            {detail.customer && detail.mail.direction === 'inbound' && (!detail.mail.mailboxUserId || detail.mail.mailboxUserId === currentUserId) ? (
+              <div className="well flex flex-wrap items-center justify-between gap-3 p-3.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground">快速回复 {detail.customer.name}</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">可先由右侧 AI 副驾驶生成三版草稿并核验红线，或直接打开富文本回复编辑器</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!copilotOpen ? (
+                    <Button variant="outline" size="sm" onClick={() => setCopilotOpen(true)}>
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden />AI 生成回复
+                    </Button>
+                  ) : null}
+                  <Button size="sm" onClick={() => setReply(true)}>
+                    <Send className="h-3.5 w-3.5" aria-hidden />撰写回复邮件
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </div>}
       </section>
 

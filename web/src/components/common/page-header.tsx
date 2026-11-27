@@ -48,9 +48,9 @@ export function PageHeader({
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               {backLabel}
             </Button>
-          ) : eyebrow !== null ? (
-            <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
-              {eyebrow ?? 'GLOBALCRM / TRADE WORKSPACE'}
+          ) : eyebrow ? (
+            <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              {eyebrow}
             </p>
           ) : null}
           <div className="flex flex-wrap items-center gap-2.5">

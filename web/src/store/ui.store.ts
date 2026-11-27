@@ -38,6 +38,9 @@ interface UiState {
   agentKnowledgeHandoff: KnowledgeHandoff | null;
   prepareKnowledgeEmail: (value: Omit<KnowledgeHandoff, 'requestId'>) => void;
   clearKnowledgeHandoff: (requestId: string) => void;
+  agentPromptHandoff: { requestId: string; prompt: string } | null;
+  openAgentWithPrompt: (prompt: string) => void;
+  clearAgentPromptHandoff: (requestId: string) => void;
   agentBatchCustomerIds:string[];
   openAgentBatch:(ids:string[])=>void;
   clearAgentBatchSelection:()=>void;
@@ -77,6 +80,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
   agentKnowledgeHandoff: null,
   prepareKnowledgeEmail: value => set({agentKnowledgeHandoff:{...value,requestId:createClientId()},agentOpen:true,scratchpadOpen:false,agentCustomerPreviewId:null,agentCustomerAnalysisId:null,agentCustomerAnalysisCustomerId:null,agentMailAnalysisId:null,agentMailAnalysisMailId:null,agentMailAnalysisDirection:null}),
   clearKnowledgeHandoff: requestId => set(state=>state.agentKnowledgeHandoff?.requestId===requestId?{agentKnowledgeHandoff:null}:{}),
+  agentPromptHandoff: null,
+  openAgentWithPrompt: (prompt) => set({ agentPromptHandoff: { requestId: createClientId(), prompt }, agentOpen: true, scratchpadOpen: false }),
+  clearAgentPromptHandoff: (requestId) => set((state) => (state.agentPromptHandoff?.requestId === requestId ? { agentPromptHandoff: null } : {})),
   agentBatchCustomerIds:[],
   openAgentBatch:(ids)=>set({agentOpen:true,agentBatchCustomerIds:ids}),
   clearAgentBatchSelection:()=>set({agentBatchCustomerIds:[]}),

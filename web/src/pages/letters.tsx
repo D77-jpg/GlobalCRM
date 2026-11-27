@@ -1,18 +1,36 @@
 /**
- * 开发信记录页
+ * 开发信记录页（Gallery-White & Charcoal Master-Detail Workbench）
  * ------------------------------------------------------------------
- * 跨客户查看所有已发送 / 草稿 / 失败的开发信，支持筛选、导出、查看、
- * 重新发送与批量删除。重新发送需要完整客户档案（占位符取值），
- * 因此点击时会先按需拉一次 GET /customers/:id。
+ * 跨客户查看所有已发送 / 草稿 / 失败的开发信，支持：
+ *  - 顶部 4 维核心指标与趋势微图
+ *  - 状态快速切换与多维筛选栏
+ *  - 左表 + 右侧常驻「开发信详情」预览检查器（Master-Detail 双栏工作台）
+ *  - 导出 Excel、审核草稿连续流转、重新发送与批量删除
  */
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Download, FilterX } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock3,
+  Copy,
+  Download,
+  Eye,
+  FilePenLine,
+  FilterX,
+  Mail,
+  Maximize2,
+  RotateCw,
+  Send,
+  Sparkles,
+  User,
+} from 'lucide-react';
 import { PageHeader } from '@/components/common/page-header';
 import { WorkspaceToolbar } from '@/components/common/workspace';
 import { SearchInput } from '@/components/common/search-input';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
+import { LetterStatusBadge } from '@/components/common/status-badge';
+import { MiniSparkline } from '@/components/common/charts';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -24,9 +42,11 @@ import { useLetterList } from '@/hooks/use-queries';
 import { usePageTitle } from '@/hooks/use-ui';
 import { useLetterStore, type LetterSortField } from '@/store/letter.store';
 import { useMetaStore } from '@/store/meta.store';
+import { useUiStore } from '@/store/ui.store';
 import { apiGet, toErrorMessage } from '@/lib/api';
 import { downloadFile, stampedFilename } from '@/lib/download';
-import { customerDetailPath, LETTER_STATUS_OPTIONS, MAIL_CHANNEL_LABEL } from '@/constants';
+import { copyToClipboard, formatDateTime, formatRelative, htmlToPlainText } from '@/lib/format';
+import { customerDetailPath, LETTER_STATUS_OPTIONS, MAIL_CHANNEL_LABEL, ROUTES } from '@/constants';
 import type { Customer, DevelopmentLetter, MailChannel } from '@/types';
 
 /** Select 的「不限」值（Radix 不接受空字符串） */
@@ -40,6 +60,7 @@ const CHANNEL_OPTIONS: { value: string; label: string }[] = [
 export function LettersPage(): React.JSX.Element {
   usePageTitle('开发信记录');
   const navigate = useNavigate();
+  const openAgentWithPrompt = useUiStore((state) => state.openAgentWithPrompt);
 
   /* ---------------------------- store 订阅 ---------------------------- */
 
@@ -78,6 +99,8 @@ export function LettersPage(): React.JSX.Element {
 
   /* ---------------------------- 本地状态 ---------------------------- */
 
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [expandedBody, setExpandedBody] = React.useState(false);
   const [viewTarget, setViewTarget] = React.useState<DevelopmentLetter | null>(null);
   const [viewOpen, setViewOpen] = React.useState(false);
   const [sendOpen, setSendOpen] = React.useState(false);
@@ -90,17 +113,45 @@ export function LettersPage(): React.JSX.Element {
 
   const hasFilters = search.trim() !== '' || status !== ALL || channel !== ALL;
 
+  React.useEffect(() => {
+    if (items.length === 0) {
+      setActiveId(null);
+      return;
+    }
+    if (!activeId || !items.some((item) => item.id === activeId)) {
+      setActiveId(items[0].id);
+      setExpandedBody(false);
+    }
+  }, [items, activeId]);
+
+  const activeLetter = React.useMemo(
+    () => items.find((item) => item.id === activeId) ?? items[0] ?? null,
+    [items, activeId],
+  );
+
   const selectedLetters = React.useMemo(
     () => items.filter((item) => selectedIds.includes(item.id)),
     [items, selectedIds],
   );
 
-  /* ---------------------------- 动作 ---------------------------- */
-
   const draftQueue = React.useMemo(
     () => items.filter((item) => item.status === 'draft' && item.review?.decision !== 'rejected'),
     [items],
   );
+
+  /* ---------------------------- 统计指标（基于真实返回） ---------------------------- */
+
+  const stats = React.useMemo(() => {
+    const delivered = items.filter((item) => item.status === 'sent' || item.status === 'opened').length;
+    const opened = items.filter((item) => item.status === 'opened' || Boolean(item.tracking?.opened)).length;
+    const pendingAction = items.filter(
+      (item) => item.status === 'draft' || item.status === 'failed' || Boolean(item.needsReview),
+    ).length;
+    const openRate = delivered > 0 ? Math.round((opened / delivered) * 100) : 0;
+    return { delivered, opened, pendingAction, openRate };
+  }, [items]);
+
+  /* ---------------------------- 动作 ---------------------------- */
 
   const openLetterInDialog = React.useCallback(async (letter: DevelopmentLetter) => {
     if (letter.needsReview) {
@@ -134,12 +185,12 @@ export function LettersPage(): React.JSX.Element {
     }
   }, []);
 
-  /**
-   * 重发 / 审核草稿前先取完整客户档案与草稿依据，支持人工批量「通过并下一封」连续处理。
-   */
-  const openResend = React.useCallback(async (letter: DevelopmentLetter) => {
-    await openLetterInDialog(letter);
-  }, [openLetterInDialog]);
+  const openResend = React.useCallback(
+    async (letter: DevelopmentLetter) => {
+      await openLetterInDialog(letter);
+    },
+    [openLetterInDialog],
+  );
 
   const handleSent = React.useCallback(() => {
     void fetchList();
@@ -157,6 +208,17 @@ export function LettersPage(): React.JSX.Element {
       setExporting(false);
     }
   }, [buildQuery]);
+
+  const handleCopyLetter = React.useCallback(async (letter: DevelopmentLetter) => {
+    const text = letter.contentText || htmlToPlainText(letter.content);
+    if (!text.trim()) {
+      toast.warning('该开发信没有可复制的正文');
+      return;
+    }
+    const ok = await copyToClipboard(`${letter.subject}\n\n${text}`);
+    if (ok) toast.success('已复制主题与正文');
+    else toast.error('复制失败', { description: '浏览器阻止了剪贴板访问' });
+  }, []);
 
   const confirmDelete = React.useCallback(async () => {
     if (!deleteTarget) return;
@@ -194,6 +256,17 @@ export function LettersPage(): React.JSX.Element {
     }
   }, [selectedIds, bulkDelete]);
 
+  const activePlainBody = React.useMemo(() => {
+    if (!activeLetter) return '';
+    return (activeLetter.contentText || htmlToPlainText(activeLetter.content)).trim();
+  }, [activeLetter]);
+
+  const activeLocked = Boolean(
+    activeLetter &&
+      (['queued', 'scheduled', 'sending', 'retrying'].includes(activeLetter.status) ||
+        (activeLetter.status === 'failed' && Boolean(activeLetter.needsReview))),
+  );
+
   /* ---------------------------- 渲染 ---------------------------- */
 
   return (
@@ -203,11 +276,12 @@ export function LettersPage(): React.JSX.Element {
         description={
           total > 0 ? (
             <>
-              共 <span className="font-medium text-foreground tabular-nums">{total.toLocaleString('zh-CN')}</span> 条记录
+              统一查询发送、草稿、审核及投递记录，当前共{' '}
+              <span className="font-semibold text-foreground tabular-nums">{total.toLocaleString('zh-CN')}</span> 条留档
               {hasFilters ? '（已应用筛选条件）' : ''}
             </>
           ) : (
-            '所有发送过的开发信都会在这里留档，可随时查看、复制或重新发送'
+            '统一查询发送、草稿、审核及投递记录，跟踪开发信触达效果并持续优化沟通策略'
           )
         }
         actions={
@@ -227,7 +301,13 @@ export function LettersPage(): React.JSX.Element {
               onClick={() => void handleExport()}
             >
               {!exporting ? <Download className="h-4 w-4" aria-hidden /> : null}
-              导出 Excel
+              导出记录
+            </Button>
+            <Button type="button" size="sm" asChild>
+              <Link to={ROUTES.customers}>
+                <Send className="h-3.5 w-3.5" aria-hidden />
+                新建开发信
+              </Link>
             </Button>
           </>
         }
@@ -241,29 +321,110 @@ export function LettersPage(): React.JSX.Element {
         </Alert>
       ) : null}
 
+      {/* ---------------------------- 4 维核心指标条 ---------------------------- */}
+      <section aria-label="开发信统计概览" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
+              <Send className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="whitespace-nowrap text-xs text-muted-foreground">全部记录</p>
+              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
+                {total.toLocaleString('zh-CN')}
+              </p>
+              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                当前页 {items.length} 条
+              </p>
+            </div>
+          </div>
+          <MiniSparkline className="w-16 shrink-0" values={[Math.max(1, items.length - 3), Math.max(1, items.length - 1), items.length, Math.max(total, items.length)]} />
+        </div>
+
+        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
+              <CheckCircle2 className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="whitespace-nowrap text-xs text-muted-foreground">本页已投递</p>
+              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
+                {stats.delivered}
+              </p>
+              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
+                已发出记录
+              </p>
+            </div>
+          </div>
+          <MiniSparkline className="w-16 shrink-0" values={[1, Math.max(1, Math.floor(stats.delivered * 0.6)), Math.max(1, stats.delivered)]} />
+        </div>
+
+        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
+              <Eye className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="whitespace-nowrap text-xs text-muted-foreground">本页已打开</p>
+              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
+                {stats.opened}
+              </p>
+              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
+                打开率 {stats.openRate}%
+              </p>
+            </div>
+          </div>
+          <MiniSparkline className="w-16 shrink-0" values={[0, Math.max(1, Math.floor(stats.opened * 0.5)), stats.opened]} />
+        </div>
+
+        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
+              <Clock3 className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="whitespace-nowrap text-xs text-muted-foreground">待审与异常</p>
+              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
+                {stats.pendingAction}
+              </p>
+              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
+                待审草稿 {draftQueue.length} 封
+              </p>
+            </div>
+          </div>
+          <MiniSparkline className="w-16 shrink-0" values={[0, draftQueue.length, stats.pendingAction]} />
+        </div>
+      </section>
+
       {/* Quick Status Tabs */}
-      <nav aria-label="开发信状态快速切换" className="flex flex-wrap items-center gap-4 border-b border-border">
-        {([
-          ['all', '全部记录'],
-          ['draft', '草稿'],
-          ['sent', '已发送'],
-          ['opened', '已打开'],
-          ['failed', '失败与待确认'],
-        ] as const).map(([key, label]) => (
+      <nav aria-label="开发信状态快速切换" className="flex flex-wrap items-center gap-5 border-b border-border">
+        {(
+          [
+            ['all', '全部记录'],
+            ['draft', '草稿'],
+            ['sent', '已发送'],
+            ['opened', '已打开'],
+            ['failed', '失败与待确认'],
+          ] as const
+        ).map(([key, label]) => (
           <button
             key={key}
             type="button"
             onClick={() => setFilters({ status: key })}
             className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
               status === key
-                ? 'border-primary font-semibold text-primary'
+                ? 'border-foreground font-semibold text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
             {label}
             {status === key && total > 0 ? (
-              <span className="ml-1.5 rounded-full bg-primary-soft px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-primary">
+              <span className="ml-1.5 rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-foreground">
                 {total}
+              </span>
+            ) : key === 'draft' && draftQueue.length > 0 && status !== 'draft' ? (
+              <span className="ml-1.5 rounded-full bg-surface px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-muted-foreground">
+                {draftQueue.length}
               </span>
             ) : null}
           </button>
@@ -310,43 +471,238 @@ export function LettersPage(): React.JSX.Element {
         {preparing ? <span className="text-xs text-muted-foreground">正在打开邮件编辑页…</span> : null}
       </WorkspaceToolbar>
 
-      {/* ---------------------------- 表格 ---------------------------- */}
+      {/* ---------------------------- Master-Detail 双栏工作台 ---------------------------- */}
 
-      <Card className="relative overflow-hidden">
-        <LetterTable
-          letters={items}
-          loading={loading}
-          error={error}
-          selectedIds={selectedIds}
-          sortBy={sortBy}
-          sortOrder={sortOrder}
-          hasFilters={hasFilters}
-          busy={sending}
-          onSort={(field: LetterSortField) => setSorting(field)}
-          onToggleSelect={toggleSelect}
-          onToggleSelectAll={toggleSelectAll}
-          onView={(letter) => {
-            setViewTarget(letter);
-            setViewOpen(true);
-          }}
-          onResend={(letter) => void openResend(letter)}
-          onDelete={setDeleteTarget}
-          onRetry={() => void fetchList()}
-          onResetFilters={resetFilters}
-          page={page}
-          limit={limit}
-          total={total}
-          totalPages={totalPages}
-          onPageChange={setPage}
-          onLimitChange={setLimit}
-        />
-      </Card>
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_324px] 2xl:grid-cols-[minmax(0,1fr)_356px]">
+        <Card className="relative min-w-0 overflow-hidden">
+          <LetterTable
+            letters={items}
+            loading={loading}
+            error={error}
+            selectedIds={selectedIds}
+            activeId={activeLetter?.id ?? null}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            hasFilters={hasFilters}
+            busy={sending}
+            onSort={(field: LetterSortField) => setSorting(field)}
+            onToggleSelect={toggleSelect}
+            onToggleSelectAll={toggleSelectAll}
+            onSelectActive={(letter) => {
+              setActiveId(letter.id);
+              setExpandedBody(false);
+            }}
+            onView={(letter) => {
+              setActiveId(letter.id);
+              setViewTarget(letter);
+              setViewOpen(true);
+            }}
+            onResend={(letter) => void openResend(letter)}
+            onDelete={setDeleteTarget}
+            onRetry={() => void fetchList()}
+            onResetFilters={resetFilters}
+            page={page}
+            limit={limit}
+            total={total}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
+          />
+        </Card>
+
+        {/* 右侧常驻「开发信详情」检查器 */}
+        <aside
+          aria-label="开发信详情预览"
+          className="rounded-xl border border-border bg-card p-4 shadow-xs xl:sticky xl:top-4"
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-border/80 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/80 bg-surface text-foreground">
+                <Mail className="h-3.5 w-3.5" aria-hidden />
+              </span>
+              <h2 className="text-sm font-semibold text-foreground">开发信详情</h2>
+            </div>
+            {activeLetter ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="打开完整开发信详情"
+                onClick={() => {
+                  setViewTarget(activeLetter);
+                  setViewOpen(true);
+                }}
+              >
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            ) : null}
+          </div>
+
+          {activeLetter ? (
+            <div className="mt-3.5 space-y-4">
+              <div>
+                <h3 className="text-[0.9375rem] font-semibold leading-snug text-foreground">
+                  {activeLetter.subject || '（无主题）'}
+                </h3>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <LetterStatusBadge status={activeLetter.status} needsReview={activeLetter.needsReview} />
+                  <span className="text-[11px] text-muted-foreground">
+                    {MAIL_CHANNEL_LABEL[activeLetter.channel] ?? activeLetter.channel}
+                  </span>
+                </div>
+              </div>
+
+              <dl className="space-y-2 rounded-lg border border-border/70 bg-surface/50 p-3 text-xs">
+                <div className="flex items-start justify-between gap-3">
+                  <dt className="shrink-0 text-muted-foreground">收件人</dt>
+                  <dd className="min-w-0 truncate text-right font-medium text-foreground">
+                    {activeLetter.recipientName ? `${activeLetter.recipientName} · ` : ''}
+                    {activeLetter.recipientEmail}
+                  </dd>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <dt className="shrink-0 text-muted-foreground">所属客户</dt>
+                  <dd className="min-w-0 truncate text-right">
+                    {activeLetter.customer ? (
+                      <Link
+                        to={customerDetailPath(activeLetter.customer.id)}
+                        className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-2 hover:underline"
+                      >
+                        <User className="h-3 w-3 text-muted-foreground" aria-hidden />
+                        <span className="truncate">{activeLetter.customer.name}</span>
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">客户已删除</span>
+                    )}
+                  </dd>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <dt className="shrink-0 text-muted-foreground">发送时间</dt>
+                  <dd className="text-right tabular-nums text-foreground">
+                    {activeLetter.sentAt
+                      ? `${formatDateTime(activeLetter.sentAt)}（${formatRelative(activeLetter.sentAt)}）`
+                      : activeLetter.status === 'scheduled' && activeLetter.scheduledAt
+                        ? `定时 ${formatDateTime(activeLetter.scheduledAt)}`
+                        : '尚未发送'}
+                  </dd>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <dt className="shrink-0 text-muted-foreground">打开情况</dt>
+                  <dd className="text-right text-foreground">
+                    {activeLetter.tracking?.opened
+                      ? `已打开 ${activeLetter.tracking.dedupedOpenCount ?? activeLetter.tracking.openCount} 次`
+                      : activeLetter.status === 'opened'
+                        ? '已记录打开'
+                        : '暂无打开回执'}
+                  </dd>
+                </div>
+              </dl>
+
+              {activeLetter.status === 'failed' && activeLetter.error ? (
+                <div className="rounded-lg border border-rose-200/80 bg-rose-50/70 px-3 py-2 text-xs text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-300">
+                  失败原因：{activeLetter.error}
+                </div>
+              ) : null}
+
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">邮件内容</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewTarget(activeLetter);
+                      setViewOpen(true);
+                    }}
+                    className="text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    查看富文本排版
+                  </button>
+                </div>
+                <div className="rounded-lg border border-border/80 bg-surface/60 p-3.5 text-xs leading-relaxed text-foreground/90">
+                  {activePlainBody ? (
+                    <>
+                      <p className="whitespace-pre-line break-words">
+                        {expandedBody || activePlainBody.length <= 320
+                          ? activePlainBody
+                          : `${activePlainBody.slice(0, 320)}…`}
+                      </p>
+                      {activePlainBody.length > 320 ? (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedBody((prev) => !prev)}
+                          className="mt-2 inline-flex items-center text-[11px] font-semibold text-foreground underline-offset-2 hover:underline"
+                        >
+                          {expandedBody ? '收起正文' : '展开完整内容'}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">（暂无正文内容）</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={sending || activeLocked}
+                  onClick={() => void openResend(activeLetter)}
+                >
+                  {activeLetter.status === 'draft' ? (
+                    <>
+                      <FilePenLine className="h-3.5 w-3.5" aria-hidden />
+                      审核并发送
+                    </>
+                  ) : (
+                    <>
+                      <RotateCw className="h-3.5 w-3.5" aria-hidden />
+                      重新发送
+                    </>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleCopyLetter(activeLetter)}
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                  复制正文
+                </Button>
+              </div>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full justify-center border border-border/70 bg-surface/50 text-xs hover:bg-surface"
+                onClick={() =>
+                  openAgentWithPrompt(
+                    `请基于发给「${activeLetter.customer?.name || activeLetter.recipientName || activeLetter.recipientEmail}」的开发信《${activeLetter.subject || '无主题'}》，帮我起草一封简洁得体的二次跟进邮件（Follow-up），突出差异化价值并礼貌询问反馈。`,
+                  )
+                }
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                让 AI 基于此信起草二次跟进
+              </Button>
+            </div>
+          ) : (
+            <div className="py-12 text-center">
+              <p className="text-xs font-medium text-foreground">未选中开发信记录</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                在左侧表格点击任意一行，即可在此快速检视收件人、投递状态与完整正文摘要。
+              </p>
+            </div>
+          )}
+        </aside>
+      </div>
 
       {/* ---------------------------- 批量操作条 ---------------------------- */}
 
       {selectedIds.length > 0 ? (
         <div
-          className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-card/95 px-3 py-2 shadow-lg backdrop-blur animate-in slide-in-from-bottom-2 duration-200"
+          className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-foreground/25 bg-card/95 px-3 py-2 shadow-lg backdrop-blur animate-in slide-in-from-bottom-2 duration-200"
           role="toolbar"
           aria-label="批量操作"
         >
@@ -421,7 +777,12 @@ export function LettersPage(): React.JSX.Element {
           if (!resendTarget) return;
           const remaining = draftQueue.filter((item) => item.id !== resendTarget.id);
           const nextItem = remaining[0];
-          if (!nextItem) { setSendOpen(false); setResendTarget(null); setSendCustomer(null); return; }
+          if (!nextItem) {
+            setSendOpen(false);
+            setResendTarget(null);
+            setSendCustomer(null);
+            return;
+          }
           void openLetterInDialog(nextItem);
         }}
         onNavigateQueue={(delta) => {

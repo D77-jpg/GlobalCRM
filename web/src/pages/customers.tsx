@@ -121,7 +121,7 @@ export function CustomersPage(): React.JSX.Element {
   const [previewId, setPreviewId] = React.useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(true);
   const [viewMode, setViewMode] = React.useState<'table' | 'kanban'>('table');
-  const canPreview = useMediaQuery('(min-width: 1440px)');
+  const canPreview = useMediaQuery('(min-width: 1280px)');
 
   // Keep the right-side quick view useful as the list, filter or page changes.
   React.useEffect(() => {
@@ -323,7 +323,7 @@ export function CustomersPage(): React.JSX.Element {
 
   return (
     <div className="workspace-page">
-      <div className={cn('min-w-0', showPreview && 'min-[1440px]:grid min-[1440px]:grid-cols-[minmax(0,1fr)_19.5rem] min-[1440px]:items-stretch min-[1440px]:gap-4')}>
+      <div className={cn('min-w-0', showPreview && 'xl:grid xl:grid-cols-[minmax(0,1fr)_288px] xl:items-stretch xl:gap-4')}>
         <div className="min-w-0 space-y-4">
           <PageHeader
         title="客户管理"
