@@ -131,3 +131,83 @@ tenantTest('admin can replace an unreadable stored key without exposing it', asy
     assert.equal((await settings.resolveAgentProvider()).model, 'replacement-model');
   } finally { global.fetch = originalFetch; }
 });
+
+tenantTest('dual-edition: self_hosted allows exact whitelisted internal AI gateway while blocking non-whitelisted LAN and cloud metadata', async () => {
+  const editionMod = await import('../src/config/edition');
+  const cookieMod = await import('../src/utils/auth-cookies');
+
+  // 1. saas edition ignores internal allowlist and keeps strict HTTPS + public-address policy
+  await assert.rejects(
+    settings.validateAiBaseUrl('http://127.0.0.1:7863/v1', true, {
+      edition: 'saas',
+      allowedInternalOrigins: ['http://127.0.0.1:7863'],
+    }),
+    { statusCode: 400 },
+  );
+
+  // 2. self_hosted allows exact whitelisted internal gateway (even in production over HTTP)
+  const allowed = await settings.validateAiBaseUrl('http://127.0.0.1:7863/v1', true, {
+    edition: 'self_hosted',
+    allowedInternalOrigins: ['http://127.0.0.1:7863'],
+  });
+  assert.equal(allowed, 'http://127.0.0.1:7863/v1');
+
+  // 3. self_hosted rejects different port / non-whitelisted LAN IP
+  await assert.rejects(
+    settings.validateAiBaseUrl('http://127.0.0.1:9999/v1', true, {
+      edition: 'self_hosted',
+      allowedInternalOrigins: ['http://127.0.0.1:7863'],
+    }),
+    { statusCode: 400 },
+  );
+  await assert.rejects(
+    settings.validateAiBaseUrl('http://192.168.1.50:7863/v1', true, {
+      edition: 'self_hosted',
+      allowedInternalOrigins: ['http://127.0.0.1:7863'],
+    }),
+    { statusCode: 400 },
+  );
+
+  // 4. Cloud metadata & link-local are ALWAYS blocked even if mistakenly added to allowlist
+  for (const metadataUrl of ['http://169.254.169.254/v1', 'http://metadata.google.internal/v1']) {
+    await assert.rejects(
+      settings.validateAiBaseUrl(metadataUrl, true, {
+        edition: 'self_hosted',
+        allowedInternalOrigins: [new URL(metadataUrl).origin],
+      }),
+      { statusCode: 400 },
+    );
+  }
+  assert.deepEqual(
+    editionMod.parseAllowedInternalOrigins('http://host.docker.internal:7863, http://169.254.169.254, http://user:pass@127.0.0.1:7863, ftp://127.0.0.1:7863'),
+    ['http://host.docker.internal:7863'],
+  );
+
+  // 5. Cookie Secure flag: saas production always enforces Secure; self_hosted respects COOKIE_SECURE
+  assert.equal(cookieMod.secureCookieFlag({ isProd: true, edition: 'saas', cookieSecure: false }), true);
+  assert.equal(cookieMod.secureCookieFlag({ isProd: true, edition: 'self_hosted', cookieSecure: false }), false);
+  assert.equal(cookieMod.secureCookieFlag({ isProd: true, edition: 'self_hosted', cookieSecure: true }), true);
+
+  // 6. Mail tracking skips private/loopback URLs in self_hosted mode only
+  assert.equal(editionMod.shouldSkipMailTrackingForUrl('http://192.168.1.100:5173', 'self_hosted'), true);
+  assert.equal(editionMod.shouldSkipMailTrackingForUrl('http://localhost:5000', 'self_hosted'), true);
+  assert.equal(editionMod.shouldSkipMailTrackingForUrl('https://crm.example.com', 'self_hosted'), false);
+  assert.equal(editionMod.shouldSkipMailTrackingForUrl('http://localhost:5000', 'saas'), false);
+
+  // 7. Deployment feature profile defaults
+  const saasProfile = editionMod.resolveDeploymentProfile({ edition: 'saas', allowedInternalOrigins: [] });
+  assert.equal(saasProfile.features.billing, true);
+  assert.equal(saasProfile.features.multiOrg, true);
+  assert.equal(saasProfile.features.enforcePlanLimits, true);
+  assert.equal(saasProfile.features.internalAiGateway, false);
+
+  const selfHostedProfile = editionMod.resolveDeploymentProfile({
+    edition: 'self_hosted',
+    allowedInternalOrigins: ['http://host.docker.internal:7863'],
+  });
+  assert.equal(selfHostedProfile.features.billing, false);
+  assert.equal(selfHostedProfile.features.multiOrg, false);
+  assert.equal(selfHostedProfile.features.publicPricing, false);
+  assert.equal(selfHostedProfile.features.enforcePlanLimits, false);
+  assert.equal(selfHostedProfile.features.internalAiGateway, true);
+});

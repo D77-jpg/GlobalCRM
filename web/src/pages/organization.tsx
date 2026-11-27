@@ -11,6 +11,7 @@ import { usePageTitle } from '@/hooks/use-ui';
 import { apiGet, apiPut, toErrorMessage } from '@/lib/api';
 import { useI18n } from '@/i18n';
 import { useAuthStore } from '@/store/auth.store';
+import { selectDeploymentFeatures, useMetaStore } from '@/store/meta.store';
 import type { Organization, PlanDefinition, UsageSummary } from '@/types';
 
 interface CurrentOrganizationResponse {
@@ -27,6 +28,7 @@ function formatBytes(bytes: number): string {
 export function OrganizationPage(): React.JSX.Element {
   const { t, language } = useI18n();
   const role = useAuthStore((state) => state.user?.role);
+  const features = useMetaStore(selectDeploymentFeatures);
   const canEdit = role === 'admin';
   const [data, setData] = React.useState<CurrentOrganizationResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -89,11 +91,11 @@ export function OrganizationPage(): React.JSX.Element {
         actions={<Button variant="outline" onClick={() => void load()}><Gauge className="h-4 w-4" />{t('common.refresh')}</Button>}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className={features.billing ? 'grid gap-4 lg:grid-cols-[1.2fr_0.8fr]' : 'grid gap-4'}>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4" />{t('org.profileTitle')}</CardTitle>
-            <CardDescription>{t('org.profileDesc')}</CardDescription>
+            <CardDescription>{features.billing ? t('org.profileDesc') : '维护当前团队/公司的基础资料，用于系统展示与文档落款。'}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -105,19 +107,25 @@ export function OrganizationPage(): React.JSX.Element {
                 <Label>{t('org.slug')}</Label>
                 <Input value={organization.slug} disabled />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="org-billing-email">{t('org.billingEmail')}</Label>
-                <Input id="org-billing-email" type="email" value={form.billingEmail} disabled={!canEdit} onChange={(event) => setForm((prev) => ({ ...prev, billingEmail: event.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="org-tax-id">{t('org.taxId')}</Label>
-                <Input id="org-tax-id" value={form.taxId} disabled={!canEdit} onChange={(event) => setForm((prev) => ({ ...prev, taxId: event.target.value }))} />
-              </div>
+              {features.billing ? (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="org-billing-email">{t('org.billingEmail')}</Label>
+                    <Input id="org-billing-email" type="email" value={form.billingEmail} disabled={!canEdit} onChange={(event) => setForm((prev) => ({ ...prev, billingEmail: event.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="org-tax-id">{t('org.taxId')}</Label>
+                    <Input id="org-tax-id" value={form.taxId} disabled={!canEdit} onChange={(event) => setForm((prev) => ({ ...prev, taxId: event.target.value }))} />
+                  </div>
+                </>
+              ) : null}
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="org-address">{t('org.billingAddress')}</Label>
-              <Input id="org-address" value={form.billingAddress} disabled={!canEdit} onChange={(event) => setForm((prev) => ({ ...prev, billingAddress: event.target.value }))} />
-            </div>
+            {features.billing ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="org-address">{t('org.billingAddress')}</Label>
+                <Input id="org-address" value={form.billingAddress} disabled={!canEdit} onChange={(event) => setForm((prev) => ({ ...prev, billingAddress: event.target.value }))} />
+              </div>
+            ) : null}
             {canEdit ? (
               <div className="flex justify-end">
                 <Button onClick={() => void save()} disabled={saving || !form.name.trim()}>
@@ -129,39 +137,41 @@ export function OrganizationPage(): React.JSX.Element {
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('org.currentPlan')}</CardTitle>
-              <CardDescription>{planLabel} · {organization.subscriptionStatus}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.status')}</span><Badge variant={organization.status === 'active' ? 'developed' : 'warning'}>{organization.status}</Badge></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.plan')}</span><span className="font-medium">{planLabel}</span></div>
-              {organization.trialEndsAt ? <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.trialEnds')}</span><span>{new Date(organization.trialEndsAt).toLocaleDateString(language === 'en' ? 'en-US' : 'zh-CN')}</span></div> : null}
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.currency')}</span><span>{organization.currency}</span></div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>{t('org.planLimits')}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-muted-foreground">{t('org.users')}</span><span>{organization.limits.users}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">{t('org.projects')}</span><span>{organization.limits.projects}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">{t('org.emails')}</span><span>{organization.limits.monthlyEmails.toLocaleString()}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">{t('org.aiTokens')}</span><span>{organization.limits.monthlyAiTokens.toLocaleString()}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">{t('org.storage')}</span><span>{formatBytes(organization.limits.storageBytes)}</span></div>
-            </CardContent>
-          </Card>
-        </div>
+        {features.billing ? (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('org.currentPlan')}</CardTitle>
+                <CardDescription>{planLabel} · {organization.subscriptionStatus}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.status')}</span><Badge variant={organization.status === 'active' ? 'developed' : 'warning'}>{organization.status}</Badge></div>
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.plan')}</span><span className="font-medium">{planLabel}</span></div>
+                {organization.trialEndsAt ? <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.trialEnds')}</span><span>{new Date(organization.trialEndsAt).toLocaleDateString(language === 'en' ? 'en-US' : 'zh-CN')}</span></div> : null}
+                <div className="flex items-center justify-between"><span className="text-muted-foreground">{t('org.currency')}</span><span>{organization.currency}</span></div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('org.planLimits')}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('org.users')}</span><span>{organization.limits.users}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('org.projects')}</span><span>{organization.limits.projects}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('org.emails')}</span><span>{organization.limits.monthlyEmails.toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('org.aiTokens')}</span><span>{organization.limits.monthlyAiTokens.toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('org.storage')}</span><span>{formatBytes(organization.limits.storageBytes)}</span></div>
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
       </div>
 
       {usage ? (
         <Card>
           <CardHeader>
-            <CardTitle>{t('org.usageTitle')}</CardTitle>
-            <CardDescription>{t('org.usageDesc')}</CardDescription>
+            <CardTitle>{features.billing ? t('org.usageTitle') : '本月用量统计'}</CardTitle>
+            <CardDescription>{features.billing ? t('org.usageDesc') : `统计周期 ${usage.period} · 团队自用模式不限制套餐额度，仅记录邮件发送、AI Token 与附件存储消耗便于内部成本核算。`}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-3">
             {[
@@ -170,9 +180,15 @@ export function OrganizationPage(): React.JSX.Element {
               { label: t('org.storage'), value: usage.usage.storage_bytes, percent: usage.percentages.storage_bytes },
             ].map((item) => (
               <div key={item.label} className="space-y-1.5">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">{item.label}</span><span className="tabular-nums">{item.label === t('org.storage') ? formatBytes(item.value) : item.value.toLocaleString()}</span></div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, item.percent))}%` }} /></div>
-                <p className="text-right text-[11px] text-muted-foreground">{item.percent}%</p>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">{item.label}</span><span className="tabular-nums font-medium">{item.label === t('org.storage') ? formatBytes(item.value) : item.value.toLocaleString()}</span></div>
+                {features.enforcePlanLimits ? (
+                  <>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, item.percent))}%` }} /></div>
+                    <p className="text-right text-[11px] text-muted-foreground">{item.percent}%</p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">无商业配额上限</p>
+                )}
               </div>
             ))}
           </CardContent>

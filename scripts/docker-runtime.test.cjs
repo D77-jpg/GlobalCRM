@@ -36,8 +36,14 @@ test('standalone ingress and healthcheck contract', () => {
 });
 
 test('example contains no production credentials', () => {
-  const example = read('production.env.example');
-  for (const key of ['JWT_SECRET', 'ADMIN_PASSWORD', 'MAIL_CREDENTIAL_ENCRYPTION_KEY', 'MONGO_ROOT_PASSWORD']) {
-    assert.match(example, new RegExp(`^${key}=REPLACE_WITH_`, 'm'));
+  for (const envFile of ['production.env.example', 'team-lan.env.example']) {
+    const example = read(envFile);
+    for (const key of ['JWT_SECRET', 'ADMIN_PASSWORD', 'MAIL_CREDENTIAL_ENCRYPTION_KEY', 'MONGO_ROOT_PASSWORD']) {
+      assert.match(example, new RegExp(`^${key}=REPLACE_WITH_`, 'm'), `${envFile}: ${key}`);
+    }
   }
+  const lanOverlay = read('compose.lan.yaml');
+  assert.match(lanOverlay, /CRM_EDITION:\s*\$\{LAN_CRM_EDITION:-self_hosted\}/);
+  assert.match(lanOverlay, /host\.docker\.internal:host-gateway/);
+  assert.match(lanOverlay, /AI_ALLOWED_INTERNAL_ORIGINS/);
 });

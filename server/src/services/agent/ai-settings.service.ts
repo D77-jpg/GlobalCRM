@@ -2,6 +2,11 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { Types } from 'mongoose';
 import env from '../../config/env';
+import {
+  isMetadataOrLinkLocalAddress,
+  isMetadataOrLinkLocalHost,
+  type CrmEdition,
+} from '../../config/edition';
 import { AgentAiProvider, type AgentAiProviderDocument } from '../../models/AgentAiProvider';
 import { AgentAiSettings, type AgentAiSettingsDocument } from '../../models/AgentAiSettings';
 import { getTenantContext } from '../../models/tenant-context';
@@ -72,30 +77,87 @@ function publicAddress(address: string): boolean {
 }
 
 /** Configuration is admin-only, but never let an arbitrary URL reach cloud metadata or the LAN. */
-export async function validateAiBaseUrl(value: string, production = env.isProd): Promise<string> {
+export async function validateAiBaseUrl(
+  value: string,
+  production = env.isProd,
+  options?: { edition?: CrmEdition; allowedInternalOrigins?: string[] },
+): Promise<string> {
   let url: URL;
   try { url = new URL(value); } catch { throw ApiError.badRequest('API 地址无效'); }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw ApiError.badRequest('API 地址仅支持无凭证、无查询参数的 HTTP(S) 基址');
   }
-  if (production && url.protocol !== 'https:') throw ApiError.badRequest('生产环境 AI 地址必须使用 HTTPS');
+
+  const edition = options?.edition ?? env.CRM_EDITION;
+  const allowedOrigins = (options?.allowedInternalOrigins ?? env.aiAllowedInternalOrigins)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
   const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+
+  // 云元数据与链路本地地址在任何模式、任何白名单下均绝对禁止
+  if (isMetadataOrLinkLocalHost(hostname)) {
+    throw ApiError.badRequest('AI 地址不得指向云元数据或链路本地地址');
+  }
+
+  const isWhitelistedInternalGateway = edition === 'self_hosted'
+    && allowedOrigins.includes(url.origin.toLowerCase());
+
+  if (isWhitelistedInternalGateway) {
+    if (!hostname || hostname.endsWith('.')) {
+      throw ApiError.badRequest('该 AI 主机地址不允许使用');
+    }
+    if (isIP(hostname)) {
+      if (isMetadataOrLinkLocalAddress(hostname)) {
+        throw ApiError.badRequest('AI 地址不得指向云元数据或链路本地地址');
+      }
+      return url.toString().replace(/\/$/, '');
+    }
+    if (hostname !== 'localhost' && !hostname.endsWith('.localhost')) {
+      let addresses: { address: string }[];
+      try { addresses = await lookup(hostname, { all: true }); }
+      catch { throw ApiError.badRequest('AI 主机 DNS 解析失败，请确认容器网络或 host.docker.internal 可达'); }
+      if (!addresses.length || addresses.some(({ address }) => isMetadataOrLinkLocalAddress(address))) {
+        throw ApiError.badRequest('AI 地址解析到了不允许的保留或元数据地址');
+      }
+    }
+    return url.toString().replace(/\/$/, '');
+  }
+
+  if (production && url.protocol !== 'https:') {
+    throw ApiError.badRequest(
+      edition === 'self_hosted'
+        ? '生产环境非白名单 AI 地址必须使用 HTTPS；如需接入本地/内网网关，请将其精确地址（协议+主机+端口）加入服务端 AI_ALLOWED_INTERNAL_ORIGINS'
+        : '生产环境 AI 地址必须使用 HTTPS',
+    );
+  }
   if (!hostname || hostname.endsWith('.') || hostname === 'localhost' || hostname.endsWith('.localhost')) {
     if (production || !['localhost', '127.0.0.1', '::1'].includes(hostname)) {
-      throw ApiError.badRequest('该 AI 主机地址不允许使用');
+      throw ApiError.badRequest(
+        edition === 'self_hosted'
+          ? '该本地 AI 主机未在服务端 AI_ALLOWED_INTERNAL_ORIGINS 白名单中'
+          : '该 AI 主机地址不允许使用',
+      );
     }
     return url.toString().replace(/\/$/, '');
   }
   if (isIP(hostname)) {
     if (!publicAddress(hostname) && !(env.isDev && ['127.0.0.1', '::1'].includes(hostname))) {
-      throw ApiError.badRequest('AI 地址不得指向内网或保留地址');
+      throw ApiError.badRequest(
+        edition === 'self_hosted'
+          ? '该内网 AI 地址未在服务端 AI_ALLOWED_INTERNAL_ORIGINS 白名单中'
+          : 'AI 地址不得指向内网或保留地址',
+      );
     }
   } else {
     let addresses: { address: string }[];
     try { addresses = await lookup(hostname, { all: true }); }
     catch { throw ApiError.badRequest('AI 主机 DNS 解析失败'); }
     if (!addresses.length || addresses.some(({ address }) => !publicAddress(address))) {
-      throw ApiError.badRequest('AI 地址解析到了内网或保留地址');
+      throw ApiError.badRequest(
+        edition === 'self_hosted'
+          ? '该内网 AI 主机未在服务端 AI_ALLOWED_INTERNAL_ORIGINS 白名单中'
+          : 'AI 地址解析到了内网或保留地址',
+      );
     }
   }
   return url.toString().replace(/\/$/, '');

@@ -91,6 +91,7 @@ router.get(
       placeholders: LETTER_PLACEHOLDERS.map(({ key, label }) => ({ key, label, token: `{{${key}}}` })),
       mailChannel: getActiveChannel(),
       maxPageSize: MAX_PAGE_SIZE,
+      deployment: env.deployment,
       company: {
         name: env.COMPANY_NAME,
         website: env.COMPANY_WEBSITE,

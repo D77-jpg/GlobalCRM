@@ -102,7 +102,10 @@ function chatMessages(instructions: string, input: AgentInputItem[] | string, mi
 function isLocalGateway(baseUrl: string): boolean {
   try {
     const hostname = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname === '::1'
+      || hostname === 'host.docker.internal';
   } catch {
     return false;
   }

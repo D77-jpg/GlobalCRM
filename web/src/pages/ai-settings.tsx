@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { usePageTitle } from '@/hooks/use-ui';
 import { apiDelete, apiGet, apiPost, apiPut, toErrorMessage } from '@/lib/api';
+import { selectDeploymentFeatures, useMetaStore } from '@/store/meta.store';
 import { cn } from '@/lib/utils';
 
 type ProviderKind = 'openai' | 'mock';
@@ -320,6 +321,7 @@ function ProviderCard({
 
 export function AiSettingsPage(): React.JSX.Element {
   usePageTitle('AI 配置');
+  const features = useMetaStore(selectDeploymentFeatures);
   const [catalog, setCatalog] = React.useState<AiProviderCatalog | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState('');
@@ -780,7 +782,11 @@ export function AiSettingsPage(): React.JSX.Element {
                   {insecureHttp ? (
                     <div role="note" className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
                       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden />
-                      <p>此地址使用 HTTP，密钥会在网络传输中暴露。仅可在开发环境测试；生产环境只接受 HTTPS。</p>
+                      <p>
+                        {features.internalAiGateway
+                          ? '此地址使用 HTTP：当前已启用团队自用内网网关模式，处于服务端 AI_ALLOWED_INTERNAL_ORIGINS 白名单内的本地/内网网关可以直接测试并保存（非白名单地址仍会被拦截）。'
+                          : '此地址使用 HTTP，密钥会在网络传输中暴露。商业生产环境只接受 HTTPS；如为团队自用本地网关，请在服务端配置 CRM_EDITION=self_hosted 与 AI_ALLOWED_INTERNAL_ORIGINS 白名单。'}
+                      </p>
                     </div>
                   ) : null}
 

@@ -7,6 +7,7 @@
  */
 import type { Request, Response } from 'express';
 import env from '../config/env';
+import type { CrmEdition } from '../config/edition';
 
 export const AUTH_COOKIE_NAMES = {
   access: 'cdlm_access',
@@ -57,8 +58,17 @@ export function setCookie(res: Response, name: string, value: string, options: C
   res.append('Set-Cookie', serializeCookie(name, value, options));
 }
 
-export function secureCookieFlag(): boolean {
-  return env.isProd || env.COOKIE_SECURE;
+export function secureCookieFlag(options?: {
+  isProd?: boolean;
+  edition?: CrmEdition;
+  cookieSecure?: boolean;
+}): boolean {
+  const isProd = options?.isProd ?? env.isProd;
+  const edition = options?.edition ?? env.CRM_EDITION;
+  const cookieSecure = options?.cookieSecure ?? env.COOKIE_SECURE;
+  // 商业版（saas）生产环境始终强制 Secure Cookie；团队自用版（self_hosted）允许通过 COOKIE_SECURE=false 支持受信任局域网 HTTP 访问
+  if (edition === 'self_hosted') return cookieSecure;
+  return isProd || cookieSecure;
 }
 
 export function setAuthCookies(

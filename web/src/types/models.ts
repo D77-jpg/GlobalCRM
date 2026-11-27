@@ -1502,6 +1502,19 @@ export interface PlaceholderMeta {
   token: string;
 }
 
+export interface DeploymentFeatures {
+  billing: boolean;
+  multiOrg: boolean;
+  publicPricing: boolean;
+  internalAiGateway: boolean;
+  enforcePlanLimits: boolean;
+}
+
+export interface DeploymentProfile {
+  edition: 'saas' | 'self_hosted';
+  features: DeploymentFeatures;
+}
+
 export interface MetaResponse {
   customerStatus: { value: CustomerStatus; label: string }[];
   customerSource: CustomerSource[];
@@ -1511,6 +1524,7 @@ export interface MetaResponse {
   placeholders: PlaceholderMeta[];
   mailChannel: MailChannel;
   maxPageSize: number;
+  deployment?: DeploymentProfile;
   company: {
     name: string;
     website: string;
