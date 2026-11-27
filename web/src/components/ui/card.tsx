@@ -1,5 +1,5 @@
 /**
- * Card & StatCard — elevated warm-bordered white surfaces for executive clarity.
+ * Card & StatCard — Gallery-white architectural cards with crisp 1px borders.
  */
 import * as React from 'react';
 import { cn } from '@/lib/utils';
@@ -24,7 +24,7 @@ const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <h3
       ref={ref}
-      className={cn('text-[0.9375rem] font-semibold leading-snug tracking-[-0.015em]', className)}
+      className={cn('text-[0.9375rem] font-semibold leading-snug tracking-[-0.018em]', className)}
       {...props}
     />
   ),
@@ -51,7 +51,7 @@ const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 CardFooter.displayName = 'CardFooter';
 
 /**
- * 统计卡片：柔和森林绿圆形图标底 + 清晰的数值与辅助趋势/说明。
+ * 统计卡片：利落现代商务方形圆角图标框 + 高对比度墨黑数值 + 克制语义角标。
  */
 export function StatCard({
   label,
@@ -73,12 +73,12 @@ export function StatCard({
   className?: string;
 }): React.JSX.Element {
   const iconToneClass = {
-    default: 'bg-primary-soft text-primary',
-    primary: 'bg-primary-soft text-primary',
-    pending: 'bg-amberx-soft text-amberx',
-    developed: 'bg-mint-soft text-mint',
-    failed: 'bg-rose-soft text-rose',
-    gold: 'bg-gold-soft text-gold',
+    default: 'border border-border/80 bg-surface text-foreground',
+    primary: 'border border-border/80 bg-surface text-foreground',
+    pending: 'border border-border/80 bg-surface text-foreground',
+    developed: 'border border-mint/20 bg-mint-soft/70 text-mint',
+    failed: 'border border-rose/20 bg-rose-soft/70 text-rose',
+    gold: 'border border-border/80 bg-surface text-foreground',
   }[tone];
 
   const badgeToneClass = {
@@ -87,14 +87,14 @@ export function StatCard({
     pending: 'chip-amber',
     developed: 'chip-mint',
     failed: 'chip-rose',
-    gold: 'chip-gold',
+    gold: 'chip-muted',
   }[tone];
 
   return (
-    <Card className={cn('p-4 transition-[border-color,box-shadow] duration-150 hover:border-foreground/15', className)}>
+    <Card className={cn('p-4 transition-[border-color,box-shadow] duration-150 hover:border-foreground/20', className)}>
       <div className="flex items-start gap-3">
         {icon ? (
-          <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full', iconToneClass)} aria-hidden>
+          <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', iconToneClass)} aria-hidden>
             {icon}
           </div>
         ) : null}
@@ -105,7 +105,7 @@ export function StatCard({
           </div>
           <div className="mt-1.5 flex items-end justify-between gap-2">
             <div className="min-w-0">
-              <p className="break-all text-[1.5rem] font-bold leading-none tracking-[-0.03em] tabular-nums text-foreground">
+              <p className="break-all text-[1.45rem] font-bold leading-none tracking-[-0.03em] tabular-nums text-foreground">
                 {value}
               </p>
               {hint ? <div className="mt-1.5 text-xs leading-snug text-muted-foreground">{hint}</div> : null}

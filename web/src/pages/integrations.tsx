@@ -120,18 +120,18 @@ function IntegrationWorkspace({ projectId, projectName }: { projectId: string; p
   return <div className="workspace-page space-y-6">
     <PageHeader title={t('integrations.title')} description={t('integrations.subtitle')} actions={<Button className="min-h-11" onClick={openCreate} disabled={!settings || loading || settings.quota.used >= settings.quota.limit}><Plus className="h-4 w-4" aria-hidden />{t('integrations.create')}</Button>} />
     <div className="grid gap-3.5 sm:grid-cols-3">
-      <div className="panel flex items-center gap-3.5 p-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
-          <ShieldCheck className="h-[18px] w-[18px]" />
+      <div className="flex min-w-0 items-center gap-3.5 rounded-xl border border-border bg-card p-4 shadow-xs">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+          <ShieldCheck className="h-4 w-4" />
         </span>
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">{t('integrations.project')}</p>
           <p className="mt-1 truncate text-base font-bold text-foreground" data-user-content>{projectName}</p>
         </div>
       </div>
-      <div className="panel flex items-center gap-3.5 p-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
-          <KeyRound className="h-[18px] w-[18px]" />
+      <div className="flex min-w-0 items-center gap-3.5 rounded-xl border border-border bg-card p-4 shadow-xs">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+          <KeyRound className="h-4 w-4" />
         </span>
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">{settings ? t('integrations.quota', settings.quota) : t('common.loading')}</p>
@@ -140,7 +140,7 @@ function IntegrationWorkspace({ projectId, projectName }: { projectId: string; p
           </p>
         </div>
       </div>
-      <div className="panel flex items-center justify-between gap-3 p-4">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">{t('integrations.logs')}</p>
           <p className="mt-1 text-xl font-bold leading-none tabular-nums text-foreground">{logs?.total ?? '—'}</p>

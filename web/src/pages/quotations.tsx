@@ -23,6 +23,7 @@ import { downloadFile } from '@/lib/download';
 import { formatDate, formatMoney, roundMoney } from '@/lib/format';
 import { customerDetailPath, QUOTATION_STATUS_LABEL } from '@/constants';
 import { PageHeader } from '@/components/common/page-header';
+import { HealthRing, MiniSparkline } from '@/components/common/charts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -442,11 +443,11 @@ export function QuotationsPage(): React.JSX.Element {
       />
 
       {/* Top 4 KPI Cards */}
-      <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4">
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
-              <FileText className="h-[18px] w-[18px]" />
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+              <FileText className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">草稿待报价</p>
@@ -457,8 +458,8 @@ export function QuotationsPage(): React.JSX.Element {
         </Card>
         <Card className="p-4">
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
-              <ReceiptText className="h-[18px] w-[18px]" />
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+              <ReceiptText className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">已发送 / 谈判中</p>
@@ -469,8 +470,8 @@ export function QuotationsPage(): React.JSX.Element {
         </Card>
         <Card className="p-4">
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amberx-soft text-amberx" aria-hidden>
-              <ShieldCheck className="h-[18px] w-[18px]" />
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+              <ShieldCheck className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">待主管审批 / RFQ</p>
@@ -480,34 +481,37 @@ export function QuotationsPage(): React.JSX.Element {
           </div>
         </Card>
         <Card className="p-4">
-          <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft text-gold" aria-hidden>
-              <CheckCircle2 className="h-[18px] w-[18px]" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-muted-foreground">已成交报价额</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em] text-primary">
-                {formatMoney(summary?.acceptedAmount ?? 0, 'USD')}
-              </p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">成交 {summary?.accepted ?? 0} 份</p>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+                <CheckCircle2 className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="whitespace-nowrap text-xs font-medium text-muted-foreground">已成交报价额</p>
+                <p className="mt-1 whitespace-nowrap text-xl font-bold leading-none tabular-nums tracking-[-0.03em] text-foreground">
+                  {formatMoney(summary?.acceptedAmount ?? 0, 'USD')}
+                </p>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">成交 {summary?.accepted ?? 0} 份</p>
+              </div>
             </div>
+            <MiniSparkline values={[0, summary?.draft ?? 0, (summary?.sent ?? 0) + (summary?.negotiating ?? 0), summary?.accepted ?? 0]} className="hidden 2xl:block w-16 shrink-0" />
           </div>
         </Card>
       </div>
 
       {/* Mode Tabs */}
-      <nav className="flex flex-wrap items-center gap-4 border-b border-border">
+      <nav className="flex flex-wrap items-center gap-5 border-b border-border">
         {([
-          ['builder', '创建 / 编辑外贸报价单'],
+          ['builder', '创建报价'],
           ['rfq', `非标定制 RFQ 核价表 (${rfqs.length})`],
-          ['list', `全部报价单与审批 (${quotations.length})`],
+          ['list', `全部报价与审批 (${quotations.length})`],
         ] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"
             onClick={() => setTab(key)}
             className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
-              tab === key ? 'border-primary font-semibold text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+              tab === key ? 'border-foreground font-semibold text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
             {label}
@@ -515,11 +519,11 @@ export function QuotationsPage(): React.JSX.Element {
         ))}
       </nav>
 
-      {/* TAB 1: Standard 3-Column Quotation Builder */}
+      {/* TAB 1: Standard 3-Column Quotation Builder (active from xl 1280px+) */}
       {tab === 'builder' ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] 2xl:grid-cols-[16.5rem_minmax(0,1fr)_20rem] 2xl:items-start">
+        <div className="grid gap-4 xl:grid-cols-[248px_minmax(0,1fr)_296px] xl:items-start">
           {/* Left: Customer & Product Picker */}
-          <div className="grid gap-4 md:grid-cols-2 lg:col-span-2 2xl:col-span-1 2xl:grid-cols-1">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">选择报价客户</CardTitle>
@@ -618,7 +622,7 @@ export function QuotationsPage(): React.JSX.Element {
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
                 <div>
                   <Label>币种</Label>
                   <Select value={currency} onValueChange={(v) => setCurrency(v as QuotationCurrency)}>
@@ -629,7 +633,7 @@ export function QuotationsPage(): React.JSX.Element {
                   </Select>
                 </div>
                 <div>
-                  <Label>贸易条款 Incoterm</Label>
+                  <Label>贸易条款 (Incoterm)</Label>
                   <Select value={incoterm} onValueChange={(v) => setIncoterm(v as QuotationIncoterm)}>
                     <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -679,11 +683,11 @@ export function QuotationsPage(): React.JSX.Element {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-muted/50 text-[11px] text-muted-foreground">
                       <tr>
-                        <th className="p-2">产品名称 / 规格</th>
-                        <th className="w-24 p-2">数量</th>
-                        <th className="w-24 p-2">单价 ({currency})</th>
-                        <th className="w-24 p-2">核价状态</th>
-                        <th className="w-24 p-2 text-right">小计</th>
+                        <th className="min-w-[9.5rem] whitespace-nowrap p-2">产品名称 / 规格</th>
+                        <th className="w-20 whitespace-nowrap p-2">数量</th>
+                        <th className="w-24 whitespace-nowrap p-2">单价 ({currency})</th>
+                        <th className="w-24 whitespace-nowrap p-2">核价状态</th>
+                        <th className="w-20 whitespace-nowrap p-2 text-right">小计</th>
                         <th className="w-9 p-2" />
                       </tr>
                     </thead>
@@ -794,7 +798,35 @@ export function QuotationsPage(): React.JSX.Element {
                 ) : null}
 
                 {!quoteCheck ? (
-                  <p className="text-muted-foreground">添加产品并点击「实时体检」，查看目录价偏差、毛利率预警和风险提示。</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3.5 rounded-lg border border-border/80 bg-surface/60 p-3">
+                      <HealthRing
+                        score={
+                          [Boolean(customerId), Boolean(title.trim()), rows.some((r) => r.productName.trim()), Boolean(incoterm), Boolean(paymentTerms.trim())].filter(Boolean).length * 20
+                        }
+                        label="完整度"
+                        size={64}
+                        strokeWidth={5.5}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground">制单前要素核对</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">点击右上角「实时体检」对照产品阶梯价校验</p>
+                      </div>
+                    </div>
+                    <ul className="space-y-1.5 text-[11.5px]">
+                      {[
+                        ['报价客户已关联', Boolean(customerId)],
+                        ['报价标题已填写', Boolean(title.trim())],
+                        ['商品明细已录入', rows.some((r) => r.productName.trim())],
+                        ['贸易与付款条款规范', Boolean(incoterm && paymentTerms.trim())],
+                      ].map(([lbl, ok]) => (
+                        <li key={String(lbl)} className="flex items-center justify-between text-muted-foreground">
+                          <span className={ok ? 'text-foreground' : undefined}>{lbl}</span>
+                          <span className={ok ? 'font-medium text-mint' : 'text-muted-foreground'}>{ok ? '✓ 已就绪' : '待完善'}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     <div className="rounded-md bg-muted/50 p-2 font-medium">

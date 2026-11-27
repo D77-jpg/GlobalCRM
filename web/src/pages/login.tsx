@@ -1,8 +1,9 @@
 /**
- * 登录页 — Atelier Trade 高端外贸品牌入口
+ * 登录页 — Gallery White & Charcoal 现代商务双栏架构
  * ------------------------------------------------------------------
- * 温润象牙白与深森林绿视觉语言，完整保留密码登录、记住用户名、
- * 邮箱两步验证 OTP、忘记密码弹窗、语言/主题切换与公开合规链接。
+ * 微暖画廊白与深炭黑极简分栏：左侧建筑感网格画布与真实核心工作流概览，
+ * 右侧纯净高对比度认证工作区。100% 保留密码登录、记住用户名、邮箱 OTP 两步验证、
+ * 忘记密码弹窗、语言/深浅色切换及公开合规入口。
  */
 import * as React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -12,17 +13,15 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   ArrowRight,
+  CheckCircle2,
   Eye,
   EyeOff,
-  FileText,
-  Factory,
-  Handshake,
-  Inbox,
+  Layers,
   LockKeyhole,
   Mail,
   MailCheck,
   ShieldCheck,
-  Truck,
+  Sparkles,
   UserRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -43,30 +42,18 @@ import { readStorage, writeStorage } from '@/lib/utils';
 
 const REMEMBER_KEY = 'cdlm-remembered-username';
 
-const FLOW_STEPS: Array<{
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  en: string;
-}> = [
-  { icon: Inbox, label: '询盘', en: 'Inquiry' },
-  { icon: FileText, label: '报价', en: 'Quotation' },
-  { icon: Handshake, label: '订单', en: 'Order' },
-  { icon: Factory, label: '生产', en: 'Production' },
-  { icon: Truck, label: '出货', en: 'Shipping' },
-];
-
 function LoginMark(): React.JSX.Element {
   return (
-    <span className="brand-mark flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white">
-      <svg viewBox="0 0 28 28" fill="none" className="h-6 w-6" aria-hidden>
+    <span className="brand-mark flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+      <svg viewBox="0 0 28 28" fill="none" className="h-4.5 w-4.5" aria-hidden>
         <path
-          d="M14 4.5a9.5 9.5 0 1 0 9.5 9.5H15.5"
-          stroke="#E8D7A8"
-          strokeWidth="2.2"
+          d="M14 5a9 9 0 1 0 9 9h-7.2"
+          stroke="currentColor"
+          strokeWidth="2.4"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <circle cx="14" cy="14" r="2.2" fill="currentColor" />
+        <circle cx="14" cy="14" r="2" fill="currentColor" />
       </svg>
     </span>
   );
@@ -74,35 +61,57 @@ function LoginMark(): React.JSX.Element {
 
 function BrandLockup(): React.JSX.Element {
   return (
-    <div className="flex items-center gap-3 text-foreground">
+    <div className="flex items-center gap-2.5 text-foreground">
       <LoginMark />
       <div className="min-w-0">
-        <p className="text-[15px] font-bold leading-5 tracking-[0.04em]">{PRODUCT_NAME_UPPER}</p>
+        <p className="text-[14px] font-bold leading-4 tracking-[0.04em]">{PRODUCT_NAME_UPPER}</p>
         <p className="mt-0.5 truncate text-[11px] leading-4 text-muted-foreground">{PRODUCT_TAGLINE_EN}</p>
       </div>
     </div>
   );
 }
 
-function FlowStep({
-  icon: Icon,
-  label,
-  en,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  en: string;
-}): React.JSX.Element {
-  return (
-    <div className="flex min-w-0 flex-col items-center text-center">
-      <span className="flex h-[58px] w-[58px] items-center justify-center rounded-2xl border border-primary/15 bg-card/95 text-primary shadow-card backdrop-blur-md">
-        <Icon className="h-5 w-5" aria-hidden />
-      </span>
-      <span className="mt-2.5 text-[13.5px] font-semibold leading-4 text-foreground">{label}</span>
-      <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{en}</span>
-    </div>
-  );
-}
+const CAPABILITY_ROWS_ZH = [
+  {
+    code: '01',
+    title: '客户发现与海关贸易情报',
+    desc: '多维检索目标市场采购商，AI 评估匹配度并沉淀项目独立线索池',
+    tag: '三栏研究工作台',
+  },
+  {
+    code: '02',
+    title: '三栏邮件中心与全渠道副驾驶',
+    desc: '联动项目知识库与对外口径红线，一键起草多版专业商务回复',
+    tag: '口径实时核验',
+  },
+  {
+    code: '03',
+    title: '阶梯核价、RFQ 与自动开发流水线',
+    desc: '衔接产品规格阶梯价、非标核价审批及 0 / 3 / 7 天多轮跟进节奏',
+    tag: '人工审核护栏',
+  },
+];
+
+const CAPABILITY_ROWS_EN = [
+  {
+    code: '01',
+    title: 'Prospect Discovery & Trade Intelligence',
+    desc: 'Identify global buyers with customs records and AI match scoring in an isolated pool.',
+    tag: '3-Pane Research',
+  },
+  {
+    code: '02',
+    title: 'Omnichannel & Mail AI Copilot',
+    desc: 'Draft multi-version replies grounded in approved project knowledge and policy guardrails.',
+    tag: 'Guardrail Verified',
+  },
+  {
+    code: '03',
+    title: 'Tiered Quotations, RFQ & Auto-Outreach',
+    desc: 'Connect SKU price tiers, custom RFQ approvals, and 0/3/7-day multi-touch sequences.',
+    tag: 'Human-in-the-Loop',
+  },
+];
 
 export function LoginPage(): React.JSX.Element {
   const { t, language } = useI18n();
@@ -208,255 +217,333 @@ export function LoginPage(): React.JSX.Element {
   };
 
   const remember = watch('remember');
+  const capabilityRows = language === 'zh' ? CAPABILITY_ROWS_ZH : CAPABILITY_ROWS_EN;
 
   return (
-    <div className="login-page relative min-h-screen overflow-hidden bg-background text-foreground">
-      <img
-        src="/login/export-logistics.jpg"
-        alt=""
-        className="absolute inset-0 h-full w-full object-cover object-center opacity-25 dark:opacity-15"
-      />
-      {/* Warm ivory & forest-emerald architectural atmosphere */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_90%_at_12%_18%,hsl(45_28%_96%_/_0.96)_0%,hsl(45_22%_95%_/_0.88)_55%,hsl(148_30%_20%_/_0.12)_100%)] dark:bg-[radial-gradient(70%_90%_at_12%_18%,hsl(150_14%_7%_/_0.95)_0%,hsl(150_12%_8%_/_0.88)_60%,hsl(148_36%_18%_/_0.35)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background/85 to-transparent" />
+    <div className="login-page grid min-h-screen w-full grid-cols-1 bg-background text-foreground lg:grid-cols-[1.08fr_0.92fr]">
+      {/* Left Architectural Gallery Showcase */}
+      <section
+        aria-label="产品介绍"
+        className="relative hidden flex-col justify-between overflow-hidden border-r border-border bg-sidebar p-10 xl:p-14 lg:flex"
+      >
+        {/* Subtle 28px architectural grid hairline pattern */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.38] dark:opacity-[0.18]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, hsl(var(--border)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--border)) 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
+            maskImage: 'radial-gradient(ellipse 85% 80% at 35% 45%, #000 35%, transparent 100%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 85% 80% at 35% 45%, #000 35%, transparent 100%)',
+          }}
+        />
 
-      <header className="absolute inset-x-0 top-0 z-20">
-        <div className="mx-auto flex h-[84px] max-w-[1560px] items-center justify-between px-5 sm:px-8 lg:px-12 xl:px-20">
+        <div className="relative z-10">
           <BrandLockup />
-          <div className="flex items-center gap-2">
-            <LanguageToggle />
-            <ThemeToggle />
-          </div>
         </div>
-      </header>
 
-      <main className="relative z-10 mx-auto grid min-h-screen w-full max-w-[1560px] grid-cols-1 items-center gap-10 px-5 pb-12 pt-28 sm:px-8 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-14 lg:px-12 lg:pb-16 lg:pt-24 xl:grid-cols-[minmax(0,1fr)_496px] xl:px-20">
-        <section className="hidden min-w-0 lg:block" aria-label="产品介绍">
-          <div className="max-w-[700px]">
-            <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-soft/80 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-primary">
-              FROM INQUIRY TO GLOBAL GROWTH
-            </span>
-            <h1 className="mt-6 text-[clamp(2.85rem,4.1vw,4.35rem)] font-semibold leading-[1.04] tracking-[-0.045em] text-foreground">
-              Simplify
-              <br />
-              Your Export Business.
-              <br />
-              <span className="text-primary">All in One CRM.</span>
-            </h1>
-            <p className="mt-6 max-w-[560px] text-[15px] leading-7 text-muted-foreground">
-              {language === 'zh'
-                ? '从客户发现、智能开发、邮件与全渠道沟通，到精准报价与订单交付——在高度隔离的多品牌外贸工作台中，以 AI 副驾驶驱动每一次专业成交。'
-                : 'From prospecting and automated outreach to omnichannel communication, quotations, and fulfillment — orchestrate every global trade milestone in one project-isolated workspace.'}
-            </p>
+        <div className="relative z-10 my-auto max-w-[580px] py-8">
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-muted-foreground shadow-sm">
+            <Sparkles className="h-3 w-3 text-foreground" aria-hidden />
+            AI-NATIVE B2B TRADE WORKSPACE
+          </span>
 
-            <div className="mt-10 flex max-w-[640px] items-start justify-between gap-2 xl:mt-12">
-              {FLOW_STEPS.map((step, index) => (
-                <React.Fragment key={step.en}>
-                  <FlowStep {...step} />
-                  {index < FLOW_STEPS.length - 1 ? (
-                    <ArrowRight className="mt-5 h-4 w-4 shrink-0 text-primary/45" aria-hidden />
-                  ) : null}
-                </React.Fragment>
+          <h1 className="mt-5 text-[clamp(2.15rem,3vw,3rem)] font-semibold leading-[1.14] tracking-[-0.035em] text-foreground">
+            {language === 'zh' ? (
+              <>
+                面向现代外贸团队的
+                <br />
+                <span className="text-muted-foreground">智能客户与成交工作台。</span>
+              </>
+            ) : (
+              <>
+                The intelligent workspace
+                <br />
+                <span className="text-muted-foreground">for global B2B trade.</span>
+              </>
+            )}
+          </h1>
+
+          <p className="mt-4 max-w-[500px] text-[14px] leading-relaxed text-muted-foreground">
+            {language === 'zh'
+              ? '将客户发现、三栏邮件与全渠道沟通、阶梯核价及多轮自动开发收敛于同一套高密度工作空间。各品牌项目上下文严格隔离，每一封对外沟通均可核验。'
+              : 'Unify prospect research, 3-pane mail & omnichannel copilot, tiered quotations, and multi-touch outreach inside a strictly isolated multi-brand workspace.'}
+          </p>
+
+          {/* Architectural Capability Preview Frame */}
+          <div className="mt-8 overflow-hidden rounded-xl border border-border bg-card shadow-card">
+            <div className="flex items-center justify-between border-b border-border bg-surface/80 px-4 py-2.5">
+              <div className="flex items-center gap-1.5" aria-hidden>
+                <span className="h-2 w-2 rounded-full bg-border" />
+                <span className="h-2 w-2 rounded-full bg-border" />
+                <span className="h-2 w-2 rounded-full bg-border" />
+              </div>
+              <span className="font-mono text-[10.5px] text-muted-foreground">
+                GLOBALCRM · WORKSPACE ARCHITECTURE
+              </span>
+              <span className="inline-flex items-center gap-1 text-[10.5px] font-medium text-foreground">
+                <Layers className="h-3 w-3" aria-hidden />
+                {language === 'zh' ? '项目隔离' : 'Isolated'}
+              </span>
+            </div>
+
+            <div className="divide-y divide-border">
+              {capabilityRows.map((row) => (
+                <div key={row.code} className="flex items-start justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-surface/50">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="mt-0.5 rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-muted-foreground">
+                      {row.code}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold leading-snug text-foreground">{row.title}</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{row.desc}</p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-md border border-border bg-surface px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
+                    {row.tag}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
-        </section>
+        </div>
 
-        <section className="mx-auto w-full max-w-[31rem] lg:mx-0 lg:justify-self-end" aria-label="登录">
-          <div className="rounded-[1.5rem] border border-border bg-card/95 p-6 text-card-foreground shadow-[0_28px_72px_-32px_hsl(150_24%_12%_/_0.22),0_2px_10px_hsl(150_20%_12%_/_0.05)] backdrop-blur-xl sm:p-9">
-            <div>
-              <p className="text-[10.5px] font-semibold uppercase tracking-[0.2em] text-primary">
-                {twoFactorChallenge ? 'TWO-FACTOR VERIFICATION' : 'WELCOME BACK'}
-              </p>
-              <h2 className="mt-2 text-[2rem] font-semibold leading-tight tracking-[-0.035em] text-foreground">
-                {twoFactorChallenge ? t('auth.twoFactor') : t('auth.welcome')}
-              </h2>
-              <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                {twoFactorChallenge
-                  ? `${t('auth.twoFactorHint')} · ${twoFactorChallenge.emailHint}`
-                  : t('auth.subtitle')}
-              </p>
-            </div>
+        <div className="relative z-10 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-foreground" aria-hidden />
+            {language === 'zh' ? '多项目品牌严格隔离' : 'Multi-project brand isolation'}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-foreground" aria-hidden />
+            {language === 'zh' ? '对外口径与合规发信护栏' : 'Policy & compliance guardrails'}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-foreground" aria-hidden />
+            {language === 'zh' ? 'HttpOnly 加密会话与双重验证' : 'HttpOnly session & 2FA'}
+          </span>
+        </div>
+      </section>
 
-            {twoFactorChallenge ? (
-              <form className="mt-7 space-y-5" noValidate onSubmit={(event) => void onVerify(event)}>
-                {twoFactorError || otpError ? (
-                  <div role="alert" className="flex gap-2.5 rounded-xl border border-rose/25 bg-rose-soft px-3.5 py-3 text-sm leading-5 text-rose">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                    <div>
-                      <p className="font-medium">验证失败</p>
-                      <p className="mt-0.5 opacity-90">{otpError || twoFactorError}</p>
-                    </div>
+      {/* Right Crisp Authentication Column */}
+      <main className="flex min-h-screen flex-col justify-between bg-card px-6 py-6 sm:px-10 lg:px-14 lg:py-8">
+        <header className="flex items-center justify-between">
+          <div className="lg:invisible">
+            <BrandLockup />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <LanguageToggle />
+            <ThemeToggle />
+          </div>
+        </header>
+
+        <section className="mx-auto my-auto w-full max-w-[380px] py-8" aria-label="登录">
+          <div>
+            <p className="font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              {twoFactorChallenge ? 'TWO-FACTOR VERIFICATION' : 'SIGN IN TO WORKSPACE'}
+            </p>
+            <h2 className="mt-2 text-[1.75rem] font-semibold leading-tight tracking-[-0.032em] text-foreground">
+              {twoFactorChallenge ? t('auth.twoFactor') : t('auth.welcome')}
+            </h2>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">
+              {twoFactorChallenge
+                ? `${t('auth.twoFactorHint')} · ${twoFactorChallenge.emailHint}`
+                : t('auth.subtitle')}
+            </p>
+          </div>
+
+          {twoFactorChallenge ? (
+            <form className="mt-7 space-y-4" noValidate onSubmit={(event) => void onVerify(event)}>
+              {twoFactorError || otpError ? (
+                <div role="alert" className="flex gap-2.5 rounded-lg border border-rose/25 bg-rose-soft px-3.5 py-2.5 text-xs leading-5 text-rose">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <div>
+                    <p className="font-medium">验证失败</p>
+                    <p className="mt-0.5 opacity-90">{otpError || twoFactorError}</p>
                   </div>
-                ) : null}
-
-                <div>
-                  <Label htmlFor="login-otp">{t('auth.twoFactor')}</Label>
-                  <div className="relative mt-1.5">
-                    <MailCheck className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <Input
-                      id="login-otp"
-                      className="h-[50px] rounded-xl pl-12 pr-4 text-center text-[20px] tracking-[0.45em]"
-                      placeholder="000000"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      maxLength={6}
-                      autoFocus
-                      value={otp}
-                      onChange={(event) => {
-                        setOtp(event.target.value.replace(/\D/g, '').slice(0, 6));
-                        setOtpError(null);
-                      }}
-                    />
-                  </div>
-                  <FieldMessage hint={t('auth.twoFactorHint')} className="pl-1" />
                 </div>
+              ) : null}
 
-                <Button type="submit" className="login-submit h-[50px] w-full rounded-xl text-[15px] font-semibold" size="lg" loading={verifyingTwoFactor} disabled={verifyingTwoFactor || otp.length !== 6}>
-                  {verifyingTwoFactor ? t('common.loading') : (
-                    <>
-                      {t('auth.verify')}
-                      <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
-                    </>
-                  )}
-                </Button>
+              <div>
+                <Label htmlFor="login-otp">{t('auth.twoFactor')}</Label>
+                <div className="relative mt-1.5">
+                  <MailCheck className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  <Input
+                    id="login-otp"
+                    className="h-11 rounded-lg pl-10 pr-4 text-center font-mono text-lg tracking-[0.42em]"
+                    placeholder="000000"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    autoFocus
+                    value={otp}
+                    onChange={(event) => {
+                      setOtp(event.target.value.replace(/\D/g, '').slice(0, 6));
+                      setOtpError(null);
+                    }}
+                  />
+                </div>
+                <FieldMessage hint={t('auth.twoFactorHint')} className="pl-0.5" />
+              </div>
 
-                <button
-                  type="button"
-                  onClick={handleBackToPassword}
-                  className="w-full text-center text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
-                >
-                  {t('auth.backLogin')}
-                </button>
-              </form>
-            ) : (
-              <form
-                className="mt-7 space-y-4"
-                noValidate
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void handleSubmit(onSubmit)();
-                }}
+              <Button
+                type="submit"
+                className="login-submit h-10 w-full rounded-lg text-sm font-medium"
+                loading={verifyingTwoFactor}
+                disabled={verifyingTwoFactor || otp.length !== 6}
               >
-                {loginError ? (
-                  <div role="alert" className="flex gap-2.5 rounded-xl border border-rose/25 bg-rose-soft px-3.5 py-3 text-sm leading-5 text-rose">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                    <div>
-                      <p className="font-medium">登录失败</p>
-                      <p className="mt-0.5 opacity-90">{loginError}</p>
-                    </div>
-                  </div>
-                ) : null}
+                {verifyingTwoFactor ? t('common.loading') : (
+                  <>
+                    {t('auth.verify')}
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  </>
+                )}
+              </Button>
 
-                <div>
-                  <Label htmlFor="login-username" className="sr-only">
-                    {t('auth.username')}
-                  </Label>
-                  <div className="relative">
-                    <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <Input
-                      id="login-username"
-                      className="h-[48px] rounded-xl pl-11 pr-4 text-[14.5px]"
-                      placeholder={t('auth.username')}
-                      autoComplete="username"
-                      autoFocus
-                      invalid={Boolean(errors.username)}
-                      {...register('username')}
-                    />
+              <button
+                type="button"
+                onClick={handleBackToPassword}
+                className="w-full text-center text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+              >
+                {t('auth.backLogin')}
+              </button>
+            </form>
+          ) : (
+            <form
+              className="mt-7 space-y-4"
+              noValidate
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSubmit(onSubmit)();
+              }}
+            >
+              {loginError ? (
+                <div role="alert" className="flex gap-2.5 rounded-lg border border-rose/25 bg-rose-soft px-3.5 py-2.5 text-xs leading-5 text-rose">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <div>
+                    <p className="font-medium">登录失败</p>
+                    <p className="mt-0.5 opacity-90">{loginError}</p>
                   </div>
-                  <FieldMessage error={errors.username?.message} className="pl-1" />
                 </div>
+              ) : null}
 
-                <div>
-                  <Label htmlFor="login-password" className="sr-only">
+              <div>
+                <Label htmlFor="login-username" className="mb-1.5 block text-xs font-medium text-foreground">
+                  {t('auth.username')}
+                </Label>
+                <div className="relative">
+                  <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  <Input
+                    id="login-username"
+                    className="h-10 rounded-lg bg-background/60 pl-9 pr-3.5 text-sm"
+                    placeholder={t('auth.username')}
+                    autoComplete="username"
+                    autoFocus
+                    invalid={Boolean(errors.username)}
+                    {...register('username')}
+                  />
+                </div>
+                <FieldMessage error={errors.username?.message} className="pl-0.5" />
+              </div>
+
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <Label htmlFor="login-password" className="text-xs font-medium text-foreground">
                     {t('auth.password')}
                   </Label>
-                  <div className="relative">
-                    <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <Input
-                      id="login-password"
-                      type={showPassword ? 'text' : 'password'}
-                      className="h-[48px] rounded-xl pl-11 pr-11 text-[14.5px]"
-                      placeholder={t('auth.password')}
-                      autoComplete="current-password"
-                      invalid={Boolean(errors.password)}
-                      {...register('password')}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((visible) => !visible)}
-                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
-                      aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                    >
-                      {showPassword ? <EyeOff className="h-[18px] w-[18px]" aria-hidden /> : <Eye className="h-[18px] w-[18px]" aria-hidden />}
-                    </button>
-                  </div>
-                  <FieldMessage error={errors.password?.message} className="pl-1" />
-                </div>
-
-                <div className="flex items-center justify-between gap-3 pt-1">
-                  <label htmlFor="login-remember" className="flex cursor-pointer items-center gap-2 text-[13px] text-muted-foreground">
-                    <Checkbox
-                      id="login-remember"
-                      checked={Boolean(remember)}
-                      onCheckedChange={(checked) => setValue('remember', checked === true)}
-                    />
-                    {language === 'zh' ? '记住用户名' : 'Remember username'}
-                  </label>
                   <button
                     type="button"
                     onClick={() => setForgotOpen(true)}
-                    className="text-[13px] font-medium text-primary transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+                    className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
                   >
                     {t('auth.forgot')}
                   </button>
                 </div>
+                <div className="relative">
+                  <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  <Input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    className="h-10 rounded-lg bg-background/60 pl-9 pr-10 text-sm"
+                    placeholder={t('auth.password')}
+                    autoComplete="current-password"
+                    invalid={Boolean(errors.password)}
+                    {...register('password')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+                    aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+                  </button>
+                </div>
+                <FieldMessage error={errors.password?.message} className="pl-0.5" />
+              </div>
 
-                <Button type="submit" className="login-submit mt-2 h-[50px] w-full rounded-xl text-[15px] font-semibold" size="lg" loading={loggingIn} disabled={loggingIn}>
-                  {loggingIn ? t('auth.loggingIn') : (
-                    <>
-                      {t('auth.login')}
-                      <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
-                    </>
-                  )}
-                </Button>
-              </form>
-            )}
+              <div className="flex items-center justify-between pt-0.5">
+                <label htmlFor="login-remember" className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    id="login-remember"
+                    checked={Boolean(remember)}
+                    onCheckedChange={(checked) => setValue('remember', checked === true)}
+                  />
+                  {language === 'zh' ? '记住用户名' : 'Remember username'}
+                </label>
+              </div>
 
-            <div className="my-6 flex items-center gap-3">
-              <span className="h-px flex-1 bg-border" aria-hidden />
-              <span className="text-[11px] text-muted-foreground">{language === 'zh' ? '或' : 'or'}</span>
-              <span className="h-px flex-1 bg-border" aria-hidden />
-            </div>
+              <Button
+                type="submit"
+                className="login-submit mt-1 h-10 w-full rounded-lg text-sm font-medium"
+                loading={loggingIn}
+                disabled={loggingIn}
+              >
+                {loggingIn ? t('auth.loggingIn') : (
+                  <>
+                    {t('auth.login')}
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  </>
+                )}
+              </Button>
+            </form>
+          )}
 
-            <button
-              type="button"
-              onClick={() => toast.info(language === 'zh' ? '请联系系统管理员开通账号' : 'Contact your system administrator to request an account')}
-              className="flex h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-border bg-surface text-[13.5px] font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-primary-soft/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-            >
-              <Mail className="h-4 w-4 text-primary" aria-hidden />
-              {language === 'zh' ? '联系管理员开通账号' : 'Request an account'}
-            </button>
-
-            <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11px] leading-5 text-muted-foreground">
-              <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden />
-              仅限授权成员使用 · 登录信息加密传输
-            </p>
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              {features.publicPricing ? (
-                <>
-                  <Link className="hover:text-foreground" to={ROUTES.pricing}>{language === 'zh' ? '价格与套餐' : 'Pricing'}</Link>
-                  <span aria-hidden>·</span>
-                </>
-              ) : null}
-              <Link className="hover:text-foreground" to={ROUTES.help}>{language === 'zh' ? '帮助中心' : 'Help center'}</Link>
-              <span aria-hidden>·</span>
-              <Link className="hover:text-foreground" to={`${ROUTES.legal}/terms`}>{language === 'zh' ? '服务条款' : 'Terms'}</Link>
-              <span aria-hidden>·</span>
-              <Link className="hover:text-foreground" to={`${ROUTES.legal}/privacy`}>{language === 'zh' ? '隐私政策' : 'Privacy'}</Link>
-            </div>
+          <div className="my-5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-border" aria-hidden />
+            <span className="text-[11px] text-muted-foreground">{language === 'zh' ? '或' : 'or'}</span>
+            <span className="h-px flex-1 bg-border" aria-hidden />
           </div>
+
+          <button
+            type="button"
+            onClick={() => toast.info(language === 'zh' ? '请联系系统管理员开通账号' : 'Contact your system administrator to request an account')}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface text-xs font-medium text-foreground transition-colors hover:border-foreground/25 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <Mail className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+            {language === 'zh' ? '联系管理员开通账号' : 'Request an account'}
+          </button>
         </section>
+
+        <footer className="space-y-2 text-center">
+          <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5 text-foreground/75" aria-hidden />
+            {language === 'zh' ? '仅限授权成员使用 · 登录信息加密传输' : 'Authorized personnel only · Encrypted session'}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {features.publicPricing ? (
+              <>
+                <Link className="hover:text-foreground" to={ROUTES.pricing}>{language === 'zh' ? '价格与套餐' : 'Pricing'}</Link>
+                <span aria-hidden>·</span>
+              </>
+            ) : null}
+            <Link className="hover:text-foreground" to={ROUTES.help}>{language === 'zh' ? '帮助中心' : 'Help center'}</Link>
+            <span aria-hidden>·</span>
+            <Link className="hover:text-foreground" to={`${ROUTES.legal}/terms`}>{language === 'zh' ? '服务条款' : 'Terms'}</Link>
+            <span aria-hidden>·</span>
+            <Link className="hover:text-foreground" to={`${ROUTES.legal}/privacy`}>{language === 'zh' ? '隐私政策' : 'Privacy'}</Link>
+          </div>
+        </footer>
       </main>
 
       <ForgotPasswordDialog open={forgotOpen} onOpenChange={setForgotOpen} />

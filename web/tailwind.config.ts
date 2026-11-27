@@ -4,8 +4,8 @@ import animate from 'tailwindcss-animate';
 /**
  * Tailwind 配置
  * ------------------------------------------------------------------
- * Atelier Trade 设计系统：温润象牙白画布 + 暖石侧栏 + 深森林绿品牌主色 + 克制古铜金点缀。
- * 深色模式通过 .dark 下的语义变量自动切换。
+ * Gallery White & Charcoal 设计系统（Notion / Claude 微暖画廊白 + 利落现代商务炭黑）：
+ * 10px–12px 干练圆角、1px 精细建筑感分割线、高对比度墨黑主交互、克制低饱和语义点缀。
  */
 export default {
   darkMode: ['class'],
@@ -90,15 +90,15 @@ export default {
       borderRadius: {
         xl: 'calc(var(--radius) + 2px)',
         lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 4px)',
-        sm: 'calc(var(--radius) - 6px)',
-        '4xl': '2rem',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+        '4xl': '1.5rem',
       },
       boxShadow: {
         card: 'var(--shadow-card)',
         island: 'var(--shadow-island)',
         pop: 'var(--shadow-pop)',
-        soft: '0 2px 8px -4px hsl(150 22% 14% / 0.08), 0 1px 2px hsl(150 22% 14% / 0.04)',
+        soft: '0 1px 2px hsl(40 10% 10% / 0.04), 0 4px 12px -6px hsl(40 10% 10% / 0.06)',
       },
       fontFamily: {
         sans: [
@@ -124,11 +124,11 @@ export default {
           to: { height: '0' },
         },
         'fade-in': {
-          from: { opacity: '0', transform: 'translateY(6px)' },
+          from: { opacity: '0', transform: 'translateY(4px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
         'pop-in': {
-          from: { opacity: '0', transform: 'scale(.97)' },
+          from: { opacity: '0', transform: 'scale(.98)' },
           to: { opacity: '1', transform: 'scale(1)' },
         },
         shimmer: {
@@ -136,10 +136,10 @@ export default {
         },
       },
       animation: {
-        'accordion-down': 'accordion-down 0.2s ease-out',
-        'accordion-up': 'accordion-up 0.2s ease-out',
-        'fade-in': 'fade-in 0.28s cubic-bezier(.22,.68,.34,1)',
-        'pop-in': 'pop-in 0.16s ease-out',
+        'accordion-down': 'accordion-down 0.18s ease-out',
+        'accordion-up': 'accordion-up 0.18s ease-out',
+        'fade-in': 'fade-in 0.22s cubic-bezier(.22,.68,.34,1)',
+        'pop-in': 'pop-in 0.14s ease-out',
       },
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],

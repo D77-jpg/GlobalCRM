@@ -45,14 +45,14 @@ function GlobalSearch(): React.JSX.Element {
   }
 
   return (
-    <form onSubmit={submit} role="search" className="relative hidden w-full max-w-[26rem] md:block">
+    <form onSubmit={submit} role="search" className="relative hidden min-w-[13.5rem] max-w-[25rem] flex-1 md:block">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
       <input
         value={value}
         onChange={(event) => setValue(event.target.value)}
         aria-label={t('header.searchAria')}
-        placeholder={language === 'zh' ? '搜索客户、公司、邮件或报价…' : 'Search customers, mail, quotes…'}
-        className="h-9 w-full rounded-xl border border-border/80 bg-surface pl-9 pr-14 text-xs text-foreground outline-none transition-[border-color,background-color,box-shadow] placeholder:text-muted-foreground/80 hover:border-foreground/20 hover:bg-card focus:border-primary/50 focus:bg-card focus:ring-2 focus:ring-primary/15"
+        placeholder={language === 'zh' ? '搜索客户、邮件或报价…' : 'Search customers, mail, quotes…'}
+        className="h-9 w-full rounded-xl border border-border/80 bg-surface pl-9 pr-16 text-xs text-foreground outline-none transition-[border-color,background-color,box-shadow] placeholder:text-muted-foreground/80 hover:border-foreground/20 hover:bg-card focus:border-primary/50 focus:bg-card focus:ring-2 focus:ring-primary/15"
       />
       <button
         type="button"
@@ -162,11 +162,11 @@ export function Header({ onOpenMobileNav, sidebarCollapsed, onToggleSidebar }: H
               aria-label={agentOpen ? t('header.assistantClose') : t('header.assistantOpen')}
               aria-expanded={agentOpen}
               className={cn(
-                'h-8.5 gap-1.5 rounded-lg px-3 text-xs font-semibold shadow-sm',
-                agentOpen && 'ring-2 ring-primary/30 ring-offset-1 ring-offset-card',
+                'h-8 gap-1.5 rounded-lg px-3 text-xs font-medium shadow-sm',
+                agentOpen && 'ring-2 ring-foreground/20 ring-offset-1 ring-offset-card',
               )}
             >
-              <Sparkles className="h-3.5 w-3.5 text-[#E8D7A8]" aria-hidden />
+              <Sparkles className="h-3.5 w-3.5" aria-hidden />
               <span className="hidden sm:inline">{language === 'zh' ? 'AI 助手' : 'AI Assistant'}</span>
             </Button>
           </TooltipTrigger>

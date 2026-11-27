@@ -182,7 +182,7 @@ export function CustomerWorkbenchSidebar({
                   strokeDasharray={ringStroke}
                   strokeDashoffset={ringOffset}
                   strokeLinecap="round"
-                  className={computedIntentScore >= 75 ? 'text-primary' : computedIntentScore >= 45 ? 'text-amberx' : 'text-muted-foreground'}
+                  className={computedIntentScore >= 75 ? 'text-foreground' : computedIntentScore >= 45 ? 'text-amberx' : 'text-muted-foreground'}
                 />
               </svg>
               <div className="absolute flex flex-col items-center">

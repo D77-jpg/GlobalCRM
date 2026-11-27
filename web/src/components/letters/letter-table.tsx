@@ -34,6 +34,7 @@ export interface LetterTableProps {
   loading: boolean;
   error: string | null;
   selectedIds: string[];
+  activeId?: string | null;
   sortBy: LetterSortField;
   sortOrder: 'asc' | 'desc';
   hasFilters: boolean;
@@ -41,6 +42,7 @@ export interface LetterTableProps {
   onSort: (field: LetterSortField) => void;
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: (ids: string[]) => void;
+  onSelectActive?: (letter: DevelopmentLetter) => void;
   onView: (letter: DevelopmentLetter) => void;
   onResend: (letter: DevelopmentLetter) => void;
   onDelete: (letter: DevelopmentLetter) => void;
@@ -59,6 +61,7 @@ export function LetterTable({
   loading,
   error,
   selectedIds,
+  activeId = null,
   sortBy,
   sortOrder,
   hasFilters,
@@ -66,6 +69,7 @@ export function LetterTable({
   onSort,
   onToggleSelect,
   onToggleSelectAll,
+  onSelectActive,
   onView,
   onResend,
   onDelete,
@@ -247,30 +251,42 @@ export function LetterTable({
                     aria-label="全选本页"
                   />
                 </TableHead>
-                <SortableHeader field="subject" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort} className="min-w-[12rem]">
+                <SortableHeader field="subject" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort} className="min-w-[10.5rem]">
                   主题 / 正文摘要
                 </SortableHeader>
-                <TableHead className="min-w-[9.5rem]">收件人</TableHead>
-                <TableHead className="min-w-[7rem]">所属客户</TableHead>
+                <TableHead className="min-w-[8.5rem]">收件人</TableHead>
+                <TableHead className={onSelectActive ? 'hidden min-w-[6.5rem] 2xl:table-cell' : 'min-w-[6.5rem]'}>所属客户</TableHead>
                 <SortableHeader field="status" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort}>
                   状态
                 </SortableHeader>
-                <TableHead className="whitespace-nowrap">发送方式</TableHead>
+                <TableHead className={onSelectActive ? 'hidden whitespace-nowrap 2xl:table-cell' : 'whitespace-nowrap'}>发送方式</TableHead>
                 <SortableHeader field="sentAt" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort} className="whitespace-nowrap">
                   发送时间
                 </SortableHeader>
-                <TableHead className="w-[7.75rem] whitespace-nowrap pr-3 text-right">操作</TableHead>
+                <TableHead className="w-[7.25rem] whitespace-nowrap pr-3 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               {letters.map((letter) => {
                 const selected = selectedIds.includes(letter.id);
+                const isActive = activeId === letter.id;
                 const isInFlight = ['queued', 'scheduled', 'sending', 'retrying'].includes(letter.status);
                 const isUncertain = letter.status === 'failed' && Boolean(letter.needsReview);
                 const locked = isInFlight || isUncertain;
                 return (
-                  <TableRow key={letter.id} data-state={selected ? 'selected' : undefined}>
+                  <TableRow
+                    key={letter.id}
+                    data-state={selected ? 'selected' : undefined}
+                    onClick={() => onSelectActive?.(letter)}
+                    className={
+                      isActive
+                        ? 'cursor-pointer bg-surface/85 shadow-[inset_2px_0_0_hsl(var(--foreground))]'
+                        : onSelectActive
+                          ? 'cursor-pointer'
+                          : undefined
+                    }
+                  >
                     <TableCell className="pl-3">
                       <Checkbox
                         checked={selected}
@@ -306,7 +322,7 @@ export function LetterTable({
                       </a>
                     </TableCell>
 
-                    <TableCell>
+                    <TableCell className={onSelectActive ? 'hidden 2xl:table-cell' : undefined}>
                       {letter.customer ? (
                         <Link
                           to={customerDetailPath(letter.customer.id)}
@@ -341,7 +357,7 @@ export function LetterTable({
                       </div>
                     </TableCell>
 
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    <TableCell className={onSelectActive ? 'hidden whitespace-nowrap text-xs text-muted-foreground 2xl:table-cell' : 'whitespace-nowrap text-xs text-muted-foreground'}>
                       {MAIL_CHANNEL_LABEL[letter.channel] ?? letter.channel}
                     </TableCell>
 

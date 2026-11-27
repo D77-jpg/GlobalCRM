@@ -153,10 +153,10 @@ export function CommandPalette(): React.JSX.Element {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent hideClose className="max-w-xl gap-0 overflow-hidden rounded-2xl border-border p-0 sm:p-0">
+      <DialogContent hideClose className="max-w-xl gap-0 overflow-hidden rounded-xl border-border p-0 sm:p-0">
         <DialogTitle className="sr-only">全局命令搜索</DialogTitle>
         <div className="flex items-center gap-2.5 border-b border-border bg-surface/70 px-4 py-3">
-          <Search className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           <Input
             autoFocus
             value={query}

@@ -63,10 +63,14 @@ export function OnboardingPage(): React.JSX.Element {
       setStatus(await apiGet<OnboardingStatus>('/projects/onboarding'));
     } catch (error) {
       toast.error(t('errors.generic'), { description: toErrorMessage(error) });
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [t]);
 
-  React.useEffect(() => { void load(); }, [load, activeProject?.id]);
+  React.useEffect(() => {
+    void load();
+  }, [load, activeProject?.id]);
 
   const complete = async () => {
     setCompleting(true);
@@ -75,47 +79,88 @@ export function OnboardingPage(): React.JSX.Element {
       toast.success(t('onboarding.completed'));
     } catch (error) {
       toast.error(t('errors.generic'), { description: toErrorMessage(error) });
-    } finally { setCompleting(false); }
+    } finally {
+      setCompleting(false);
+    }
   };
 
   if (loading || !status) {
-    return <div className="workspace-page"><PageHeader title={t('onboarding.title')} description={t('onboarding.subtitle')} />
-      <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading')}</div></div>;
+    return (
+      <div className="workspace-page">
+        <PageHeader title={t('onboarding.title')} description={t('onboarding.subtitle')} />
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t('common.loading')}
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="workspace-page">
-      <PageHeader title={t('onboarding.title')} description={t('onboarding.subtitle')}
-        actions={status.completed ? undefined : (
-          <Button size="sm" loading={completing} disabled={!canManage || !status.ready} onClick={() => void complete()}>
-            <Check className="h-4 w-4" aria-hidden />{completing ? t('onboarding.completing') : t('onboarding.complete')}
-          </Button>
-        )} />
+      <PageHeader
+        title={t('onboarding.title')}
+        description={t('onboarding.subtitle')}
+        actions={
+          status.completed ? undefined : (
+            <Button
+              size="sm"
+              loading={completing}
+              disabled={!canManage || !status.ready}
+              onClick={() => void complete()}
+            >
+              <Check className="h-4 w-4" aria-hidden />
+              {completing ? t('onboarding.completing') : t('onboarding.complete')}
+            </Button>
+          )
+        }
+      />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_21rem] xl:items-start">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_336px] xl:items-start">
         <Card className="overflow-hidden">
-          <CardHeader className="hero-wash border-b border-border/80 pb-4">
+          <CardHeader className="border-b border-border/80 bg-surface/55 pb-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-base">
-                <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-foreground">
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                </span>
                 {status.projectName} · 初始化清单
               </CardTitle>
-              <span className="chip chip-mint font-semibold tabular-nums">
+              <span className="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-semibold tabular-nums text-foreground">
                 {status.doneCount} / {status.totalCount}
               </span>
             </div>
-            <div className="mt-2 flex items-baseline gap-3">
+            <div className="mt-2.5 flex items-baseline gap-3">
               <span className="text-3xl font-bold tabular-nums tracking-[-0.03em] text-foreground">
-                {status.doneCount} <span className="text-lg font-medium text-muted-foreground">/ {status.totalCount}</span>
+                {status.doneCount}{' '}
+                <span className="text-lg font-medium text-muted-foreground">/ {status.totalCount}</span>
               </span>
-              <span className="text-xs text-muted-foreground">{t('onboarding.progress', { done: status.doneCount, total: status.totalCount })}</span>
+              <span className="text-xs text-muted-foreground">
+                {t('onboarding.progress', { done: status.doneCount, total: status.totalCount })}
+              </span>
             </div>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={status.totalCount} aria-valuenow={status.doneCount}>
-              <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${status.totalCount ? (status.doneCount / status.totalCount) * 100 : 0}%` }} />
+            <div
+              className="mt-3 h-2 overflow-hidden rounded-full bg-border/80"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={status.totalCount}
+              aria-valuenow={status.doneCount}
+            >
+              <div
+                className="h-full rounded-full bg-foreground transition-all duration-500"
+                style={{ width: `${status.totalCount ? (status.doneCount / status.totalCount) * 100 : 0}%` }}
+              />
             </div>
             {status.completed ? (
-              <p className="mt-2.5 text-xs font-medium text-primary">
-                {t('onboarding.completed')}{status.completedAt ? ` · ${t('onboarding.completedAt', { date: new Date(status.completedAt).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US') })}` : ''}
+              <p className="mt-2.5 text-xs font-medium text-foreground">
+                {t('onboarding.completed')}
+                {status.completedAt
+                  ? ` · ${t('onboarding.completedAt', {
+                      date: new Date(status.completedAt).toLocaleDateString(
+                        language === 'zh' ? 'zh-CN' : 'en-US',
+                      ),
+                    })}`
+                  : ''}
               </p>
             ) : null}
           </CardHeader>
@@ -124,39 +169,69 @@ export function OnboardingPage(): React.JSX.Element {
               const title = t(STEP_TITLE_KEY[step.key]) || step.title[language];
               const description = t(STEP_DESC_KEY[step.key]) || step.description[language];
               return (
-                <div key={step.key} className="flex flex-col gap-3 rounded-xl border border-border/85 bg-surface/50 p-3.5 transition-colors hover:border-primary/30 sm:flex-row sm:items-center">
-                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${step.done ? 'bg-primary-soft text-primary' : 'bg-muted text-muted-foreground'}`}>
-                    {step.done ? <Check className="h-4 w-4" aria-hidden /> : index + 1}
+                <div
+                  key={step.key}
+                  className="flex flex-col gap-3 rounded-xl border border-border/85 bg-surface/40 p-3.5 transition-colors hover:border-foreground/30 hover:bg-surface/75 sm:flex-row sm:items-center"
+                >
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-xs font-bold tabular-nums ${
+                      step.done
+                        ? 'border-foreground bg-foreground text-background'
+                        : 'border-border bg-card text-muted-foreground'
+                    }`}
+                  >
+                    {step.done ? <Check className="h-4 w-4" aria-hidden /> : `0${index + 1}`}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-[0.875rem] font-semibold text-foreground">
                       {title}
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${step.optional ? 'bg-muted text-muted-foreground' : 'bg-primary-soft text-primary'}`}>
+                      <span
+                        className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
+                          step.optional
+                            ? 'border-border/80 bg-card text-muted-foreground'
+                            : 'border-foreground/20 bg-surface text-foreground'
+                        }`}
+                      >
                         {step.optional ? t('onboarding.optional') : t('onboarding.required')}
                       </span>
                     </p>
                     <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <span className={`chip ${step.done ? 'chip-mint' : 'chip-muted'}`}>
-                      {step.done ? <Check className="h-3 w-3" aria-hidden /> : <Circle className="h-3 w-3" aria-hidden />}
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${
+                        step.done
+                          ? 'border-emerald-200/80 bg-emerald-50/70 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300'
+                          : 'border-border bg-card text-muted-foreground'
+                      }`}
+                    >
+                      {step.done ? (
+                        <Check className="h-3 w-3" aria-hidden />
+                      ) : (
+                        <Circle className="h-3 w-3" aria-hidden />
+                      )}
                       {step.done ? t('common.done') : t('common.pending')}
                     </span>
                     {!step.done ? (
                       <Button type="button" variant="outline" size="sm" onClick={() => navigate(step.href)}>
-                        {t('onboarding.go')}<ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                        {t('onboarding.go')}
+                        <ArrowRight className="h-3.5 w-3.5" aria-hidden />
                       </Button>
                     ) : null}
                   </div>
                 </div>
               );
             })}
-            {!status.completed && !status.ready ? <p className="pt-1 text-xs text-muted-foreground">{t('onboarding.notReady')}</p> : null}
-            {!canManage ? <p className="pt-1 text-xs text-muted-foreground">{t('errors.forbidden')}</p> : null}
+            {!status.completed && !status.ready ? (
+              <p className="pt-1 text-xs text-muted-foreground">{t('onboarding.notReady')}</p>
+            ) : null}
+            {!canManage ? (
+              <p className="pt-1 text-xs text-muted-foreground">{t('errors.forbidden')}</p>
+            ) : null}
           </CardContent>
         </Card>
 
-        <Card className="p-5">
+        <Card className="p-5 xl:sticky xl:top-4">
           <h2 className="section-title">{status.ready ? '准备就绪' : '初始化指引'}</h2>
           <div className="callout-sage mt-3">
             {status.ready
@@ -173,13 +248,13 @@ export function OnboardingPage(): React.JSX.Element {
                 key={link.to}
                 type="button"
                 onClick={() => navigate(link.to)}
-                className="flex w-full items-center justify-between gap-2 rounded-xl border border-border/80 bg-surface/60 p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary-soft/35"
+                className="flex w-full items-center justify-between gap-2 rounded-xl border border-border/80 bg-surface/50 p-3 text-left transition-colors hover:border-foreground/35 hover:bg-surface"
               >
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-foreground">{link.title}</p>
                   <p className="mt-0.5 text-[11px] text-muted-foreground">{link.desc}</p>
                 </div>
-                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-foreground" aria-hidden />
               </button>
             ))}
           </div>

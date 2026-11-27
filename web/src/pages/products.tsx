@@ -1,6 +1,7 @@
 import * as React from 'react';
+import { Link } from 'react-router-dom';
 import {
-  Archive, CheckCircle2, DollarSign, Download, FileSpreadsheet, Layers3, Loader2, PackageOpen, Pencil, Plus, RefreshCw, Search, Trash2, Upload,
+  Archive, ArrowRight, CheckCircle2, DollarSign, Download, FileSpreadsheet, Layers3, Loader2, PackageOpen, Pencil, Plus, ReceiptText, RefreshCw, Search, ShieldCheck, Trash2, Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/common/page-header';
@@ -217,52 +218,40 @@ export function ProductsPage(): React.JSX.Element {
       </>}
     />
 
-    <div className="grid gap-3.5 sm:grid-cols-3">
-      <div className="panel flex items-start gap-3 p-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
-          <PackageOpen className="h-[18px] w-[18px]" />
-        </span>
-        <div>
-          <div className="text-xs font-medium text-muted-foreground">产品总数</div>
-          <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{total}</div>
-          <div className="mt-1.5 text-[11px] text-muted-foreground">当前筛选 {products.length} 条 · 启用 {activeCount} 条</div>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {[
+        { label: '产品总数', value: total, sub: `当前显示 ${products.length} 条`, icon: PackageOpen },
+        { label: '已启用 SKU', value: activeCount, sub: '可供报价工作台调用', icon: CheckCircle2 },
+        { label: '规格参数项', value: specCount, sub: '材质、尺寸、工艺等字段', icon: Layers3 },
+        { label: '阶梯价格档', value: tierCount, sub: '按数量区间严格匹配', icon: DollarSign },
+      ].map((card) => (
+        <div key={card.label} className="panel flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+            <card.icon className="h-4 w-4" />
+          </span>
+          <div>
+            <div className="text-xs font-medium text-muted-foreground">{card.label}</div>
+            <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{card.value}</div>
+            <div className="mt-1.5 text-[11px] text-muted-foreground">{card.sub}</div>
+          </div>
         </div>
-      </div>
-      <div className="panel flex items-start gap-3 p-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
-          <Layers3 className="h-[18px] w-[18px]" />
-        </span>
-        <div>
-          <div className="text-xs font-medium text-muted-foreground">规格字段</div>
-          <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{specCount}</div>
-          <div className="mt-1.5 text-[11px] text-muted-foreground">材质、尺寸、工艺等可引用字段</div>
-        </div>
-      </div>
-      <div className="panel flex items-start gap-3 p-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft text-gold" aria-hidden>
-          <DollarSign className="h-[18px] w-[18px]" />
-        </span>
-        <div>
-          <div className="text-xs font-medium text-muted-foreground">阶梯价档</div>
-          <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{tierCount}</div>
-          <div className="mt-1.5 text-[11px] text-muted-foreground">按数量匹配，不跨档猜测</div>
-        </div>
-      </div>
+      ))}
     </div>
 
-    <div className="panel overflow-hidden">
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_272px]">
+    <div className="panel min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
-        <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="pl-8" placeholder="搜索 SKU、产品名、规格值" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-        <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}><SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部状态</SelectItem><SelectItem value="active">启用</SelectItem><SelectItem value="archived">已归档</SelectItem></SelectContent></Select>
+        <div className="relative min-w-[200px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="h-9 pl-8 text-xs" placeholder="搜索 SKU、产品名、规格值…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
+        <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}><SelectTrigger className="h-9 w-[124px] text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部状态</SelectItem><SelectItem value="active">启用</SelectItem><SelectItem value="archived">已归档</SelectItem></SelectContent></Select>
       </div>
       {error && <div className="m-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
       {loading ? <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />加载产品目录…</div> : products.length === 0 ? <div className="flex flex-col items-center px-6 py-14 text-center">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted"><PackageOpen className="h-5 w-5 text-muted-foreground" aria-hidden /></span>
-        <p className="mt-3 text-sm font-medium">还没有产品</p>
+        <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface"><PackageOpen className="h-5 w-5 text-muted-foreground" aria-hidden /></span>
+        <p className="mt-3 text-sm font-semibold">还没有产品</p>
         <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">{isAdmin ? '可以手工新增，或下载 Excel 模板批量导入产品、规格和价格档。' : '请联系项目管理员维护产品目录后再做报价核对。'}</p>
         {isAdmin ? <div className="mt-4 flex flex-wrap justify-center gap-2"><Button size="sm" variant="outline" onClick={openImportDialog}><Upload className="h-3.5 w-3.5" />批量导入</Button><Button size="sm" onClick={() => setEditing(makeEmptyDraft())}><Plus className="h-3.5 w-3.5" />新增产品</Button></div> : null}
       </div> : <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] table-fixed text-sm">
+        <table className="w-full min-w-[740px] table-fixed text-sm">
           <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
               <th className="w-[28%] p-3 font-medium">SKU / 产品</th>
@@ -343,6 +332,55 @@ export function ProductsPage(): React.JSX.Element {
           })}</tbody>
         </table>
       </div>}
+    </div>
+
+    {/* Right-Hand Operations & Pricing Guardrail Rail */}
+    <aside className="space-y-4">
+      {isAdmin ? (
+        <div className="panel space-y-2.5 p-4 text-xs">
+          <h2 className="section-title">导入与目录操作</h2>
+          <p className="text-muted-foreground">按标准三表模板批量导入或更新同 SKU 价格档。</p>
+          <div className="space-y-2 pt-1">
+            <Button size="sm" className="w-full justify-between text-xs" onClick={() => setEditing(makeEmptyDraft())}>
+              <span className="inline-flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" />手工新增产品</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="sm" variant="outline" className="w-full justify-between text-xs" onClick={openImportDialog}>
+              <span className="inline-flex items-center gap-1.5"><Upload className="h-3.5 w-3.5" />批量导入价格表</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+            <Button asChild size="sm" variant="outline" className="w-full justify-between text-xs">
+              <a href={PRODUCT_IMPORT_TEMPLATE_URL} download="产品价格导入模板.xlsx">
+                <span className="inline-flex items-center gap-1.5"><Download className="h-3.5 w-3.5" />下载标准 Excel 模板</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="panel space-y-3 p-4 text-xs">
+        <h2 className="section-title flex items-center gap-1.5">
+          <ShieldCheck className="h-4 w-4" aria-hidden />
+          价格核对规则
+        </h2>
+        <div className="space-y-2 text-muted-foreground">
+          <div className="rounded-lg bg-surface p-2.5">
+            <p className="font-semibold text-foreground">阶梯区间严格匹配</p>
+            <p className="mt-0.5 leading-relaxed">报价数量落入对应区间时自动带出单价；未覆盖数量区间不会跨档猜测。</p>
+          </div>
+          <div className="rounded-lg bg-surface p-2.5">
+            <p className="font-semibold text-foreground">内部依据 · 人工承诺</p>
+            <p className="mt-0.5 leading-relaxed">本目录仅作 AI 回复核验与报价单制单依据，对外报价以正式审核报价单为准。</p>
+          </div>
+        </div>
+        <Button asChild size="sm" variant="outline" className="w-full text-xs">
+          <Link to="/quotations">
+            <ReceiptText className="h-3.5 w-3.5" />前往报价与 RFQ 工作台
+          </Link>
+        </Button>
+      </div>
+    </aside>
     </div>
 
     <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open) setEditing(null); }}>

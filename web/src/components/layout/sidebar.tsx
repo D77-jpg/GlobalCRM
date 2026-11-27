@@ -104,16 +104,16 @@ interface SidebarProps {
 
 function BrandMark(): React.JSX.Element {
   return (
-    <span className="brand-mark flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white">
-      <svg viewBox="0 0 28 28" fill="none" className="h-5 w-5" aria-hidden>
+    <span className="brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
+      <svg viewBox="0 0 28 28" fill="none" className="h-4.5 w-4.5" aria-hidden>
         <path
-          d="M14 4.5a9.5 9.5 0 1 0 9.5 9.5H15.5"
-          stroke="#E8D7A8"
-          strokeWidth="2.3"
+          d="M14 5a9 9 0 1 0 9 9h-7.2"
+          stroke="currentColor"
+          strokeWidth="2.4"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <circle cx="14" cy="14" r="2.2" fill="currentColor" />
+        <circle cx="14" cy="14" r="2" fill="currentColor" />
       </svg>
     </span>
   );
@@ -138,7 +138,7 @@ function Brand({ collapsed }: { collapsed: boolean }): React.JSX.Element {
             project={project}
             size={collapsed ? 'sm' : 'md'}
             compact={collapsed}
-            className={collapsed ? undefined : 'dark:rounded-md dark:bg-white/95 dark:px-1.5 dark:py-0.5'}
+            className={collapsed ? undefined : 'dark:[&_img]:invert dark:[&_img]:hue-rotate-180'}
           />
         ) : (
           <BrandMark />
@@ -176,8 +176,8 @@ function SidebarWorkspaceCard({ collapsed }: { collapsed: boolean }): React.JSX.
             title={collapsed ? `${t('nav.currentProject')}: ${active.name}` : undefined}
             aria-label={`切换项目，当前为 ${active.name}`}
             className={cn(
-              'group flex w-full items-center gap-2.5 rounded-xl border border-border/90 bg-card text-left shadow-[0_1px_2px_hsl(150_18%_12%_/_0.04)] transition-[border-color,box-shadow] hover:border-primary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-              collapsed ? 'justify-center p-1.5' : 'px-3 py-2.5',
+              'group flex w-full items-center gap-2.5 rounded-lg border border-border bg-card text-left shadow-[0_1px_2px_hsl(40_10%_8%_/_0.03)] transition-[border-color,box-shadow] hover:border-foreground/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35',
+              collapsed ? 'justify-center p-1.5' : 'px-2.5 py-2',
             )}
           >
             {collapsed ? (
@@ -271,8 +271,8 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
                   collapsed && 'justify-center px-0',
                   isActive
-                    ? 'bg-primary-soft font-semibold text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)_/_0.12)]'
-                    : 'text-sidebar-foreground/75 hover:bg-card/75 hover:text-foreground',
+                    ? 'bg-card font-semibold text-foreground shadow-[0_1px_2px_hsl(40_10%_8%_/_0.06)] ring-1 ring-border/90'
+                    : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-foreground',
                 )
               }
             >
@@ -280,8 +280,8 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
                 <>
                   <item.icon
                     className={cn(
-                      'h-[17px] w-[17px] shrink-0 transition-colors',
-                      isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground',
+                      'h-4 w-4 shrink-0 transition-colors',
+                      isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
                     )}
                     aria-hidden
                   />
