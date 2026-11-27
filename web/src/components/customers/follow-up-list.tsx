@@ -7,14 +7,24 @@
  */
 import * as React from 'react';
 import { CalendarClock, NotebookPen, Pencil, Trash2 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/common/confirm-dialog';
 import { EmptyState, ErrorState, InlineLoader } from '@/components/common/empty-state';
 import { FOLLOW_UP_METHOD_LABEL, FOLLOW_UP_RESULT_LABEL } from '@/constants';
 import { formatDate, formatDateTime, getFollowUpState } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { FollowUp } from '@/types';
+import type { FollowUp, FollowUpResult } from '@/types';
+
+const RESULT_VISUAL: Record<FollowUpResult, { dot: string; tag: string }> = {
+  won: { dot: 'bg-emerald-500', tag: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
+  replied: { dot: 'bg-teal-500', tag: 'bg-teal-50 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300' },
+  interested: { dot: 'bg-amber-500', tag: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' },
+  quoted: { dot: 'bg-orange-500', tag: 'bg-orange-50 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300' },
+  negotiating: { dot: 'bg-violet-500', tag: 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' },
+  no_need: { dot: 'bg-rose-500', tag: 'bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' },
+  no_reply: { dot: 'bg-slate-400', tag: 'bg-surface text-muted-foreground' },
+  other: { dot: 'bg-sky-500', tag: 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' },
+};
 
 export interface FollowUpListProps {
   followUps: FollowUp[];
@@ -83,57 +93,71 @@ export function FollowUpList({
 
   return (
     <>
-      <ol className="space-y-3">
+      <ol className="relative mt-1 divide-y divide-border/55 pl-5 before:absolute before:bottom-3 before:left-[5px] before:top-3 before:w-px before:bg-border/80">
         {followUps.map((item, index) => {
           const isLatest = index === 0;
           const hint = nextFollowUpHint(item.nextFollowUpAt);
+          const visual = RESULT_VISUAL[item.result] ?? RESULT_VISUAL.no_reply;
           return (
             <li
               key={item.id}
-              className={cn(
-                'group rounded-lg border p-3.5 transition-colors',
-                isLatest ? 'border-primary/40 bg-primary/5' : 'border-border bg-card',
-              )}
+              className="group relative py-2.5 transition-colors first:pt-1 last:pb-1"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="gap-1.5">
+              {/* Timeline Rail Dot */}
+              <span
+                className={cn(
+                  'absolute -left-5 h-2.5 w-2.5 rounded-full ring-4 ring-card',
+                  index === 0 ? 'top-2' : 'top-3.5',
+                  isLatest && item.result === 'no_reply' ? 'bg-indigo-500' : visual.dot,
+                )}
+                aria-hidden
+              />
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs font-semibold text-foreground">
                   {FOLLOW_UP_METHOD_LABEL[item.method] ?? item.method}
-                </Badge>
-                <Badge variant="secondary">{FOLLOW_UP_RESULT_LABEL[item.result] ?? item.result}</Badge>
+                </span>
+                <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-tight', visual.tag)}>
+                  {FOLLOW_UP_RESULT_LABEL[item.result] ?? item.result}
+                </span>
                 {isLatest ? (
-                  <Badge variant="default" className="gap-1">
+                  <span className="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300">
                     最新
-                  </Badge>
+                  </span>
                 ) : null}
-                <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-                  <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+
+                <span className="ml-auto flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground">
+                  <CalendarClock className="h-3 w-3 opacity-75" aria-hidden />
                   {formatDateTime(item.followUpAt)}
                 </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-                  aria-label="编辑该跟进记录"
-                  onClick={() => onEdit(item)}
-                >
-                  <Pencil className="h-3.5 w-3.5" aria-hidden />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
-                  aria-label="删除该跟进记录"
-                  onClick={() => setDeleteTarget(item)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                </Button>
+
+                <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                    aria-label="编辑该跟进记录"
+                    onClick={() => onEdit(item)}
+                  >
+                    <Pencil className="h-3 w-3" aria-hidden />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                    aria-label="删除该跟进记录"
+                    onClick={() => setDeleteTarget(item)}
+                  >
+                    <Trash2 className="h-3 w-3" aria-hidden />
+                  </Button>
+                </div>
               </div>
 
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{item.content}</p>
+              <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">{item.content}</p>
 
-              {hint ? <p className={cn('mt-2 text-xs', hint.className)}>{hint.text}</p> : null}
+              {hint ? <p className={cn('mt-1 text-[11px] font-medium', hint.className)}>{hint.text}</p> : null}
             </li>
           );
         })}
