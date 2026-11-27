@@ -1055,7 +1055,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         ? `AI 服务暂时繁忙，约 ${circuitCooldownSec} 秒后自动恢复`
                         : circuitFailedCount > 0
                           ? `有 ${circuitFailedCount} 位客户因 AI 服务繁忙暂停生成`
-                          : `有 ${aiFailedCount} 位客户此前生成草稿多次超时，已暂停自动重试`}
+                          : `有 ${aiFailedCount} 位客户草稿暂未生成成功，可一键分批重试`}
                     </p>
                     <p className="leading-5 text-muted-foreground">
                       确认 AI 服务正常后，点击右侧按钮可分批恢复草稿生成（不会影响已发信失败或已停止跟进的客户）。
@@ -1122,7 +1122,9 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         请修改邮件：{unverifiedCount} 封草稿有内容待调整（可重新生成 {rebuildableCount} 封）
                       </p>
                       <p className="leading-5">
-                        可在下方点「查看并修改」直接定位到对应句子，或点击右侧按钮重新生成（不会覆盖你已手动确认过的草稿）。
+                        {rebuildableCount > 0
+                          ? '可在下方点「查看并修改」直接定位到对应句子，或点击右侧按钮重新生成（不会覆盖你已手动确认过的草稿）。'
+                          : '当前待调整草稿暂不符合自动重新生成条件（如客户已手动暂停或缺少邮箱），请点下方「查看并修改」处理。'}
                       </p>
                     </div>
                   </div>

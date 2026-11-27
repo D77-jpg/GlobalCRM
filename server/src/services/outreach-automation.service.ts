@@ -95,7 +95,7 @@ export function isCircuitFailedEnrollmentReason(lastError?: string | null): bool
 export function isAiUpstreamFailedEnrollmentReason(lastError?: string | null): boolean {
   if (!lastError) return false;
   if (/状态异常|占位符|SMTP|发件箱/.test(lastError)) return false;
-  return /AI\s*(?:任务|上游|请求|通道)|OPENAI_|HTTP\s*5\d\d|HTTP\s*429|TASK_WORKFLOW_LIMIT|超时|熔断|并发队列已满/i.test(lastError);
+  return /AI\s*(?:任务|上游|请求|通道|服务)|OPENAI_|HTTP\s*5\d\d|HTTP\s*429|HTTP\s*40[13]|鉴权失败|TASK_WORKFLOW_LIMIT|TASK_BUDGET_EXCEEDED|超时|熔断|并发队列已满/i.test(lastError);
 }
 
 const FACT_AUDIT_FAILURE_CATEGORY_LABELS: Record<FactAuditFailureCategory, string> = {
@@ -204,7 +204,13 @@ export function humanizeTaskError(error?: { code?: string; message?: string } | 
   if (code === 'OPENAI_TIMEOUT') return 'AI 响应超时，系统稍后会自动重试';
   if (code === 'OPENAI_CIRCUIT_OPEN') return 'AI 服务暂时繁忙，约 30 秒后自动恢复';
   if (code === 'OPENAI_CAPACITY') return 'AI 排队较满，稍后自动重试';
+  if (code === 'OPENAI_UNREACHABLE') return '无法连接 AI 服务，请检查网络或代理地址';
+  if (code === 'OPENAI_HTTP_401' || code === 'OPENAI_HTTP_403') return 'AI 服务鉴权失败（401/403），请检查模型密钥或代理账号登录态';
+  if (code === 'OPENAI_INVALID_STRUCTURED_OUTPUT' || code === 'OPENAI_INCOMPLETE_RESPONSE' || code === 'OPENAI_INVALID_RESPONSE') {
+    return 'AI 返回内容不完整或格式异常（可能达到输出长度上限），可重试生成';
+  }
   if (code === 'TASK_WORKFLOW_LIMIT') return '生成耗时较长已暂停，可手动重新生成';
+  if (code === 'TASK_BUDGET_EXCEEDED') return '单次生成任务预算已达上限，可重新生成';
   if (/^OPENAI_HTTP_5\d\d$/.test(code)) return 'AI 服务暂时不可用，稍后会自动重试';
   if (/^OPENAI_HTTP_429$/.test(code)) return 'AI 请求频率较高，稍后会自动重试';
   return error.message || '草稿暂未生成成功';
@@ -1859,7 +1865,7 @@ export async function getOutreachAutomationOverview(
     ...projectFilter,
     status: 'failed',
     lastError: {
-      $regex: /AI\s*(?:任务|上游|请求|通道)|OPENAI_|HTTP\s*5\d\d|HTTP\s*429|TASK_WORKFLOW_LIMIT|超时|熔断|并发队列已满/i,
+      $regex: /AI\s*(?:任务|上游|请求|通道|服务)|OPENAI_|HTTP\s*5\d\d|HTTP\s*429|HTTP\s*40[13]|鉴权失败|TASK_WORKFLOW_LIMIT|TASK_BUDGET_EXCEEDED|超时|熔断|并发队列已满/i,
       $not: /状态异常|占位符|SMTP|发件箱/,
     },
   });
@@ -1881,6 +1887,7 @@ export async function getOutreachAutomationOverview(
   let deliveryFailedCount = 0;
   let deliveryCancelledCount = 0;
   let activeFailedTasks = 0;
+  let activeTaskFailedRecoverable = 0;
   let retryingTasks = 0;
   let ruleStoppedCount = 0;
   let actionNeededCount = 0;
@@ -1901,7 +1908,17 @@ export async function getOutreachAutomationOverview(
     const key = `${String(row.customerId)}:${nextStep}`;
     const nextLetter = queueLetterMap.get(key);
     const nextLetterStatus = nextLetter ? String(nextLetter.status) : undefined;
-    const isRuleStopped = row.status === 'blocked' && !isVerificationBlockedReason(row.lastError);
+    const customerIneligibleReason = row.status !== 'completed' && actualStep < MAX_AUTO_STEPS
+      ? !customer || String(customer.ownerId ?? '') !== String(config.userId)
+        ? '客户已删除或归属已变化'
+        : customer.outreachRepliedAt
+          ? '客户已回复，自动开发已停止'
+          : (customer.outreachAbandonedAt || !AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number]))
+            ? '客户已不在可开发状态'
+            : undefined
+      : undefined;
+    const isRuleStopped = (row.status === 'blocked' && !isVerificationBlockedReason(row.lastError))
+      || Boolean(customerIneligibleReason);
     if (isRuleStopped) ruleStoppedCount += 1;
 
     const audit = row.status !== 'completed' && !isRuleStopped && actualStep < MAX_AUTO_STEPS && nextLetterStatus === 'draft'
@@ -1966,7 +1983,9 @@ export async function getOutreachAutomationOverview(
     // Reconcile stale enrollment.lastError so resolved old errors (like old 95/103 word-count errors
     // or stale "发送任务已保存，可在邮件中心查看进度" when the actual letter is cancelled/failed/sent)
     // move cleanly to errorHistory without touching paused status!
-    let effectiveLastError = row.lastError;
+    let effectiveLastError = customerIneligibleReason && row.status !== 'blocked'
+      ? customerIneligibleReason
+      : row.lastError;
     if (!isRuleStopped && row.lastError && !taskInFlight) {
       if (draftReady || isWaitingDelivery || ['sent', 'opened'].includes(nextLetterStatus ?? '') || row.status === 'completed' || actualStep >= MAX_AUTO_STEPS) {
         const resolvedReason = (row.status === 'completed' || actualStep >= MAX_AUTO_STEPS)
@@ -2181,7 +2200,12 @@ export async function getOutreachAutomationOverview(
       else if (isDeliveryFailed) draftStage = 'delivery_failed';
       else if (!nextLetter && taskStatus === 'failed') draftStage = 'task_failed';
     }
-    if (draftStage === 'task_failed') activeFailedTasks += 1;
+    if (draftStage === 'task_failed') {
+      activeFailedTasks += 1;
+      if (row.status === 'active' && !isRuleStopped && !isDeliveryFailed && !isDeliveryUncertain && customer?.email) {
+        activeTaskFailedRecoverable += 1;
+      }
+    }
 
     let phase: OutreachAutomationQueueRow['phase'];
     if (row.status === 'completed' || actualStep >= MAX_AUTO_STEPS) phase = 'completed';
@@ -2331,7 +2355,7 @@ export async function getOutreachAutomationOverview(
       ruleStopped: ruleStoppedCount,
       failed: counts.failed ?? 0,
       circuitFailed: circuitFailedCount,
-      aiFailed: aiFailedCount,
+      aiFailed: aiFailedCount + activeTaskFailedRecoverable,
       unverifiedDrafts,
       rebuildableUnverifiedDrafts,
       sendGateBlockedDrafts,
@@ -3479,34 +3503,68 @@ export async function recoverCircuitFailedEnrollments(
   const now = new Date();
   const includeUpstream = Boolean(options?.includeUpstreamAiFailures);
 
-  const failedRows = await OutreachAutomationEnrollment.find({
-    ...scope(actor, target.id),
-    campaignId: config._id,
-    status: 'failed',
-  }).sort({ updatedAt: 1 }).limit(500);
+  let activeTaskFailedCustomerIds: Types.ObjectId[] = [];
+  if (includeUpstream) {
+    activeTaskFailedCustomerIds = await AgentTask.distinct('customerId', {
+      projectId: config.projectId,
+      userId: config.userId,
+      outreachStep: { $in: [1, 2, 3] },
+      status: 'failed',
+      customerId: { $ne: null },
+    });
+  }
 
+  const candidateFilter = includeUpstream && activeTaskFailedCustomerIds.length > 0
+    ? {
+      ...scope(actor, target.id),
+      campaignId: config._id,
+      $or: [
+        { status: 'failed' },
+        { status: 'active', customerId: { $in: activeTaskFailedCustomerIds } },
+      ],
+    }
+    : {
+      ...scope(actor, target.id),
+      campaignId: config._id,
+      status: 'failed',
+    };
+
+  const failedRows = await OutreachAutomationEnrollment.find(candidateFilter).sort({ updatedAt: 1 }).limit(500);
+
+  let scanned = 0;
   let recovered = 0;
   let skipped = 0;
 
   for (const row of failedRows) {
+    const isActiveRow = row.status === 'active';
     const customer = await Customer.findOne({
       _id: row.customerId,
       projectId: config.projectId,
       ownerId: config.userId,
     }).select('_id status email outreachStep outreachAbandonedAt outreachRepliedAt outreachLastAt').lean();
     if (!customer || !customer.email || !AUTO_TARGET_STATUSES.includes(customer.status as (typeof AUTO_TARGET_STATUSES)[number]) || customer.outreachAbandonedAt || customer.outreachRepliedAt) {
-      skipped += 1;
+      if (!isActiveRow) {
+        scanned += 1;
+        skipped += 1;
+      }
       continue;
     }
     const step = Math.max(Number(customer.outreachStep ?? 0), await sentProgress(config.projectId, customer._id));
     if (step >= MAX_AUTO_STEPS) {
-      skipped += 1;
+      if (!isActiveRow) {
+        scanned += 1;
+        skipped += 1;
+      }
       continue;
     }
     const nextStep = step + 1;
     // Never touch rows whose current-step letter failed SMTP delivery or has draft status anomaly.
     const existingLetter = await findDraft(config.projectId, customer._id, nextStep);
-    if (existingLetter && existingLetter.status === 'failed') {
+    if (isActiveRow) {
+      if (existingLetter && existingLetter.status !== 'cancelled') continue;
+      if (await hasActiveTask(config.projectId, customer._id, nextStep)) continue;
+    } else if (existingLetter && existingLetter.status === 'failed') {
+      scanned += 1;
       skipped += 1;
       continue;
     }
@@ -3518,6 +3576,11 @@ export async function recoverCircuitFailedEnrollments(
       status: 'failed',
     }).sort({ updatedAt: -1 }).limit(12).select('_id error').lean();
 
+    if (isActiveRow && recentFailedTasks.length === 0) {
+      continue;
+    }
+
+    scanned += 1;
     const upstreamFailedCount = recentFailedTasks.filter((t) => !isCircuitRejectError(t.error)).length;
     const hasCircuitTask = recentFailedTasks.some((t) => isCircuitRejectError(t.error));
     const circuitReason = isCircuitFailedEnrollmentReason(row.lastError);
@@ -3550,7 +3613,7 @@ export async function recoverCircuitFailedEnrollments(
               $each: [{
                 at: now,
                 message: includeUpstream
-                  ? '切换 AI 模型后清理旧模型失败任务记录并重置重试预算。'
+                  ? '恢复草稿生成：清理旧失败任务记录并重置重试预算。'
                   : '清理因 AI 通道熔断/并发保护（未发往上游）导致的失败任务记录。',
               }],
               $slice: -100,
@@ -3573,7 +3636,7 @@ export async function recoverCircuitFailedEnrollments(
 
   const overview = await getOutreachAutomationOverview(actor, target.id);
   return {
-    scanned: failedRows.length,
+    scanned,
     recovered,
     skipped,
     overview,
@@ -4197,6 +4260,7 @@ async function processEnrollment(
   actor: AuthUser,
   now: Date,
   allowSend: boolean,
+  pacingReady = true,
 ): Promise<{ sent: boolean; queued?: boolean }> {
   const customer = await Customer.findOne({
     _id: enrollment.customerId,
@@ -4477,6 +4541,14 @@ async function processEnrollment(
     });
     return { sent: false };
   }
+  if (!pacingReady) {
+    // 错峰冷却仅限制实际发信，不阻塞其他客户的草稿生成与重试。
+    const pacingUntil = config.nextPacingAt && new Date(config.nextPacingAt).getTime() > now.getTime()
+      ? new Date(config.nextPacingAt)
+      : new Date(now.getTime() + Math.max(30_000, Number(config.minPacingSeconds ?? 60) * 1000));
+    await markEnrollment(enrollment._id, { nextRunAt: pacingUntil });
+    return { sent: false };
+  }
   if (await domainAtLimit(config._id, draft.recipientEmail, config.perDomainLimit, now)) {
     await markEnrollment(enrollment._id, { nextRunAt: new Date(now.getTime() + 30 * 60_000) });
     return { sent: false };
@@ -4554,7 +4626,7 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
     const configs = await OutreachAutomationConfig.find({ enabled: true }).sort({ lastTickAt: 1, _id: 1 }).limit(50);
     for (const config of configs) {
       await OutreachAutomationConfig.updateOne({ _id: config._id }, { $set: { lastTickAt: now } });
-      if (!await campaignPacingReady(config, now)) continue;
+      const pacingReady = await campaignPacingReady(config, now);
       let actor: AuthUser;
       try {
         actor = await getActorForConfig(config);
@@ -4628,8 +4700,8 @@ export async function tickOutreachAutomation(now = new Date()): Promise<void> {
       }).sort({ nextRunAt: 1 }).limit(20);
 
       for (const row of rows) {
-        const result = await processEnrollment(config, row, actor, now, allowSend);
-        if (result.sent || result.queued) break;
+        const result = await processEnrollment(config, row, actor, now, allowSend, pacingReady);
+        if (result.sent) break;
       }
       };
       if (actor.organizationId) await runWithTenant({ organizationId: actor.organizationId, source: 'outreach-worker' }, processCampaign);

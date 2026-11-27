@@ -18,6 +18,7 @@ export function agentFailure(error: unknown): { code: string; message: string; r
   if (/INCOMPLETE|INVALID_STRUCTURED|UNVERIFIED_SOURCES/.test(code)) return { code, message: '模型返回的内容不完整、格式不合规或依据不足，请重试；未执行未确认的业务操作。', retryable: true };
   if (/TIMEOUT|ABORT/.test(code)) return { code, message: '模型请求超时，可以稍后重试；已完成的任务步骤会保留。', retryable: true };
   if (/CIRCUIT_OPEN/.test(code)) return { code, message: '上游 AI 服务连续失败已触发短暂熔断保护（约 30 秒后自动恢复），请稍后重试或切换其他 AI 服务。', retryable: true };
+  if (/HTTP_401|HTTP_403/.test(code)) return { code, message: `上游 AI 服务鉴权失败（${code}），请检查模型 API Key 或本地代理账号登录态后重试。`, retryable: true };
   if (/HTTP_429/.test(code)) return { code, message: '上游 AI 服务触发限流（HTTP 429），请稍后重试或切换 AI 服务。', retryable: true };
   if (/HTTP_5\d\d/.test(code)) return { code, message: `上游 AI 服务返回异常（${code}），属于中转或模型侧临时故障，请稍后重试或切换 AI 服务。`, retryable: true };
   if (/UNREACHABLE/.test(code)) return { code, message: '无法连接上游 AI 服务（网络中断或代理异常），请检查网络后重试或切换 AI 服务。', retryable: true };

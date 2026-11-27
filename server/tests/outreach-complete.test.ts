@@ -3193,3 +3193,133 @@ test('Section 13: admin-confirmed non-delivery re-enters the automated flow with
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('Outreach recovery covers active task_failed rows, clears ineligible unverified deadlocks, and queues drafts during send pacing cooldown', async () => {
+  const { runWithTenant } = await import('../src/models/tenant-context');
+  const { Customer, DevelopmentLetter, User } = await import('../src/models');
+  const { OutreachAutomationConfig, OutreachAutomationEnrollment } = await import('../src/models/OutreachAutomation');
+  const { AgentTask } = await import('../src/models/AgentTask');
+  const {
+    getOutreachAutomationOverview,
+    recoverCircuitFailedEnrollments,
+    tickOutreachAutomation,
+  } = await import('../src/services/outreach-automation.service');
+
+  await runWithTenant({ organizationId: String(orgA) }, async () => {
+    const rep = await User.create({
+      organizationId: orgA,
+      username: 'fictional_recovery_pacing_rep',
+      passwordHash: 'not-a-real-bcrypt-hash',
+      displayName: 'Recovery Pacing Rep',
+      role: 'user',
+      status: 'active',
+      projectIds: [new Types.ObjectId(projectAId)],
+    });
+    const now = new Date();
+    const campaign = await OutreachAutomationConfig.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      actorRole: 'user',
+      enabled: true,
+      rolloutMode: 'shadow',
+      dailyLimit: 15,
+      perDomainLimit: 3,
+      windowStart: '00:00',
+      windowEnd: '23:59',
+      timezone: 'Asia/Shanghai',
+      useBuyerTimezone: false,
+      minPacingSeconds: 180,
+      maxPacingSeconds: 240,
+      nextPacingAt: new Date(now.getTime() + 180_000),
+    });
+
+    const [custActiveFailedTask, custIneligiblePaused, custNeedsDraftDuringPacing] = await Customer.create([
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Active Failed Task Buyer', company: 'AF Co', email: 'af@example.test', status: 'contacted', outreachStep: 2, letterCount: 2, source: 'manual' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Ineligible Stage Buyer', company: 'IS Co', email: 'is@example.test', status: 'interested', outreachStep: 1, letterCount: 1, source: 'manual' },
+      { projectId: new Types.ObjectId(projectAId), ownerId: rep._id, name: 'Pacing Draft Buyer', company: 'PD Co', email: 'pd@example.test', status: 'pending', source: 'manual' },
+    ]);
+
+    const past = new Date(now.getTime() - 60_000);
+    const [enrActiveFailed, enrIneligiblePaused] = await OutreachAutomationEnrollment.create([
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custActiveFailedTask._id, status: 'active', currentStep: 2, nextRunAt: past, taskIds: [] },
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custIneligiblePaused._id, status: 'paused', pauseOrigin: 'system', currentStep: 1, nextRunAt: past, taskIds: [] },
+      { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custNeedsDraftDuringPacing._id, status: 'active', currentStep: 0, nextRunAt: past, taskIds: [] },
+    ]);
+
+    // 1) Active enrollment with a failed AgentTask (no step-3 draft yet)
+    await AgentTask.create({
+      projectId: new Types.ObjectId(projectAId),
+      userId: rep._id,
+      sessionId: new Types.ObjectId(),
+      actorRole: 'user',
+      goal: 'Step 3 failed on 401',
+      requestKey: `active-task-failed-401-${Date.now()}`,
+      customerId: custActiveFailedTask._id,
+      kind: 'first_outreach',
+      outreachStep: 3,
+      status: 'failed',
+      error: { code: 'OPENAI_HTTP_401', message: '401', retryable: true },
+    });
+
+    // 2) System-paused enrollment whose customer already moved to "interested" with an unverified step-2 draft
+    await DevelopmentLetter.create({
+      projectId: new Types.ObjectId(projectAId),
+      customerId: custIneligiblePaused._id,
+      userId: rep._id,
+      outreachStep: 2,
+      subject: 'Stale unverified step 2',
+      content: '<p>Follow up</p>',
+      contentText: 'Follow up',
+      recipientEmail: 'is@example.test',
+      status: 'draft',
+      needsReview: true,
+      knowledgeReview: {
+        version: 1,
+        projectId: projectAId,
+        taskType: 'first_outreach',
+        generatedAt: now.toISOString(),
+        status: 'ready',
+        completeness: 'partial',
+        sources: [],
+        claims: [],
+        questions: [],
+        issues: [{ code: 'semantic_unverified', message: '语义核验暂时失败' }],
+        context: {},
+        factAudit: {
+          contract: 's4.1',
+          mode: 'unavailable',
+          attempts: 1,
+          facts: [],
+          checks: [{ id: 's0', text: 'Follow up', status: 'unverifiable', sourceIds: [], reason: '语义核验暂时失败' }],
+        },
+      },
+    });
+
+    const ovBefore = await getOutreachAutomationOverview(actorA, rep.id);
+    // Ineligible customer must NOT create an unverifiedDrafts=1 / rebuildable=0 deadlock
+    assert.equal(ovBefore.stats.unverifiedDrafts, 0);
+    assert.equal(ovBefore.stats.rebuildableUnverifiedDrafts, 0);
+    const ineligibleRow = ovBefore.queue.find((row) => row.id === enrIneligiblePaused.id);
+    assert.equal(ineligibleRow?.isRuleStopped, true);
+    assert.equal(ineligibleRow?.phase, 'blocked');
+    assert.equal(ineligibleRow?.lastError, '客户已不在可开发状态');
+
+    // Active task_failed row MUST be counted in aiFailed and expose the humanized 401 message
+    assert.equal(ovBefore.stats.aiFailed, 1);
+    const activeFailedRow = ovBefore.queue.find((row) => row.id === enrActiveFailed.id);
+    assert.equal(activeFailedRow?.draftStage, 'task_failed');
+    assert.match(String(activeFailedRow?.taskError ?? ''), /鉴权失败（401\/403）/);
+
+    // Bulk upstream AI recovery MUST cancel the failed task on the active row and reset aiFailed to 0
+    const rec = await recoverCircuitFailedEnrollments(actorA, rep.id, { includeUpstreamAiFailures: true });
+    assert.equal(rec.recovered, 1);
+    assert.equal(rec.overview.stats.aiFailed, 0);
+    assert.equal(await AgentTask.countDocuments({ customerId: custActiveFailedTask._id, outreachStep: 3, status: 'cancelled' }), 1);
+
+    // 3) Even while campaign nextPacingAt is still in cooldown, tickOutreachAutomation queues drafts (up to MAX_INFLIGHT_OUTREACH_TASKS)
+    await tickOutreachAutomation(now);
+    const queuedForPacingBuyer = await AgentTask.findOne({ customerId: custNeedsDraftDuringPacing._id, outreachStep: 1, status: 'queued' }).lean();
+    assert.ok(queuedForPacingBuyer, 'Send pacing cooldown must NOT block queueing drafts for due customers');
+    assert.equal(queuedForPacingBuyer?.tokenBudget, 180000, 'Default AgentTask tokenBudget should be relaxed to 180000');
+  });
+});

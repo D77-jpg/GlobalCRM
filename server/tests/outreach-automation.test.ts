@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { dayIn, isWithinSendWindow, localClock, nextSendWindow } from '../src/services/outreach-automation.service';
+import {
+  dayIn,
+  humanizeTaskError,
+  isAiUpstreamFailedEnrollmentReason,
+  isWithinSendWindow,
+  localClock,
+  nextSendWindow,
+} from '../src/services/outreach-automation.service';
+import { agentFailure } from '../src/services/agent/agent-errors';
+import { AgentProviderError } from '../src/services/agent/provider';
 
 const window = { windowStart: '09:30', windowEnd: '17:30', timezone: 'Asia/Shanghai' };
 
@@ -33,4 +42,16 @@ test('weekend and after-hours work rolls forward to the next weekday window', ()
     nextSendWindow(window, new Date('2026-11-08T07:25:00.000Z')).toISOString(),
     '2026-11-09T01:30:00.000Z',
   );
+});
+
+test('AI upstream 401/403 and structured output errors map to explicit messages and recovery matching', () => {
+  assert.match(humanizeTaskError({ code: 'OPENAI_HTTP_401' }), /鉴权失败（401\/403）/);
+  assert.match(humanizeTaskError({ code: 'OPENAI_HTTP_403' }), /鉴权失败（401\/403）/);
+  assert.match(humanizeTaskError({ code: 'OPENAI_INVALID_STRUCTURED_OUTPUT' }), /输出长度上限|格式异常/);
+  assert.match(humanizeTaskError({ code: 'TASK_BUDGET_EXCEEDED' }), /预算/);
+  const failure = agentFailure(new AgentProviderError('OPENAI_HTTP_401'));
+  assert.equal(failure.code, 'OPENAI_HTTP_401');
+  assert.match(failure.message, /鉴权失败/);
+  assert.equal(isAiUpstreamFailedEnrollmentReason('AI 上游连续失败 3 次（AI 服务鉴权失败（401/403））'), true);
+  assert.equal(isAiUpstreamFailedEnrollmentReason('SMTP 550 拒绝投递'), false);
 });
