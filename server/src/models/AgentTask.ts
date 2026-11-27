@@ -24,7 +24,7 @@ const schema = new Schema<IAgentTask>({
  sessionId: {type: Schema.Types.ObjectId, required: true}, actorRole: {type: String, enum: ['admin','project_admin','user','viewer'], required: true},
  kind:{type:String,enum:['first_outreach','inquiry_reply','followup_review','quotation_explanation','sample_reply'],default:'first_outreach'},sourceMailId:Schema.Types.ObjectId,sourceDueAt:Date,automationRuleId:Schema.Types.ObjectId,ruleVersion:Number,mailAnalysisId:Schema.Types.ObjectId,
  workflowEpoch:{type:Number,default:0},workflowCalls:{type:Number,default:0},workflowActiveMs:{type:Number,default:0},workflowStamp:String,workflowRecords:[Schema.Types.Mixed],previousArtifacts:[Schema.Types.Mixed],
- parentBatchId:Schema.Types.ObjectId,skillVersion:{type:Number,default:2},knowledgeIds:[Schema.Types.ObjectId],tokenBudget:{type:Number,default:60000},budgetCharged:{type:Number,default:0},contextSummary:{type:String,maxlength:2000},
+ parentBatchId:Schema.Types.ObjectId,skillVersion:{type:Number,default:2},knowledgeIds:[Schema.Types.ObjectId],tokenBudget:{type:Number,default:180000},budgetCharged:{type:Number,default:0},contextSummary:{type:String,maxlength:2000},
  outreachStep:{type:Number,enum:[1,2,3]},
  requestSignature:String, requestKey: {type: String, required: true, maxlength: 128}, goal: {type: String, required: true, maxlength: 8000},
  customerId: Schema.Types.ObjectId, query: {type: String, maxlength: 120},

@@ -11,7 +11,7 @@ import {detectProtectedMailSignal,hasProtectedCustomerMail} from './mail-thread-
 import {taskActor} from './task.service';
 import {createFollowUp} from '../followup.service';
 const scope=(actor:AuthUser)=>({projectId:requireProjectId(actor),userId:new Types.ObjectId(actor.id)});
-export const automationRuleInput=z.object({expectedVersion:z.number().int().min(0),enabled:z.boolean(),inbound:z.boolean(),due:z.boolean(),sent:z.boolean(),dailyLimit:z.number().int().min(1).max(20),tokenBudget:z.number().int().min(10000).max(60000)}).strict();
+export const automationRuleInput=z.object({expectedVersion:z.number().int().min(0),enabled:z.boolean(),inbound:z.boolean(),due:z.boolean(),sent:z.boolean(),dailyLimit:z.number().int().min(1).max(20),tokenBudget:z.number().int().min(10000).max(200000)}).strict();
 export async function getAutomationRule(actor:AuthUser){const rule=await AgentAutomationRule.findOne(scope(actor));return rule?{...rule.toObject(),id:rule.id}:{id:null,version:0,enabled:false,inbound:true,due:true,sent:true,dailyLimit:5,tokenBudget:30000};}
 export async function saveAutomationRule(input:z.infer<typeof automationRuleInput>,actor:AuthUser){
  const parsed=automationRuleInput.parse(input);const current=await AgentAutomationRule.findOne(scope(actor));if((current?.version??0)!==parsed.expectedVersion)throw ApiError.conflict('事件规则已变化，请重新载入');
