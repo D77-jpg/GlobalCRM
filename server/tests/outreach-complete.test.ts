@@ -3246,20 +3246,20 @@ test('Outreach recovery covers active task_failed rows, clears ineligible unveri
       { projectId: new Types.ObjectId(projectAId), campaignId: campaign._id, userId: rep._id, customerId: custNeedsDraftDuringPacing._id, status: 'active', currentStep: 0, nextRunAt: past, taskIds: [] },
     ]);
 
-    // 1) Active enrollment with a failed AgentTask (no step-3 draft yet)
-    await AgentTask.create({
+    // 1) Active enrollment with >12 historical failed AgentTasks (proving bulk recovery cancels ALL, not just top 12)
+    await AgentTask.create(Array.from({ length: 15 }, (_, idx) => ({
       projectId: new Types.ObjectId(projectAId),
       userId: rep._id,
       sessionId: new Types.ObjectId(),
       actorRole: 'user',
-      goal: 'Step 3 failed on 401',
-      requestKey: `active-task-failed-401-${Date.now()}`,
+      goal: `Step 3 failed on 401 #${idx + 1}`,
+      requestKey: `active-task-failed-401-${Date.now()}-${idx}`,
       customerId: custActiveFailedTask._id,
       kind: 'first_outreach',
       outreachStep: 3,
       status: 'failed',
       error: { code: 'OPENAI_HTTP_401', message: '401', retryable: true },
-    });
+    })));
 
     // 2) System-paused enrollment whose customer already moved to "interested" with an unverified step-2 draft
     await DevelopmentLetter.create({
@@ -3310,11 +3310,12 @@ test('Outreach recovery covers active task_failed rows, clears ineligible unveri
     assert.equal(activeFailedRow?.draftStage, 'task_failed');
     assert.match(String(activeFailedRow?.taskError ?? ''), /鉴权失败（401\/403）/);
 
-    // Bulk upstream AI recovery MUST cancel the failed task on the active row and reset aiFailed to 0
+    // Bulk upstream AI recovery MUST cancel ALL 15 failed tasks on the active row and reset aiFailed to 0
     const rec = await recoverCircuitFailedEnrollments(actorA, rep.id, { includeUpstreamAiFailures: true });
     assert.equal(rec.recovered, 1);
     assert.equal(rec.overview.stats.aiFailed, 0);
-    assert.equal(await AgentTask.countDocuments({ customerId: custActiveFailedTask._id, outreachStep: 3, status: 'cancelled' }), 1);
+    assert.equal(await AgentTask.countDocuments({ customerId: custActiveFailedTask._id, outreachStep: 3, status: 'cancelled' }), 15);
+    assert.equal(await AgentTask.countDocuments({ customerId: custActiveFailedTask._id, outreachStep: 3, status: 'failed' }), 0);
 
     // 3) Even while campaign nextPacingAt is still in cooldown, tickOutreachAutomation queues drafts (up to MAX_INFLIGHT_OUTREACH_TASKS)
     await tickOutreachAutomation(now);

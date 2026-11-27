@@ -3597,13 +3597,28 @@ export async function recoverCircuitFailedEnrollments(
       continue;
     }
 
-    const cancelTaskIds = (includeUpstream
-      ? recentFailedTasks
-      : recentFailedTasks.filter((t) => isCircuitRejectError(t.error))
-    ).map((t) => t._id);
-    if (cancelTaskIds.length > 0) {
+    if (includeUpstream ? hasAnyAiFailedTask : hasCircuitTask) {
+      const cancelFilter = includeUpstream
+        ? {
+          projectId: config.projectId,
+          userId: config.userId,
+          customerId: customer._id,
+          outreachStep: nextStep,
+          status: 'failed',
+        }
+        : {
+          projectId: config.projectId,
+          userId: config.userId,
+          customerId: customer._id,
+          outreachStep: nextStep,
+          status: 'failed',
+          $or: [
+            { 'error.code': { $in: [...CIRCUIT_REJECT_CODES] } },
+            { 'error.message': { $regex: /熔断|OPENAI_CIRCUIT_OPEN|OPENAI_CAPACITY|并发队列已满/i } },
+          ],
+        };
       await AgentTask.updateMany(
-        { _id: { $in: cancelTaskIds }, status: 'failed' },
+        cancelFilter,
         {
           $set: { status: 'cancelled' },
           $unset: { leaseToken: 1, leaseUntil: 1 },
