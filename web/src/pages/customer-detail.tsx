@@ -799,6 +799,26 @@ export function CustomerDetailPage(): React.JSX.Element {
               const currentIdx = CUSTOMER_STATUS_VALUES.indexOf(customer.status);
               const isCurrent = customer.status === st;
               const isPassed = customer.status !== 'lost' && st !== 'lost' && idx < currentIdx;
+              const activeStageClass: Record<CustomerStatus, string> = {
+                pending: 'bg-slate-100 text-slate-800 ring-1 ring-slate-300/80 dark:bg-slate-800/70 dark:text-slate-200 dark:ring-slate-600/50',
+                contacted: 'bg-sky-50 text-sky-800 ring-1 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-400/30',
+                replied: 'bg-teal-50 text-teal-800 ring-1 ring-teal-200 dark:bg-teal-500/15 dark:text-teal-200 dark:ring-teal-400/30',
+                interested: 'bg-amber-50 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-400/30',
+                quoting: 'bg-orange-50 text-orange-800 ring-1 ring-orange-200 dark:bg-orange-500/15 dark:text-orange-200 dark:ring-orange-400/30',
+                negotiating: 'bg-violet-50 text-violet-800 ring-1 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-400/30',
+                won: 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-400/30',
+                lost: 'bg-rose-50 text-rose-800 ring-1 ring-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:ring-rose-400/30',
+              };
+              const stageDotClass: Record<CustomerStatus, string> = {
+                pending: 'bg-slate-500',
+                contacted: 'bg-sky-500',
+                replied: 'bg-teal-500',
+                interested: 'bg-amber-500',
+                quoting: 'bg-orange-500',
+                negotiating: 'bg-violet-500',
+                won: 'bg-emerald-500',
+                lost: 'bg-rose-500',
+              };
               return (
                 <React.Fragment key={st}>
                   {idx > 0 ? <span className="text-[10px] text-muted-foreground/45 select-none">›</span> : null}
@@ -809,20 +829,18 @@ export function CustomerDetailPage(): React.JSX.Element {
                     }}
                     className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] transition-all ${
                       isCurrent
-                        ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border'
+                        ? `font-semibold shadow-xs ${activeStageClass[st]}`
                         : isPassed
-                          ? 'font-medium text-foreground/75 hover:bg-card/70'
-                          : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'
+                          ? 'font-medium text-foreground/80 hover:bg-card/80'
+                          : 'text-muted-foreground hover:bg-card/70 hover:text-foreground'
                     }`}
                   >
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
                         isCurrent
-                          ? st === 'lost'
-                            ? 'bg-rose-500'
-                            : 'bg-emerald-600'
+                          ? stageDotClass[st]
                           : isPassed
-                            ? 'bg-foreground/45'
+                            ? 'bg-emerald-500/75'
                             : 'bg-muted-foreground/30'
                       }`}
                       aria-hidden
@@ -837,7 +855,9 @@ export function CustomerDetailPage(): React.JSX.Element {
           <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/70 pt-2 text-[11px] lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
             <span className="inline-flex items-center gap-1.5">
               <span className="text-muted-foreground">关系健康度</span>
-              <strong className="font-mono text-xs font-bold tabular-nums text-foreground">{healthOverall}</strong>
+              <strong className={`font-mono text-xs font-bold tabular-nums ${healthOverall >= 70 ? 'text-emerald-600 dark:text-emerald-400' : healthOverall >= 40 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                {healthOverall}
+              </strong>
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="text-muted-foreground">资料完整度</span>
@@ -1172,19 +1192,19 @@ export function CustomerDetailPage(): React.JSX.Element {
                       <span className="font-mono text-xs font-bold tabular-nums text-foreground">{healthOverall} / 100</span>
                     </div>
                     <div className="space-y-2">
-                      {[
-                        ['资料完整度', profileCompleteness],
-                        ['沟通活跃度', communicationScore],
-                        ['需求明确度', requirementClarity],
-                        ['阶段推进度', stageMomentum],
-                      ].map(([lbl, val]) => (
-                        <div key={String(lbl)}>
+                      {([
+                        ['资料完整度', profileCompleteness, 'bg-indigo-500'],
+                        ['沟通活跃度', communicationScore, 'bg-sky-500'],
+                        ['需求明确度', requirementClarity, 'bg-amber-500'],
+                        ['阶段推进度', stageMomentum, 'bg-emerald-500'],
+                      ] as const).map(([lbl, val, barColor]) => (
+                        <div key={lbl}>
                           <div className="mb-1 flex justify-between text-[11px]">
                             <span className="text-muted-foreground">{lbl}</span>
                             <span className="font-mono font-semibold tabular-nums text-foreground">{val}%</span>
                           </div>
-                          <div className="h-1.5 overflow-hidden rounded-full bg-border/80">
-                            <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${val}%` }} />
+                          <div className="h-1.5 overflow-hidden rounded-full bg-border/70">
+                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${val}%` }} />
                           </div>
                         </div>
                       ))}

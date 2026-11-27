@@ -581,10 +581,10 @@ export function ProspectingPage(): React.JSX.Element {
           <div className="space-y-1 border-t border-border/75 pt-3">
             <p className="text-[11px] font-semibold text-muted-foreground">处理状态</p>
             {([
-              { key: 'all' as const, label: '全部待处理', count: totalOpen },
-              { key: 'ready' as const, label: '可以发送', count: counts?.ready ?? 0 },
-              { key: 'needs_contact' as const, label: '待补联系方式', count: counts?.needsContact ?? 0 },
-              ...((counts?.low ?? 0) > 0 ? [{ key: 'low' as const, label: '低优先', count: counts?.low ?? 0 }] : []),
+              { key: 'all' as const, label: '全部待处理', count: totalOpen, dot: 'bg-indigo-500' },
+              { key: 'ready' as const, label: '可以发送', count: counts?.ready ?? 0, dot: 'bg-emerald-500' },
+              { key: 'needs_contact' as const, label: '待补联系方式', count: counts?.needsContact ?? 0, dot: 'bg-amber-500' },
+              ...((counts?.low ?? 0) > 0 ? [{ key: 'low' as const, label: '低优先', count: counts?.low ?? 0, dot: 'bg-slate-400' }] : []),
             ]).map((opt) => (
               <button
                 key={opt.key}
@@ -593,11 +593,14 @@ export function ProspectingPage(): React.JSX.Element {
                 className={cn(
                   'flex w-full items-center justify-between rounded-md border px-2.5 py-1.5 text-xs transition-colors',
                   statusFilter === opt.key
-                    ? 'border-foreground/25 bg-foreground/[0.065] font-semibold text-foreground'
+                    ? 'border-foreground/20 bg-foreground/[0.06] font-semibold text-foreground'
                     : 'border-transparent text-foreground/80 hover:bg-surface',
                 )}
               >
-                <span>{opt.label}</span>
+                <span className="inline-flex items-center gap-2">
+                  <span className={cn('h-1.5 w-1.5 rounded-full', opt.dot)} aria-hidden />
+                  {opt.label}
+                </span>
                 <span className="tabular-nums text-[11px] text-muted-foreground">
                   {opt.count}
                 </span>
@@ -608,10 +611,10 @@ export function ProspectingPage(): React.JSX.Element {
           <div className="space-y-1 border-t border-border/75 pt-3">
             <p className="text-[11px] font-semibold text-muted-foreground">匹配度分层</p>
             {([
-              ['all', '全部评分'],
-              ['high', '高潜力（≥ 80 分）'],
-              ['mid', '匹配（60 – 79 分）'],
-            ] as const).map(([key, label]) => (
+              ['all', '全部评分', 'bg-slate-400'],
+              ['high', '高潜力（≥ 80 分）', 'bg-emerald-500'],
+              ['mid', '匹配（60 – 79 分）', 'bg-sky-500'],
+            ] as const).map(([key, label, dot]) => (
               <button
                 key={key}
                 type="button"
@@ -621,8 +624,11 @@ export function ProspectingPage(): React.JSX.Element {
                   scoreTier === key ? 'bg-surface font-semibold text-foreground ring-1 ring-border' : 'text-muted-foreground hover:bg-surface hover:text-foreground',
                 )}
               >
-                <span>{label}</span>
-                {scoreTier === key ? <Check className="h-3 w-3" aria-hidden /> : null}
+                <span className="inline-flex items-center gap-2">
+                  <span className={cn('h-1.5 w-1.5 rounded-full', dot)} aria-hidden />
+                  {label}
+                </span>
+                {scoreTier === key ? <Check className="h-3 w-3 text-indigo-600 dark:text-indigo-400" aria-hidden /> : null}
               </button>
             ))}
           </div>

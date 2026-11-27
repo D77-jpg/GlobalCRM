@@ -42,12 +42,14 @@ export function AreaTrendChart({
   unit = '',
   height = 176,
   emptyLabel = '暂无趋势数据',
+  color = '#4F6BED',
   className,
 }: {
   data: TrendPoint[];
   unit?: string;
   height?: number;
   emptyLabel?: string;
+  color?: string;
   className?: string;
 }): React.JSX.Element {
   const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
@@ -101,8 +103,8 @@ export function AreaTrendChart({
       >
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--foreground))" stopOpacity="0.14" />
-            <stop offset="100%" stopColor="hsl(var(--foreground))" stopOpacity="0.01" />
+            <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.01" />
           </linearGradient>
         </defs>
 
@@ -139,8 +141,8 @@ export function AreaTrendChart({
         <path
           d={linePath}
           fill="none"
-          stroke="hsl(var(--primary))"
-          strokeWidth="2.25"
+          stroke={color}
+          strokeWidth="2.35"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -152,7 +154,8 @@ export function AreaTrendChart({
             y1={padT}
             x2={activeCoord.x}
             y2={padT + plotH}
-            stroke="hsl(var(--primary) / 0.25)"
+            stroke={color}
+            strokeOpacity="0.3"
             strokeDasharray="3 3"
             strokeWidth="1"
           />
@@ -166,9 +169,9 @@ export function AreaTrendChart({
               <circle
                 cx={pt.x}
                 cy={pt.y}
-                r={isActive ? 4.5 : 2.5}
-                fill={isActive ? 'hsl(var(--card))' : 'hsl(var(--primary))'}
-                stroke="hsl(var(--primary))"
+                r={isActive ? 4.5 : 2.75}
+                fill={isActive ? 'hsl(var(--card))' : color}
+                stroke={color}
                 strokeWidth={isActive ? 2.5 : 0}
                 className="transition-all duration-150"
               />
@@ -225,7 +228,7 @@ export function MiniSparkline({
   className,
 }: {
   values: number[];
-  tone?: 'emerald' | 'sky' | 'amber' | 'gold';
+  tone?: 'emerald' | 'indigo' | 'sky' | 'amber' | 'gold' | 'rose';
   className?: string;
 }): React.JSX.Element {
   const gradId = React.useId();
@@ -242,10 +245,12 @@ export function MiniSparkline({
   const d = buildSmoothPath(pts);
   const area = `${d} L ${w} ${h} L 0 ${h} Z`;
   const stroke = {
-    emerald: 'hsl(var(--primary))',
-    sky: 'hsl(var(--status-pending))',
-    amber: 'hsl(var(--amber))',
-    gold: 'hsl(var(--gold))',
+    emerald: '#10B981',
+    indigo: '#4F6BED',
+    sky: '#0284C7',
+    amber: '#F59E0B',
+    gold: '#D97706',
+    rose: '#E11D48',
   }[tone];
 
   return (
@@ -271,21 +276,21 @@ export interface DonutSlice {
   color?: string;
 }
 
-const MONOCHROME_PALETTE = [
-  'hsl(var(--foreground))',
-  'hsl(40 6% 32%)',
-  'hsl(38 5% 50%)',
-  'hsl(38 6% 66%)',
-  'hsl(38 8% 78%)',
-  'hsl(38 10% 87%)',
+const DATA_VIZ_PALETTE = [
+  '#4F6BED', // Cobalt Indigo
+  '#0D9488', // Ocean Teal
+  '#F59E0B', // Warm Amber
+  '#8B5CF6', // Royal Violet
+  '#EC4899', // Coral Rose
+  '#94A3B8', // Cool Slate (Other / Unassigned)
 ];
 
 export function DonutChart({
   slices,
   centerValue,
   centerLabel,
-  size = 132,
-  strokeWidth = 17,
+  size = 122,
+  strokeWidth = 16,
   className,
 }: {
   slices: DonutSlice[];
@@ -301,7 +306,7 @@ export function DonutChart({
   let offset = 0;
 
   return (
-    <div className={cn('flex w-full min-w-0 flex-col items-center gap-3.5 sm:flex-row sm:items-center', className)}>
+    <div className={cn('flex w-full min-w-0 flex-col items-center gap-3 sm:flex-row sm:items-center', className)}>
       <div className="relative shrink-0" style={{ width: size, height: size }}>
         <svg viewBox={`0 0 ${size} ${size}`} className="-rotate-90" width={size} height={size} role="img" aria-label={centerLabel || '分布图表'}>
           <circle
@@ -325,7 +330,7 @@ export function DonutChart({
                     cy={size / 2}
                     r={radius}
                     fill="none"
-                    stroke={slice.color ?? MONOCHROME_PALETTE[idx % MONOCHROME_PALETTE.length]}
+                    stroke={slice.color ?? DATA_VIZ_PALETTE[idx % DATA_VIZ_PALETTE.length]}
                     strokeWidth={strokeWidth}
                     strokeDasharray={`${Math.max(0, dash - 1.5)} ${circumference}`}
                     strokeDashoffset={-currentOffset}
@@ -346,16 +351,16 @@ export function DonutChart({
         {slices.map((slice, idx) => {
           const pct = slice.pct ?? (total > 0 ? Math.round((slice.value / total) * 100) : 0);
           return (
-            <li key={slice.label} className="flex items-center justify-between gap-2.5">
+            <li key={slice.label} className="flex items-center justify-between gap-2">
               <span className="flex min-w-0 items-center gap-2">
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: slice.color ?? MONOCHROME_PALETTE[idx % MONOCHROME_PALETTE.length] }}
+                  style={{ backgroundColor: slice.color ?? DATA_VIZ_PALETTE[idx % DATA_VIZ_PALETTE.length] }}
                   aria-hidden
                 />
                 <span className="truncate font-medium text-foreground/85">{slice.label}</span>
               </span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">
+              <span className="shrink-0 whitespace-nowrap tabular-nums text-muted-foreground">
                 <strong className="font-semibold text-foreground">{pct}%</strong>
                 <span className="ml-1 text-[11px]">({slice.value})</span>
               </span>
@@ -387,10 +392,10 @@ export function HealthRing({
   const circumference = 2 * Math.PI * radius;
   const dash = (clamped / 100) * circumference;
   const strokeColor = clamped >= 70
-    ? 'hsl(var(--primary))'
+    ? '#10B981'
     : clamped >= 40
-      ? 'hsl(var(--amber))'
-      : 'hsl(var(--rose))';
+      ? '#F59E0B'
+      : '#E11D48';
 
   return (
     <div className={cn('relative inline-flex shrink-0 items-center justify-center', className)} style={{ width: size, height: size }}>

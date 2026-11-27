@@ -128,14 +128,14 @@ export const CUSTOMER_STATUS_BADGE_CLASS: Record<CustomerStatus, string> = {
  * 仅用于 Dashboard 漏斗的条形背景。
  */
 export const CUSTOMER_STATUS_BAR_CLASS: Record<CustomerStatus, string> = {
-  pending: 'bg-slate-400/45',
-  contacted: 'bg-sky-500/55',
-  replied: 'bg-emerald-500/55',
-  interested: 'bg-amber-500/60',
-  quoting: 'bg-orange-500/60',
-  negotiating: 'bg-violet-500/60',
-  won: 'bg-emerald-600/70',
-  lost: 'bg-rose-500/50',
+  pending: 'bg-slate-400',
+  contacted: 'bg-sky-500',
+  replied: 'bg-teal-500',
+  interested: 'bg-amber-500',
+  quoting: 'bg-orange-500',
+  negotiating: 'bg-violet-500',
+  won: 'bg-emerald-500',
+  lost: 'bg-rose-500',
 };
 
 /** 跟进时间筛选项 */
@@ -312,12 +312,12 @@ export const QUOTATION_STATUS_FILTER_OPTIONS: { value: QuotationStatus | 'all'; 
  * 已接受=翠绿 / 已拒绝=玫红 / 已过期=琥珀。
  */
 export const QUOTATION_STATUS_BADGE_CLASS: Record<QuotationStatus, string> = {
-  draft: 'border-border bg-card text-muted-foreground',
-  sent: 'border-border bg-card text-foreground',
-  negotiating: 'border-primary/20 bg-primary-soft text-primary',
-  accepted: 'border-emerald-200/80 bg-emerald-50/70 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-300',
-  rejected: 'border-rose-200/80 bg-rose-50/70 text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-300',
-  expired: 'border-amber-200/80 bg-amber-50/70 text-amber-700 dark:border-amber-400/20 dark:bg-amber-400/10 dark:text-amber-300',
+  draft: 'border-slate-200/90 bg-slate-50 text-slate-600 dark:border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-300',
+  sent: 'border-sky-200/90 bg-sky-50/80 text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-300',
+  negotiating: 'border-violet-200/90 bg-violet-50/80 text-violet-700 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-300',
+  accepted: 'border-emerald-200/90 bg-emerald-50/80 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300',
+  rejected: 'border-rose-200/90 bg-rose-50/80 text-rose-700 dark:border-rose-400/25 dark:bg-rose-400/10 dark:text-rose-300',
+  expired: 'border-amber-200/90 bg-amber-50/80 text-amber-700 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-300',
 };
 
 /** 报价币种取值顺序（与后端 QUOTATION_CURRENCY 一致），默认 USD */

@@ -249,7 +249,7 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
 
           {rankedUsers.length > 0 ? (
             <div className="mt-4 flex-1 space-y-3">
-              {rankedUsers.map((u) => {
+              {rankedUsers.map((u, idx) => {
                 const rawVal =
                   metricTab === 'runs'
                     ? u.runs
@@ -263,6 +263,14 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
                       ? tokens(u.totalTokens)
                       : money(u.estimatedCostUsd);
                 const widthPct = Math.max(4, Math.round((rawVal / maxMetric) * 100));
+                const barFill = [
+                  'bg-indigo-500',
+                  'bg-teal-500',
+                  'bg-amber-500',
+                  'bg-violet-500',
+                  'bg-sky-500',
+                  'bg-rose-500',
+                ][idx % 6];
                 return (
                   <div key={u.userId} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
@@ -273,7 +281,7 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-surface">
                       <div
-                        className="h-full rounded-full bg-foreground transition-all duration-300"
+                        className={`h-full rounded-full transition-all duration-300 ${barFill}`}
                         style={{ width: `${widthPct}%` }}
                       />
                     </div>

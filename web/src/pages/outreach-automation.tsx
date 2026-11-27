@@ -1282,7 +1282,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
                         </span>
                       </div>
                       <div className="h-1.5 overflow-hidden rounded-full bg-border/80">
-                        <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${quotaPct}%` }} />
+                        <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${quotaPct}%` }} />
                       </div>
                       <p className="text-[10.5px] text-muted-foreground">今日余量 {overview.stats.remainingToday} 封</p>
                     </div>
@@ -1317,44 +1317,54 @@ export function OutreachAutomationPage(): React.JSX.Element {
                       {/* Continuous Architectural Track Line on Desktop */}
                       <div className="pointer-events-none absolute left-10 right-10 top-7 hidden h-px bg-border xl:block" aria-hidden />
                       <ol className="grid min-w-[680px] grid-cols-6 gap-2">
-                        {stations.map((st, idx) => (
-                          <li key={st.label} className="relative">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setQueueFilter(st.filter);
-                                queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                              }}
-                              className={`group flex w-full flex-col items-center rounded-xl px-2 py-2 text-center transition-colors hover:bg-surface/80 ${
-                                st.urgent ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''
-                              }`}
-                            >
-                              <div className="relative z-10 flex items-center justify-center">
-                                <span
-                                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 font-mono text-sm font-bold tabular-nums transition-transform group-hover:scale-105 ${
-                                    st.urgent
-                                      ? 'border-amber-500 bg-card text-amber-700 dark:text-amber-300'
-                                      : st.count > 0
-                                        ? 'border-foreground bg-foreground text-background shadow-xs'
-                                        : 'border-border bg-card text-foreground'
-                                  }`}
-                                >
-                                  {st.count}
-                                </span>
-                                <span className="absolute -top-1.5 -right-3 rounded border border-border bg-surface px-1 py-0 font-mono text-[9px] font-semibold text-muted-foreground">
-                                  {st.timing}
-                                </span>
-                              </div>
-                              <span className="mt-2 text-xs font-semibold text-foreground">{st.label}</span>
-                              <span className="mt-0.5 line-clamp-1 text-[10.5px] text-muted-foreground">{st.sub}</span>
-                              {idx < stations.length - 1 ? (
-                                <span className="pointer-events-none absolute -right-2 top-5 hidden text-xs text-muted-foreground/50 xl:inline" aria-hidden>
-                                  →
-                                </span>
-                              ) : null}
-                            </button>
-                          </li>
-                        ))}
+                        {stations.map((st, idx) => {
+                          const nodeAccent = [
+                            { active: 'border-slate-500 bg-slate-600 text-white', idle: 'border-slate-300/90 bg-card text-slate-700 dark:border-slate-600 dark:text-slate-200', tag: 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300' },
+                            { active: 'border-indigo-500 bg-indigo-600 text-white', idle: 'border-indigo-300/80 bg-card text-indigo-700 dark:border-indigo-500/40 dark:text-indigo-300', tag: 'border-indigo-200/80 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/15 dark:text-indigo-300' },
+                            { active: 'border-sky-500 bg-sky-600 text-white', idle: 'border-sky-300/80 bg-card text-sky-700 dark:border-sky-500/40 dark:text-sky-300', tag: 'border-sky-200/80 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-300' },
+                            { active: 'border-violet-500 bg-violet-600 text-white', idle: 'border-violet-300/80 bg-card text-violet-700 dark:border-violet-500/40 dark:text-violet-300', tag: 'border-violet-200/80 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-300' },
+                            { active: 'border-amber-500 bg-amber-500 text-white', idle: 'border-amber-300/90 bg-card text-amber-700 dark:border-amber-500/40 dark:text-amber-300', tag: 'border-amber-200/80 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300' },
+                            { active: 'border-emerald-500 bg-emerald-600 text-white', idle: 'border-emerald-300/80 bg-card text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300', tag: 'border-emerald-200/80 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-300' },
+                          ][idx] ?? { active: 'border-foreground bg-foreground text-background', idle: 'border-border bg-card text-foreground', tag: 'border-border bg-surface text-muted-foreground' };
+                          return (
+                            <li key={st.label} className="relative">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQueueFilter(st.filter);
+                                  queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                }}
+                                className={`group flex w-full flex-col items-center rounded-xl px-2 py-2 text-center transition-colors hover:bg-surface/80 ${
+                                  st.urgent ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''
+                                }`}
+                              >
+                                <div className="relative z-10 flex items-center justify-center">
+                                  <span
+                                    className={`flex h-10 w-10 items-center justify-center rounded-full border-2 font-mono text-sm font-bold tabular-nums transition-transform group-hover:scale-105 ${
+                                      st.urgent
+                                        ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+                                        : st.count > 0
+                                          ? `${nodeAccent.active} shadow-xs`
+                                          : nodeAccent.idle
+                                    }`}
+                                  >
+                                    {st.count}
+                                  </span>
+                                  <span className={`absolute -top-1.5 -right-3 rounded border px-1 py-0 font-mono text-[9px] font-semibold ${nodeAccent.tag}`}>
+                                    {st.timing}
+                                  </span>
+                                </div>
+                                <span className="mt-2 text-xs font-semibold text-foreground">{st.label}</span>
+                                <span className="mt-0.5 line-clamp-1 text-[10.5px] text-muted-foreground">{st.sub}</span>
+                                {idx < stations.length - 1 ? (
+                                  <span className="pointer-events-none absolute -right-2 top-5 hidden text-xs text-muted-foreground/50 xl:inline" aria-hidden>
+                                    →
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })}
                       </ol>
                     </div>
                   </div>

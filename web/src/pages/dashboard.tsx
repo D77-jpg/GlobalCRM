@@ -66,6 +66,7 @@ function MetricCard({
   chip,
   chipTone = 'chip-muted',
   icon: Icon,
+  iconClass = 'border-border/80 bg-surface text-foreground',
   onClick,
 }: {
   label: string;
@@ -74,6 +75,7 @@ function MetricCard({
   chip?: React.ReactNode;
   chipTone?: string;
   icon: React.ComponentType<{ className?: string }>;
+  iconClass?: string;
   onClick: () => void;
 }): React.JSX.Element {
   return (
@@ -81,7 +83,7 @@ function MetricCard({
       <span className="flex w-full items-center justify-between gap-2">
         <span className="inline-flex min-w-0 items-center gap-2">
           <span
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/80 bg-surface text-foreground transition-colors group-hover:border-foreground/25"
+            className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors', iconClass)}
             aria-hidden
           >
             <Icon className="h-3.5 w-3.5" />
@@ -96,24 +98,44 @@ function MetricCard({
   );
 }
 
+const BAR_COLORS = [
+  '#4F6BED', // Cobalt Indigo
+  '#0D9488', // Ocean Teal
+  '#F59E0B', // Warm Amber
+  '#8B5CF6', // Royal Violet
+  '#0284C7', // Cerulean Sky
+  '#EC4899', // Coral Rose
+  '#10B981', // Emerald
+  '#94A3B8', // Slate
+];
+
 function BarList({ data, emptyLabel, total }: { data: { _id: string; count: number }[]; emptyLabel: string; total: number }): React.JSX.Element {
   if (!data.length) return <p className="py-5 text-xs text-muted-foreground">{emptyLabel}</p>;
   const max = Math.max(...data.map((item) => item.count), 1);
   return (
     <ul className="mt-3 space-y-2.5">
-      {data.map((item) => (
-        <li key={item._id || '未填写'}>
-          <div className="mb-1 flex justify-between gap-3 text-xs">
-            <span className="truncate font-medium text-foreground/90">{item._id || '未填写'}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {item.count} · {total ? Math.round((item.count / total) * 100) : 0}%
-            </span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div className="h-full rounded-full bg-foreground/80 transition-all" style={{ width: `${Math.max(3, (item.count / max) * 100)}%` }} />
-          </div>
-        </li>
-      ))}
+      {data.map((item, idx) => {
+        const color = BAR_COLORS[idx % BAR_COLORS.length];
+        return (
+          <li key={item._id || '未填写'}>
+            <div className="mb-1 flex justify-between gap-3 text-xs">
+              <span className="inline-flex min-w-0 items-center gap-2 font-medium text-foreground/90">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden />
+                <span className="truncate">{item._id || '未填写'}</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                <strong className="font-semibold text-foreground">{item.count}</strong> · {total ? Math.round((item.count / total) * 100) : 0}%
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted/85" aria-hidden>
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{ width: `${Math.max(3, (item.count / max) * 100)}%`, backgroundColor: color }}
+              />
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -142,6 +164,7 @@ function EmbeddedAiDock({
     DockTab,
     Array<{
       icon: React.ComponentType<{ className?: string }>;
+      accent: string;
       title: string;
       subtitle: string;
       prompt: string;
@@ -150,82 +173,94 @@ function EmbeddedAiDock({
     suggest: [
       {
         icon: Target,
-        title: dueCount > 0 ? `优先推进 ${dueCount} 位到期跟进客户` : `梳理 ${stats.customer.pending} 位待开发客户`,
-        subtitle: dueCount > 0 ? `含逾期 ${stats.workspace.followUpOverdue} 位 · 按采购意向排优先级` : '结合行业与资料完整度推荐今日触达名单',
+        accent: 'text-rose-600 dark:text-rose-400',
+        title: dueCount > 0 ? `优先跟进 ${dueCount} 位到期客户` : `梳理 ${stats.customer.pending} 位待开发客户`,
+        subtitle: dueCount > 0 ? `含逾期 ${stats.workspace.followUpOverdue} 位 · 按意向排序` : '筛选今日可触达的高潜客户',
         prompt: '请梳理当前需要优先跟进的逾期与待开发客户，按优先级列出今日跟进建议。',
       },
       {
         icon: Mail,
-        title: stats.letter.draft > 0 ? `审核 ${stats.letter.draft} 封待发开发信草稿` : '起草首轮个性化开发信',
-        subtitle: stats.letter.draft > 0 ? '对照项目对外口径核验语气、MOQ 与交期表述' : '挑选有邮箱的高潜客户生成待审草稿',
+        accent: 'text-indigo-600 dark:text-indigo-400',
+        title: stats.letter.draft > 0 ? `审核 ${stats.letter.draft} 封待发草稿` : '起草首轮个性化开发信',
+        subtitle: stats.letter.draft > 0 ? '核对语气、MOQ 与交期表述' : '挑选有邮箱的客户准备草稿',
         prompt: stats.letter.draft > 0
           ? '请帮我检查当前待发送的开发信草稿，核对语气与对外口径并给出优化建议。'
           : '请从当前待开发且有邮箱的客户中挑选重点对象，分析背景并准备开发信草稿（不要直接发送）。',
       },
       {
         icon: TrendingUp,
-        title: '近期开发与回复效果诊断',
-        subtitle: `近 7 天已发 ${stats.letter.sent7d} 封 · 整体开发率 ${stats.developmentRate}%`,
+        accent: 'text-emerald-600 dark:text-emerald-400',
+        title: '近期开发与回复诊断',
+        subtitle: `近 7 天已发 ${stats.letter.sent7d} 封 · 开发率 ${stats.developmentRate}%`,
         prompt: `请分析 ${projectName} 当前的客户开发率、发信表现与漏斗转化情况，并给出 3 条可执行优化建议。`,
       },
     ],
     write: [
       {
         icon: Send,
-        title: '为高潜客户撰写首封开发信',
-        subtitle: '自动结合官网、行业痛点与项目产品卖点',
+        accent: 'text-indigo-600 dark:text-indigo-400',
+        title: '撰写首封个性化开发信',
+        subtitle: '结合客户官网与项目卖点',
         prompt: '请帮我挑选一位待开发重点客户，结合项目资料起草首封英文开发信草稿，不要直接发送。',
       },
       {
         icon: ReceiptText,
-        title: '生成报价说明与阶梯价跟进信',
-        subtitle: '严守目录阶梯价与贸易条款，不越权承诺',
+        accent: 'text-amber-600 dark:text-amber-400',
+        title: '起草报价说明与跟进信',
+        subtitle: '按目录阶梯价与贸易条款撰写',
         prompt: '请根据当前项目的对外口径，起草一封标准报价跟进邮件模板，突出交期与定制配合度。',
       },
       {
         icon: CalendarCheck2,
-        title: '准备温和二轮/三轮催复邮件',
-        subtitle: '简短专业、不施压，提升买家回复意愿',
+        accent: 'text-sky-600 dark:text-sky-400',
+        title: '准备温和二轮/三轮跟进信',
+        subtitle: '简短专业，提高买家回复意愿',
         prompt: '请为已发首封信但尚未回复的客户，准备一封简短得体的英文二次跟进草稿。',
       },
     ],
     knowledge: [
       {
         icon: BookOpen,
-        title: '检索项目产品规格与 MOQ 口径',
-        subtitle: '仅引用已审核发布的知识库与价格表',
+        accent: 'text-teal-600 dark:text-teal-400',
+        title: '查产品规格与 MOQ 口径',
+        subtitle: '基于已审核知识库与价格目录',
         prompt: '请列出当前项目已发布的重点产品规格、起订量（MOQ）与标准打样交期口径。',
       },
       {
         icon: Globe2,
-        title: '核对贸易条款与对外沟通红线',
-        subtitle: '查看付款方式、认证资质与禁用承诺词',
+        accent: 'text-violet-600 dark:text-violet-400',
+        title: '查贸易条款与对外红线',
+        subtitle: '核对付款方式、认证与禁用词',
         prompt: '请汇总当前项目的对外沟通红线、付款条款与不可随意承诺的事项。',
       },
       {
         icon: Users,
-        title: '查找特定国家或行业目标客户',
-        subtitle: '按市场、等级与联系状态快速定位档案',
+        accent: 'text-sky-600 dark:text-sky-400',
+        title: '按市场/行业筛选重点客户',
+        subtitle: '快速定位高潜与活跃档案',
         prompt: '请帮我查找当前项目下等级较高或近期活跃的重点海外客户，并简述各自状态。',
       },
     ],
     analyze: [
       {
         icon: Activity,
-        title: '销售漏斗瓶颈与流失风险排查',
-        subtitle: `当前在谈与待跟进共 ${stats.customer.total} 位客户档案`,
+        accent: 'text-indigo-600 dark:text-indigo-400',
+        title: '漏斗瓶颈与流失风险排查',
+        subtitle: `当前共 ${stats.customer.total} 位客户档案`,
         prompt: '请诊断当前客户阶段分布，指出哪个环节积压最多，以及如何提升回复向报价转化。',
       },
       {
         icon: Globe2,
-        title: '重点海外市场结构对比',
-        subtitle: '结合国家与行业分布调整开发重心',
+        accent: 'text-teal-600 dark:text-teal-400',
+        title: '海外市场结构对比',
+        subtitle: '结合国家与行业分布调整重心',
         prompt: '请根据当前客户国家分布与行业结构，分析我们最核心的目标市场并给出拓展建议。',
       },
       {
         icon: FilePenLine,
-        title: '待补邮箱与资料完整度盘点',
-        subtitle: `当前 ${stats.customer.withoutEmail} 位客户缺少联系邮箱`,
+        accent: 'text-amber-600 dark:text-amber-400',
+        title: '待补邮箱与资料完整度',
+        subtitle: `${stats.customer.withoutEmail} 位客户缺少邮箱`,
         prompt: '请盘点当前缺少邮箱或关键资料不完整的客户情况，给出补全与清洗建议。',
       },
     ],
@@ -243,191 +278,181 @@ function EmbeddedAiDock({
   };
 
   return (
-    <aside aria-label="AI 外贸助手工作舱" className="flex flex-col gap-4 xl:h-full">
-      <div className="panel flex flex-col overflow-hidden">
-        <div className="flex items-start justify-between gap-2 border-b border-border p-4">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="h-4 w-4" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <h2 className="text-[0.9375rem] font-semibold leading-snug tracking-[-0.015em] text-foreground">
-                AI 外贸副驾驶
-              </h2>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                联动客户、邮件、知识库与核价单
-              </p>
+    <aside aria-label="AI 助手与待处理事项" className="flex flex-col xl:h-full">
+      <div className="panel flex flex-1 flex-col divide-y divide-border/75 overflow-hidden">
+        {/* Section 1: Minimal, Card-Free AI Assistant */}
+        <div className="flex flex-col">
+          <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-4">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" aria-hidden />
+              <h2 className="text-[0.9375rem] font-semibold tracking-[-0.015em] text-foreground">AI 助手</h2>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setAgentOpen(true)}
+              title="展开完整对话"
+              aria-label="展开完整对话"
+            >
+              <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => setAgentOpen(true)}
-            title="展开完整助手抽屉"
-            aria-label="展开完整助手抽屉"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
 
-        {/* Category Switcher Pills */}
-        <div className="grid grid-cols-4 gap-1 border-b border-border bg-surface/80 px-2.5 py-1.5">
-          {([
-            ['suggest', '建议执行'],
-            ['write', '写邮件'],
-            ['knowledge', '查资料'],
-            ['analyze', '分析'],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={cn(
-                'rounded-md px-2 py-1 text-xs font-medium transition-all',
-                tab === key
-                  ? 'bg-card font-semibold text-foreground shadow-xs ring-1 ring-border/80'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+          {/* Flat Underline Tabs */}
+          <div className="flex items-center gap-4 border-b border-border/75 px-4 text-xs">
+            {([
+              ['suggest', '建议'],
+              ['write', '写信'],
+              ['knowledge', '查资料'],
+              ['analyze', '分析'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={cn(
+                  '-mb-px border-b-2 pb-2 pt-1 font-medium transition-colors',
+                  tab === key
+                    ? 'border-indigo-600 font-semibold text-foreground dark:border-indigo-400'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-        {/* Actionable Prompt Cards */}
-        <div className="space-y-2 p-3.5">
-          {cardsByTab[tab].map((card) => (
-            <button
-              key={card.title}
-              type="button"
-              onClick={() => openAgentWithPrompt(card.prompt)}
-              className="group flex w-full items-center gap-3 rounded-lg border border-border bg-surface/45 p-2.5 text-left transition-all hover:border-foreground/25 hover:bg-card hover:shadow-sm"
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-card text-foreground">
-                <card.icon className="h-4 w-4" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[0.8125rem] font-semibold text-foreground">
-                  {card.title}
+          {/* Flat Hairline Action Rows (Zero Nested Cards) */}
+          <div className="divide-y divide-border/55 px-4">
+            {cardsByTab[tab].map((item) => (
+              <button
+                key={item.title}
+                type="button"
+                onClick={() => openAgentWithPrompt(item.prompt)}
+                className="group -mx-2 flex w-[calc(100%+1rem)] items-center gap-2.5 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-surface/80"
+              >
+                <item.icon className={cn('h-4 w-4 shrink-0', item.accent)} aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[0.8125rem] font-medium text-foreground">
+                    {item.title}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                    {item.subtitle}
+                  </span>
                 </span>
-                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                  {card.subtitle}
-                </span>
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
-            </button>
-          ))}
-        </div>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
+              </button>
+            ))}
+          </div>
 
-        {/* Direct Inline Composer */}
-        <form onSubmit={handleSubmit} className="border-t border-border p-3.5">
-          <div className="rounded-lg border border-border bg-surface/50 p-2.5 transition-colors focus-within:border-foreground/35 focus-within:bg-card">
-            <textarea
-              rows={2}
-              value={promptInput}
-              onChange={(e) => setPromptInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-              placeholder="输入外贸任务指令，例如：梳理今日逾期客户…"
-              aria-label="向 AI 外贸助手输入指令"
-              className="w-full resize-none bg-transparent text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-            />
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-[10.5px] text-muted-foreground">结合当前项目资料 · 人工审核发送</span>
-              <Button type="submit" size="icon-xs" className="h-7 w-7 rounded-md" aria-label="发送到 AI 助手">
+          {/* Clean Inline Input */}
+          <form onSubmit={handleSubmit} className="px-4 pb-4 pt-2">
+            <div className="flex items-end gap-2 rounded-xl border border-border/85 bg-surface/55 px-3 py-2 transition-colors focus-within:border-indigo-500/45 focus-within:bg-card">
+              <textarea
+                rows={1}
+                value={promptInput}
+                onChange={(e) => setPromptInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
+                placeholder="问 AI 助手，例如：梳理逾期客户…"
+                aria-label="向 AI 助手输入问题"
+                className="max-h-20 min-h-[1.5rem] w-full resize-none bg-transparent text-xs leading-6 text-foreground outline-none placeholder:text-muted-foreground"
+              />
+              <Button type="submit" size="icon-xs" className="h-7 w-7 shrink-0 rounded-lg" aria-label="发送到 AI 助手">
                 <Send className="h-3.5 w-3.5" />
               </Button>
             </div>
-          </div>
-        </form>
-      </div>
+          </form>
+        </div>
 
-      {/* Trade OS Live Dispatch & Execution Rail — Stretches cleanly to eliminate bottom void */}
-      <div className="panel flex flex-1 flex-col justify-between p-4">
-        <div>
+        {/* Section 2: Clean Natural Pending Checklist (Replaces Jargon & Nested Cards) */}
+        <div className="p-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-foreground">待办脉冲与风险队列</h3>
+            <h3 className="text-xs font-semibold text-foreground">待处理事项</h3>
             <span className="text-[11px] text-muted-foreground">{projectName}</span>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => onOpenCustomers({ followUp: 'overdue' })}
-              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
-            >
-              <span className="text-[11px] text-muted-foreground">逾期跟进</span>
-              <strong className={cn('mt-1 text-lg font-bold tabular-nums', stats.workspace.followUpOverdue > 0 ? 'text-rose' : 'text-foreground')}>
-                {stats.workspace.followUpOverdue}
-              </strong>
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenLetters('draft')}
-              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
-            >
-              <span className="text-[11px] text-muted-foreground">待审草稿</span>
-              <strong className="mt-1 text-lg font-bold tabular-nums text-foreground">{stats.letter.draft}</strong>
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenCustomers({ hasEmail: 'false' })}
-              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
-            >
-              <span className="text-[11px] text-muted-foreground">待补邮箱</span>
-              <strong className="mt-1 text-lg font-bold tabular-nums text-foreground">{stats.customer.withoutEmail}</strong>
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenLetters('failed')}
-              className="flex flex-col rounded-lg border border-border/80 bg-surface/55 p-2.5 text-left transition-colors hover:border-foreground/25 hover:bg-card"
-            >
-              <span className="text-[11px] text-muted-foreground">发送异常</span>
-              <strong className={cn('mt-1 text-lg font-bold tabular-nums', stats.letter.failed > 0 ? 'text-rose' : 'text-foreground')}>
-                {stats.letter.failed}
-              </strong>
-            </button>
-          </div>
-
-          <div className="mt-4 border-t border-border/75 pt-3.5">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-foreground">Trade OS 业务中枢直达</h3>
-            <div className="mt-2.5 space-y-1.5 text-xs">
-              {[
-                { label: '客户发现与公海线索', sub: 'AI 官网抓取 · 邮箱补全', to: ROUTES.prospecting, icon: Target },
-                { label: '全渠道客户会话', sub: 'WhatsApp · 阿里 · 双语副驾驶', to: ROUTES.channels, icon: Globe2 },
-                { label: '外贸报价与 RFQ 核价', sub: '阶梯价校验 · 一键导出 PDF', to: ROUTES.quotations, icon: ReceiptText },
-                { label: '多轮自动开发节律', sub: '0 / 3 / 7 天买方时区触达', to: ROUTES.outreachAutomation, icon: Send },
-                { label: '企业知识大脑与红线', sub: '已审事实依据 · 对外口径护栏', to: '/knowledge', icon: BookOpen },
-              ].map((nav) => (
-                <Link
-                  key={nav.to}
-                  to={nav.to}
-                  className="group flex items-center justify-between gap-2.5 rounded-lg border border-transparent px-2.5 py-2 transition-colors hover:border-border hover:bg-surface/75"
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/80 bg-surface text-foreground">
-                      <nav.icon className="h-3.5 w-3.5" aria-hidden />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">{nav.label}</p>
-                      <p className="truncate text-[10.5px] text-muted-foreground">{nav.sub}</p>
-                    </div>
-                  </div>
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-60 transition-all group-hover:translate-x-0.5 group-hover:text-foreground group-hover:opacity-100" aria-hidden />
-                </Link>
-              ))}
-            </div>
+          <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            {[
+              {
+                label: '逾期跟进',
+                value: stats.workspace.followUpOverdue,
+                dot: 'bg-rose-500',
+                valClass: stats.workspace.followUpOverdue > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-foreground',
+                onClick: () => onOpenCustomers({ followUp: 'overdue' }),
+              },
+              {
+                label: '待审草稿',
+                value: stats.letter.draft,
+                dot: 'bg-amber-500',
+                valClass: stats.letter.draft > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-foreground',
+                onClick: () => onOpenLetters('draft'),
+              },
+              {
+                label: '待补邮箱',
+                value: stats.customer.withoutEmail,
+                dot: 'bg-sky-500',
+                valClass: 'text-foreground',
+                onClick: () => onOpenCustomers({ hasEmail: 'false' }),
+              },
+              {
+                label: '发送异常',
+                value: stats.letter.failed,
+                dot: 'bg-red-500',
+                valClass: stats.letter.failed > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-foreground',
+                onClick: () => onOpenLetters('failed'),
+              },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={item.onClick}
+                className="group -mx-1.5 flex items-center justify-between rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-surface"
+              >
+                <span className="inline-flex items-center gap-2 text-muted-foreground group-hover:text-foreground">
+                  <span className={cn('h-1.5 w-1.5 rounded-full', item.dot)} aria-hidden />
+                  {item.label}
+                </span>
+                <strong className={cn('font-mono text-sm font-bold tabular-nums', item.valClass)}>
+                  {item.value}
+                </strong>
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="mt-4 rounded-lg border border-border/75 bg-surface/55 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
-          <span className="font-semibold text-foreground">Trade OS 护栏已激活：</span>
-          所有跨项目数据严格物理隔离，AI 生成草稿均经口径核验并需人工确认后发出。
+        {/* Section 3: Clean Flat Quick Links */}
+        <div className="flex flex-1 flex-col p-4">
+          <h3 className="text-xs font-semibold text-foreground">快捷入口</h3>
+          <div className="mt-2 divide-y divide-border/50 text-xs">
+            {[
+              { label: '客户线索池', sub: '官网抓取与邮箱补全', to: ROUTES.prospecting, icon: Target, accent: 'text-indigo-600 dark:text-indigo-400' },
+              { label: '全渠道会话', sub: 'WhatsApp · 阿里 · 微信', to: ROUTES.channels, icon: Globe2, accent: 'text-emerald-600 dark:text-emerald-400' },
+              { label: '报价与 RFQ', sub: '阶梯价核对与 PDF 导出', to: ROUTES.quotations, icon: ReceiptText, accent: 'text-amber-600 dark:text-amber-400' },
+              { label: '自动开发', sub: '多轮邮件跟进排程', to: ROUTES.outreachAutomation, icon: Send, accent: 'text-violet-600 dark:text-violet-400' },
+              { label: '知识库', sub: '产品资料与对外口径', to: '/knowledge', icon: BookOpen, accent: 'text-teal-600 dark:text-teal-400' },
+            ].map((nav) => (
+              <Link
+                key={nav.to}
+                to={nav.to}
+                className="group -mx-2 flex items-center justify-between gap-2.5 rounded-lg px-2 py-2.5 transition-colors hover:bg-surface/80"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <nav.icon className={cn('h-4 w-4 shrink-0', nav.accent)} aria-hidden />
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-foreground">{nav.label}</p>
+                    <p className="truncate text-[10.5px] text-muted-foreground">{nav.sub}</p>
+                  </div>
+                </div>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-all group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </aside>
@@ -477,6 +502,7 @@ export function DashboardPage(): React.JSX.Element {
           chip: data.customer.contacted7d > 0 ? `近7日 ${data.customer.contacted7d}` : `${data.customer.withEmail}`,
           chipTone: 'chip-muted',
           icon: Users,
+          iconClass: 'border-indigo-200/75 bg-indigo-50/75 text-indigo-600 dark:border-indigo-500/25 dark:bg-indigo-500/10 dark:text-indigo-300',
           action: () => openCustomers(),
         },
         {
@@ -488,6 +514,9 @@ export function DashboardPage(): React.JSX.Element {
           chip: data.workspace.followUpOverdue > 0 ? `逾期 ${data.workspace.followUpOverdue}` : undefined,
           chipTone: 'chip-rose',
           icon: CalendarCheck2,
+          iconClass: data.workspace.followUpOverdue > 0
+            ? 'border-rose-200/75 bg-rose-50/75 text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300'
+            : 'border-amber-200/75 bg-amber-50/75 text-amber-600 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-300',
           action: () => openCustomers({ followUp: data.workspace.followUpOverdue > 0 ? 'overdue' : 'today' }),
         },
         {
@@ -497,6 +526,7 @@ export function DashboardPage(): React.JSX.Element {
             ? `待审草稿 ${data.letter.draft} 封`
             : `${data.letter.draft} drafts ready`,
           icon: Target,
+          iconClass: 'border-sky-200/75 bg-sky-50/75 text-sky-600 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-300',
           action: () => openCustomers({ status: 'pending' }),
         },
         {
@@ -504,6 +534,7 @@ export function DashboardPage(): React.JSX.Element {
           value: data.letter.sent7d.toLocaleString('zh-CN'),
           detail: language === 'zh' ? `近 30 天 ${data.letter.sent30d} 封` : `${data.letter.sent30d} in 30d`,
           icon: Send,
+          iconClass: 'border-violet-200/75 bg-violet-50/75 text-violet-600 dark:border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-300',
           action: () => openLetters(),
         },
         {
@@ -515,6 +546,7 @@ export function DashboardPage(): React.JSX.Element {
           chip: `${data.developmentRate}%`,
           chipTone: 'chip-mint',
           icon: TrendingUp,
+          iconClass: 'border-emerald-200/75 bg-emerald-50/75 text-emerald-600 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300',
           action: () => openCustomers(),
         },
       ]
@@ -712,6 +744,7 @@ export function DashboardPage(): React.JSX.Element {
                     chip={metric.chip}
                     chipTone={metric.chipTone}
                     icon={metric.icon}
+                    iconClass={metric.iconClass}
                     onClick={metric.action}
                   />
                 ))}
@@ -919,21 +952,31 @@ export function DashboardPage(): React.JSX.Element {
                     </span>
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                    {data.analytics.conversionFunnel.slice(0, 3).map((stage) => (
-                      <div key={stage.stage} className="rounded-lg border border-border/80 bg-surface/55 p-3">
-                        <div className="flex items-center justify-between gap-2 text-xs">
-                          <span className="font-semibold text-foreground">{stage.label}</span>
-                          <span className="font-mono text-[11px] font-semibold tabular-nums text-foreground">{stage.rate}%</span>
+                    {data.analytics.conversionFunnel.slice(0, 3).map((stage, idx) => {
+                      const stageVisual = [
+                        { bar: 'bg-indigo-500', badge: 'text-indigo-600 dark:text-indigo-400', dot: 'bg-indigo-500' },
+                        { bar: 'bg-sky-500', badge: 'text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
+                        { bar: 'bg-emerald-500', badge: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
+                      ][idx] ?? { bar: 'bg-indigo-500', badge: 'text-foreground', dot: 'bg-indigo-500' };
+                      return (
+                        <div key={stage.stage} className="rounded-lg border border-border/80 bg-surface/55 p-3">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                              <span className={cn('h-2 w-2 rounded-full', stageVisual.dot)} aria-hidden />
+                              {stage.label}
+                            </span>
+                            <span className={cn('font-mono text-[11px] font-bold tabular-nums', stageVisual.badge)}>{stage.rate}%</span>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">当前阶段客户 {stage.count} 位</p>
+                          <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className={cn('h-full rounded-full transition-all', stageVisual.bar)}
+                              style={{ width: `${Math.max(stage.count > 0 ? 6 : 0, stage.rate)}%` }}
+                            />
+                          </div>
                         </div>
-                        <p className="mt-1 text-xs text-muted-foreground">当前阶段客户 {stage.count} 位</p>
-                        <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-foreground transition-all"
-                            style={{ width: `${Math.max(stage.count > 0 ? 6 : 0, stage.rate)}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               ) : null}
