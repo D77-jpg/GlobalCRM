@@ -37,7 +37,7 @@ import { useI18n } from '@/i18n';
 import { ForgotPasswordDialog } from '@/components/auth/forgot-password-dialog';
 import { loginSchema, type LoginFormValues } from '@/lib/validators';
 import { useAuthStore } from '@/store/auth.store';
-import { useMetaStore } from '@/store/meta.store';
+import { selectDeploymentFeatures, useMetaStore } from '@/store/meta.store';
 import { usePageTitle } from '@/hooks/use-ui';
 import { ROUTES } from '@/constants';
 import { PRODUCT_NAME_UPPER, PRODUCT_TAGLINE_EN } from '@/constants/brand';
@@ -116,6 +116,11 @@ export function LoginPage(): React.JSX.Element {
   const clearTwoFactor = useAuthStore((state) => state.clearTwoFactor);
   const status = useAuthStore((state) => state.status);
   const fetchMeta = useMetaStore((state) => state.fetchMeta);
+  const features = useMetaStore(selectDeploymentFeatures);
+
+  React.useEffect(() => {
+    void fetchMeta();
+  }, [fetchMeta]);
 
   const [showPassword, setShowPassword] = React.useState(false);
   const [otp, setOtp] = React.useState('');
@@ -437,8 +442,12 @@ export function LoginPage(): React.JSX.Element {
               仅限授权成员使用 · 登录信息加密传输
             </p>
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-              <Link className="hover:text-slate-800 dark:hover:text-white" to={ROUTES.pricing}>{language === 'zh' ? '价格与套餐' : 'Pricing'}</Link>
-              <span aria-hidden>·</span>
+              {features.publicPricing ? (
+                <>
+                  <Link className="hover:text-slate-800 dark:hover:text-white" to={ROUTES.pricing}>{language === 'zh' ? '价格与套餐' : 'Pricing'}</Link>
+                  <span aria-hidden>·</span>
+                </>
+              ) : null}
               <Link className="hover:text-slate-800 dark:hover:text-white" to={ROUTES.help}>{language === 'zh' ? '帮助中心' : 'Help center'}</Link>
               <span aria-hidden>·</span>
               <Link className="hover:text-slate-800 dark:hover:text-white" to={`${ROUTES.legal}/terms`}>{language === 'zh' ? '服务条款' : 'Terms'}</Link>

@@ -7,6 +7,7 @@
  * exported to Stripe / an accounting system without changing call sites.
  */
 import { Types } from 'mongoose';
+import env from '../config/env';
 import { BillingInvoice, Organization, UsageRecord, type UsageMetric } from '../models';
 import { PLAN_CATALOG, type OrganizationLimits, type OrganizationPlan } from '../constants/plans';
 import { ApiError } from '../utils/ApiError';
@@ -51,6 +52,7 @@ export async function assertUsageAvailable(
   amount: number,
   organizationId?: string,
 ): Promise<void> {
+  if (!env.enforcePlanLimits) return;
   const orgId = organizationObjectId(organizationId);
   if (!orgId) return;
   const organization = await Organization.findById(orgId).select('limits plan name').lean();

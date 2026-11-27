@@ -222,6 +222,7 @@ export async function updateOrganization(
 }
 
 export async function assertOrganizationCapacity(metric: 'users' | 'projects'): Promise<void> {
+  if (!env.enforcePlanLimits) return;
   const organization = await resolveOrganization({ id: '', username: '', displayName: '', role: 'user' } as AuthUser);
   const limit = organization.limits[metric];
   const model = metric === 'users' ? User : Project;
@@ -233,6 +234,7 @@ export async function assertOrganizationCapacity(metric: 'users' | 'projects'): 
 }
 
 export async function assertPlanQuota(metric: 'monthlyEmails' | 'monthlyAiTokens' | 'storageBytes', amount = 0): Promise<void> {
+  if (!env.enforcePlanLimits) return;
   const contextOrg = getTenantContext()?.organizationId;
   if (!contextOrg) return;
   const organization = await getOrganizationById(contextOrg);

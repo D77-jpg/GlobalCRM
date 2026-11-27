@@ -1,0 +1,32 @@
+# Team LAN / self-hosted overlay for compose.yaml.
+# Usage:
+#   docker compose -p globalcrm --env-file .env.production -f compose.yaml -f compose.lan.yaml up -d --build
+# Keep compose.yaml untouched as the commercial SaaS loopback-behind-TLS default.
+x-lan-server-env: &lan-server-env
+  CRM_EDITION: ${CRM_EDITION:-self_hosted}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  CORS_ALLOW_PRIVATE_NETWORK: ${CORS_ALLOW_PRIVATE_NETWORK:-true}
+  CORS_LAN_PORTS: ${CORS_LAN_PORTS:-5173,8080}
+  AI_ALLOWED_INTERNAL_ORIGINS: ${AI_ALLOWED_INTERNAL_ORIGINS:-http://host.docker.internal:7863}
+  ENFORCE_PLAN_LIMITS: ${ENFORCE_PLAN_LIMITS:-false}
+
+services:
+  migrate:
+    environment:
+      <<: *lan-server-env
+
+  server:
+    environment:
+      <<: *lan-server-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    environment:
+      <<: *lan-server-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web:
+    ports: !override
+      - "${GLOBALCRM_BIND_HOST:-0.0.0.0}:${GLOBALCRM_HTTP_PORT:-5173}:8080"

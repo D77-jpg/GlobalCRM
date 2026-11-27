@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Request } from 'express';
 import env from '../config/env';
+import { shouldSkipMailTrackingForUrl } from '../config/edition';
 import { DevelopmentLetter } from '../models';
 
 const TOKEN_BYTES = 32;
@@ -101,6 +102,10 @@ export function shouldTrackLink(value: string): boolean {
  * 纯文本、无标签内容直接返回，追踪失败也由上层降级为原始 HTML。
  */
 export function prepareTrackedHtml(html: string): PreparedTracking {
+  // 团队自用模式下若 TRACKING_BASE_URL 指向回环/内网地址，跳过追踪像素与链接改写，防止外发邮件暴露内网 IP
+  if (shouldSkipMailTrackingForUrl(env.TRACKING_BASE_URL, env.CRM_EDITION)) {
+    return { deliveryHtml: html };
+  }
   const contentWithoutCompliance = html.replace(/<div\b[^>]*data-compliance=["']unsubscribe["'][\s\S]*?<\/div>/i, '');
   if (!/<[a-z][\s\S]*>/i.test(contentWithoutCompliance)) return { deliveryHtml: html };
 

@@ -7,6 +7,7 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { parseAllowedInternalOrigins, resolveDeploymentProfile } from './edition';
 
 // 允许在任意工作目录下启动（npm --prefix 场景）
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -21,6 +22,15 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   /** Deployment environment. NODE_ENV controls Node/runtime behavior; APP_ENV names dev/staging/prod. */
   APP_ENV: z.enum(['development', 'staging', 'production']).optional(),
+  /** Deployment edition: saas (commercial multi-tenant default) or self_hosted (internal team / LAN). */
+  CRM_EDITION: z.enum(['saas', 'self_hosted']).default('saas'),
+  /** Comma-separated exact origins allowed for internal AI gateways when CRM_EDITION=self_hosted (e.g. http://host.docker.internal:7863). */
+  AI_ALLOWED_INTERNAL_ORIGINS: z.string().default(''),
+  /** Optional override for plan quota hard enforcement (defaults to true in saas, false in self_hosted). */
+  ENFORCE_PLAN_LIMITS: z.preprocess(
+    (value) => typeof value === 'string' && value.trim() === '' ? undefined : value,
+    booleanish.optional(),
+  ),
   HOST: z.string().min(1).default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(5000),
   /** Per-IP API rate limit; load/soak tests may raise this in an isolated environment. */
@@ -203,12 +213,24 @@ if (productionErrors.length) {
 }
 
 const appEnv = raw.APP_ENV ?? (raw.NODE_ENV === 'production' ? 'production' : 'development');
+const aiAllowedInternalOrigins = raw.CRM_EDITION === 'self_hosted'
+  ? parseAllowedInternalOrigins(raw.AI_ALLOWED_INTERNAL_ORIGINS)
+  : [];
+const deployment = resolveDeploymentProfile({
+  edition: raw.CRM_EDITION,
+  allowedInternalOrigins: aiAllowedInternalOrigins,
+  enforcePlanLimitsOverride: raw.ENFORCE_PLAN_LIMITS,
+});
 
 export const env = {
   ...raw,
   appEnv,
   isProd: raw.NODE_ENV === 'production',
   isDev: raw.NODE_ENV === 'development',
+  isSelfHosted: raw.CRM_EDITION === 'self_hosted',
+  aiAllowedInternalOrigins,
+  enforcePlanLimits: deployment.features.enforcePlanLimits,
+  deployment,
   /** CORS 白名单数组 */
   corsOrigins: raw.CORS_ORIGIN.split(',')
     .map((s) => s.trim())

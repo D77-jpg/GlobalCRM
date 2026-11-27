@@ -84,6 +84,10 @@ export function createApp(): Application {
   const app = express();
   const crmCors = cors(corsOptions);
 
+  if (env.isProd && env.isSelfHosted && !env.COOKIE_SECURE) {
+    logger.warn('当前以团队自用模式（self_hosted）且 COOKIE_SECURE=false 运行，仅限受信任局域网 HTTP 访问；如对外开放请启用 HTTPS 并设 COOKIE_SECURE=true');
+  }
+
   // 反向代理（nginx 等）场景下正确识别协议与客户端 IP
   app.set('trust proxy', 1);
   app.disable('x-powered-by');

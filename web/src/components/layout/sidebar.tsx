@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { ROUTES } from '@/constants';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/constants/brand';
-import { useMetaStore } from '@/store/meta.store';
+import { selectDeploymentFeatures, useMetaStore } from '@/store/meta.store';
 import { selectCanManageProjects, selectIsAdmin, selectIsPlatformAdmin, useAuthStore } from '@/store/auth.store';
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '@/store/project.store';
@@ -48,6 +48,8 @@ export interface NavItem {
   managerOnly?: boolean;
   /** Only platform operators can see this entry. */
   platformOnly?: boolean;
+  /** Optional deployment feature gate (hidden in self_hosted mode when false). */
+  featureFlag?: 'billing' | 'multiOrg';
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -71,10 +73,10 @@ export const NAV_ITEMS: NavItem[] = [
   { to: ROUTES.agentDiagnostics, labelKey: 'nav.agentDiagnostics', icon: ShieldCheck, end: false, adminOnly: true },
   { to: ROUTES.aiSettings, labelKey: 'nav.aiSettings', icon: Settings2, end: false, adminOnly: true },
   { to: ROUTES.organization, labelKey: 'nav.organization', icon: Building2, end: false, managerOnly: true },
-  { to: ROUTES.billing, labelKey: 'nav.billing', icon: CreditCard, end: false, adminOnly: true },
+  { to: ROUTES.billing, labelKey: 'nav.billing', icon: CreditCard, end: false, adminOnly: true, featureFlag: 'billing' },
   { to: ROUTES.oauthApplications, labelKey: 'oauth.title', icon: ShieldCheck, end: false },
-  { to: ROUTES.oauthClients, labelKey: 'oauth.clients', icon: KeyRound, end: false, platformOnly: true },
-  { to: ROUTES.platform, labelKey: 'nav.platform', icon: Globe2, end: false, platformOnly: true },
+  { to: ROUTES.oauthClients, labelKey: 'oauth.clients', icon: KeyRound, end: false, platformOnly: true, featureFlag: 'multiOrg' },
+  { to: ROUTES.platform, labelKey: 'nav.platform', icon: Globe2, end: false, platformOnly: true, featureFlag: 'multiOrg' },
 ];
 
 interface SidebarProps {
@@ -126,10 +128,16 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
   const isAdmin = useAuthStore(selectIsAdmin);
   const isPlatformAdmin = useAuthStore(selectIsPlatformAdmin);
   const canManageProjects = useAuthStore(selectCanManageProjects);
-  // 按角色过滤导航：管理员入口和项目管理员入口分别控制
+  const features = useMetaStore(selectDeploymentFeatures);
+  // 按角色与部署模式过滤导航：自用模式隐藏商业账单与多组织平台入口
   const items = React.useMemo(
-    () => NAV_ITEMS.filter((item) => (!item.adminOnly || isAdmin) && (!item.managerOnly || canManageProjects) && (!item.platformOnly || isPlatformAdmin)),
-    [isAdmin, isPlatformAdmin, canManageProjects],
+    () => NAV_ITEMS.filter(
+      (item) => (!item.adminOnly || isAdmin)
+        && (!item.managerOnly || canManageProjects)
+        && (!item.platformOnly || isPlatformAdmin)
+        && (!item.featureFlag || features[item.featureFlag]),
+    ),
+    [isAdmin, isPlatformAdmin, canManageProjects, features],
   );
 
   return (

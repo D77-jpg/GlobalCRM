@@ -7,8 +7,19 @@
 import { create } from 'zustand';
 import { apiGet, toErrorMessage } from '@/lib/api';
 import { PLACEHOLDER_DEFS, type PlaceholderDef } from '@/constants';
-import type { MailChannel, MetaResponse } from '@/types';
+import type { DeploymentFeatures, DeploymentProfile, MailChannel, MetaResponse } from '@/types';
 import { useProjectStore } from './project.store';
+
+const DEFAULT_DEPLOYMENT: DeploymentProfile = {
+  edition: 'saas',
+  features: {
+    billing: true,
+    multiOrg: true,
+    publicPricing: true,
+    internalAiGateway: false,
+    enforcePlanLimits: true,
+  },
+};
 
 /** 属于「我方信息」分组的占位符 key */
 const COMPANY_KEYS = new Set(['companyName', 'companyWebsite', 'moq', 'senderName']);
@@ -33,6 +44,8 @@ interface MetaState {
   loaded: boolean;
   /** 当前生效的邮件通道（mock 时前端会给出「模拟发送」提示） */
   mailChannel: MailChannel;
+  /** 部署模式与功能开关（由 /api/meta 下发，默认按 saas 兜底） */
+  deployment: DeploymentProfile;
   /**
    * 当前生效的占位符定义。
    *
@@ -52,6 +65,7 @@ export const useMetaStore = create<MetaState>()((set, get) => ({
   error: null,
   loaded: false,
   mailChannel: 'mock',
+  deployment: DEFAULT_DEPLOYMENT,
   // 先用本地静态定义兜底，/api/meta 回来后再覆盖
   placeholderDefs: PLACEHOLDER_DEFS,
   setMailChannel(channel) { set({ mailChannel: channel }); },
@@ -80,6 +94,7 @@ export const useMetaStore = create<MetaState>()((set, get) => ({
         placeholderDefs: toPlaceholderDefs(meta),
         loading: false,
         loaded: true,
+        deployment: meta.deployment ?? DEFAULT_DEPLOYMENT,
         mailChannel: useProjectStore.getState().activeProject?.mailChannel ?? meta.mailChannel ?? 'mock',
       });
     } catch (error) {
@@ -98,4 +113,13 @@ export function selectPlaceholderDefs(state: MetaState): PlaceholderDef[] {
 /** 我方公司信息，占位符本地预览时使用 */
 export function selectCompany(state: MetaState): MetaResponse['company'] | null {
   return state.company;
+}
+
+/** 当前部署模式（saas / self_hosted）与功能开关 */
+export function selectDeployment(state: MetaState): DeploymentProfile {
+  return state.deployment;
+}
+
+export function selectDeploymentFeatures(state: MetaState): DeploymentFeatures {
+  return state.deployment.features;
 }
