@@ -43,7 +43,7 @@ test('example contains no production credentials', () => {
     }
   }
   const lanOverlay = read('compose.lan.yaml');
-  assert.match(lanOverlay, /CRM_EDITION:\s*\$\{CRM_EDITION:-self_hosted\}/);
+  assert.match(lanOverlay, /CRM_EDITION:\s*\$\{LAN_CRM_EDITION:-self_hosted\}/);
   assert.match(lanOverlay, /host\.docker\.internal:host-gateway/);
   assert.match(lanOverlay, /AI_ALLOWED_INTERNAL_ORIGINS/);
 });

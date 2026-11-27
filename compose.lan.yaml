@@ -2,13 +2,15 @@
 # Usage:
 #   docker compose -p globalcrm --env-file .env.production -f compose.yaml -f compose.lan.yaml up -d --build
 # Keep compose.yaml untouched as the commercial SaaS loopback-behind-TLS default.
+# Overlay keys use LAN_* overrides so the same .env.production can switch cleanly between
+# commercial mode (compose.yaml) and team LAN mode (compose.yaml + compose.lan.yaml).
 x-lan-server-env: &lan-server-env
-  CRM_EDITION: ${CRM_EDITION:-self_hosted}
-  COOKIE_SECURE: ${COOKIE_SECURE:-false}
-  CORS_ALLOW_PRIVATE_NETWORK: ${CORS_ALLOW_PRIVATE_NETWORK:-true}
-  CORS_LAN_PORTS: ${CORS_LAN_PORTS:-5173,8080}
+  CRM_EDITION: ${LAN_CRM_EDITION:-self_hosted}
+  COOKIE_SECURE: ${LAN_COOKIE_SECURE:-false}
+  CORS_ALLOW_PRIVATE_NETWORK: ${LAN_CORS_ALLOW_PRIVATE_NETWORK:-true}
+  CORS_LAN_PORTS: ${LAN_CORS_LAN_PORTS:-5173,8080}
   AI_ALLOWED_INTERNAL_ORIGINS: ${AI_ALLOWED_INTERNAL_ORIGINS:-http://host.docker.internal:7863}
-  ENFORCE_PLAN_LIMITS: ${ENFORCE_PLAN_LIMITS:-false}
+  ENFORCE_PLAN_LIMITS: ${LAN_ENFORCE_PLAN_LIMITS:-false}
 
 services:
   migrate:
