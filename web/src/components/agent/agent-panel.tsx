@@ -13,22 +13,17 @@ import {
   Layers3,
   ListChecks,
   MessageSquare,
-  Bot,
   Check,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleOff,
   Clock3,
   FileClock,
-  FilePenLine,
   Loader2,
   MailSearch,
   MoreHorizontal,
   Pencil,
   Plus,
   Send,
-  ShieldCheck,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -90,12 +85,6 @@ function routeContext(pathname: string, search: string): AgentContext {
     }
   }
   return { type: 'global' };
-}
-
-function contextLabel(context: AgentContext): string {
-  if (context.type === 'customer') return '当前客户';
-  if (context.type === 'mail') return '当前这封邮件';
-  return '当前项目';
 }
 
 function sessionContextLabel(session: AgentSession): string {
@@ -227,8 +216,6 @@ export function AgentPanel(): React.JSX.Element | null {
     contextCounts.attention > 0 ? `任务需处理 ${contextCounts.attention} 项` : '',
     contextCounts.active > 0 ? `任务准备中 ${contextCounts.active} 项` : '',
   ].filter(Boolean).join(' · ');
-  const summaryMetricCount = Number(pendingDrafts.total > 0) + Number(taskTodoCount > 0) + Number(contextCounts.active > 0);
-  const summaryGridClass = summaryMetricCount >= 3 ? 'grid-cols-3' : summaryMetricCount === 2 ? 'grid-cols-2' : 'grid-cols-1';
   const secondaryLabels: Record<string, string> = {
     inbox: '来信与提醒', batches: '批量写信', knowledge: '项目知识库', records: '操作记录',
     'customer-preview': '客户预览', 'customer-analysis': '客户分析', 'mail-analysis': '邮件助理',
@@ -516,122 +503,129 @@ export function AgentPanel(): React.JSX.Element | null {
 
   return (
     <WorkspaceDrawer
-      title="销售助手"
+      title="AI 助手"
       onClose={() => setOpen(false)}
-      className="fixed inset-y-0 right-0 z-40 flex w-full flex-col workspace-drawer border-border/70 bg-card shadow-[var(--shadow-pop)] sm:inset-y-3 sm:right-3 sm:w-[min(520px,calc(100vw-1.5rem))] sm:rounded-lg sm:border lg:w-[560px]"
+      className="fixed inset-y-0 right-0 z-40 flex w-full flex-col workspace-drawer border-border/70 bg-card shadow-[var(--shadow-pop)] sm:inset-y-3 sm:right-3 sm:w-[min(500px,calc(100vw-1.5rem))] sm:rounded-xl sm:border lg:w-[520px]"
     >
-      <div className="flex min-h-12 shrink-0 items-center gap-2.5 border-b bg-card px-4 py-2">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground">
-          <Bot className="h-4 w-4" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h2 className="text-[0.8125rem] font-semibold leading-5">销售助手</h2>
-            <span className="inline-flex items-center gap-1 text-[11px] leading-4 text-muted-foreground">
-              {status?.available ? <CheckCircle2 className="h-3 w-3 text-emerald-600" aria-hidden /> : <CircleOff className="h-3 w-3 text-amber-600" aria-hidden />}
-              {!status ? '正在连接…' : status.mode === 'mock' ? '演示模式' : status.available ? 'AI 已启用' : 'AI 暂不可用'}
-            </span>
-          </div>
-          <p className="mt-0.5 truncate text-[11px] leading-4 text-muted-foreground">{project.name} · {contextLabel(activeContext)}</p>
+      {/* Calm, Minimal Header */}
+      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border/80 bg-card px-4">
+        <Sparkles className="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400" aria-hidden />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h2 className="text-sm font-semibold text-foreground">AI 助手</h2>
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                !status ? 'bg-slate-400' : status.available ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}
+              aria-hidden
+            />
+            {!status ? '连接中' : status.mode === 'mock' ? '演示模式' : status.available ? '在线' : '暂不可用'}
+          </span>
+          <span className="hidden truncate text-[11px] text-muted-foreground/80 sm:inline">
+            · {project.name}
+          </span>
         </div>
         {(customerPreviewId||customerAnalysisId||mailAnalysisId)&&<DropdownMenu>
-          <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="查看最近分析"><FileClock className="h-4 w-4" aria-hidden /></Button></DropdownMenuTrigger>
+          <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="查看最近分析"><FileClock className="h-4 w-4 text-muted-foreground" aria-hidden /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {customerPreviewId&&<DropdownMenuItem onSelect={()=>setTab('customer-preview')}>客户预览</DropdownMenuItem>}
             {customerAnalysisId&&<DropdownMenuItem onSelect={()=>setTab('customer-analysis')}>客户分析</DropdownMenuItem>}
             {mailAnalysisId&&<DropdownMenuItem onSelect={()=>setTab('mail-analysis')}>邮件助理</DropdownMenuItem>}
           </DropdownMenuContent>
         </DropdownMenu>}
+        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={startNewSession} title="开始新对话" aria-label="开始新会话">
+          <Plus className="h-4 w-4 text-muted-foreground" />
+        </Button>
         <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} aria-label="关闭销售助手">
-          <X className="h-4 w-4" />
+          <X className="h-4 w-4 text-muted-foreground" />
         </Button>
       </div>
       {status && !status.available ? (
-        <div role="status" className="mx-3 mt-2 shrink-0 rounded-md border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
-          AI 助手暂不可用，无法生成新分析或草稿；已有草稿仍可正常查看和发送。
+        <div role="status" className="mx-4 mt-2.5 shrink-0 rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
+          AI 助手暂不可用，已有草稿仍可正常查看和发送。
           {user.role === 'admin'
-            ? <> 请前往<a href="/ai-settings" className="ml-1 font-medium underline underline-offset-2">AI 配置</a>检查连接。</>
-            : ' 请联系管理员检查 AI 配置。'}
+            ? <> 前往<a href="/ai-settings" className="ml-1 font-medium underline underline-offset-2">AI 配置</a>检查连接。</>
+            : ' 请联系管理员检查配置。'}
         </div>
       ) : null}
 
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-        <div className="shrink-0 border-b px-3 py-1.5">
-          <TabsList aria-label="助手功能" className="grid w-full max-w-none grid-cols-3 gap-0.5 overflow-visible rounded-md bg-muted/60 p-0.5 [&>button]:min-h-8 [&>button]:rounded [&>button]:px-2 [&>button]:py-1 [&>button]:text-xs [&>button]:leading-5 [&>button]:text-muted-foreground [&>button]:data-[state=active]:bg-card [&>button]:data-[state=active]:text-foreground [&>button]:data-[state=active]:shadow-sm">
-            <TabsTrigger value="chat"><MessageSquare className="h-3.5 w-3.5" aria-hidden />对话</TabsTrigger>
-            <TabsTrigger value="tasks" onClick={() => { setFocusTaskId(null); setAutoOpenTaskId(null); }}><ListChecks className="h-3.5 w-3.5" aria-hidden />待办{(tasksLoaded||!pendingDrafts.loading) && pendingDrafts.total + taskTodoCount > 0 && <span className="rounded-sm bg-muted px-1 text-[10px] tabular-nums text-muted-foreground">{pendingDrafts.total + taskTodoCount}</span>}</TabsTrigger>
-            <TabsTrigger value={secondaryLabels[tab] ? tab : 'tools'} onClick={() => setTab('tools')}><BriefcaseBusiness className="h-3.5 w-3.5" aria-hidden />工具</TabsTrigger>
+        {/* Clean Minimal Underline Navigation */}
+        <div className="shrink-0 border-b border-border/80 px-4">
+          <TabsList aria-label="助手功能" className="flex h-10 w-full justify-start gap-5 rounded-none bg-transparent p-0 [&>button]:relative [&>button]:h-10 [&>button]:rounded-none [&>button]:border-b-2 [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-0.5 [&>button]:text-xs [&>button]:font-medium [&>button]:text-muted-foreground [&>button]:shadow-none [&>button]:data-[state=active]:border-indigo-600 [&>button]:data-[state=active]:font-semibold [&>button]:data-[state=active]:text-foreground dark:[&>button]:data-[state=active]:border-indigo-400">
+            <TabsTrigger value="chat" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" aria-hidden />对话</TabsTrigger>
+            <TabsTrigger value="tasks" className="gap-1.5" onClick={() => { setFocusTaskId(null); setAutoOpenTaskId(null); }}>
+              <ListChecks className="h-3.5 w-3.5" aria-hidden />
+              待办
+              {(tasksLoaded||!pendingDrafts.loading) && pendingDrafts.total + taskTodoCount > 0 && (
+                <span className="rounded-full bg-amber-100 px-1.5 py-0 text-[10px] font-semibold tabular-nums text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                  {pendingDrafts.total + taskTodoCount}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value={secondaryLabels[tab] ? tab : 'tools'} className="gap-1.5" onClick={() => setTab('tools')}><BriefcaseBusiness className="h-3.5 w-3.5" aria-hidden />工具</TabsTrigger>
           </TabsList>
         </div>
-        {tab !== 'tasks' && (tab !== 'chat' || messages.length > 0 || pendingDrafts.error) && (hasPendingWork || pendingDrafts.error) && <div className="mx-3 mt-2.5 shrink-0 rounded-lg border border-border bg-muted/35 p-2.5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-start gap-2.5">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-card text-muted-foreground"><ListChecks className="h-3.5 w-3.5" aria-hidden /></span>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-muted-foreground">{activeContext.type === 'customer' ? '当前客户' : activeContext.type === 'mail' ? '当前邮件' : '本项目'} · 待处理</p>
-                <p className="mt-0.5 text-sm font-medium leading-5">{workSummary || '待审核草稿暂未更新'}</p>
-                {pendingDrafts.error ? <p role="alert" className="mt-1 text-xs leading-5 text-destructive">{pendingDrafts.error} <button type="button" className="font-medium underline underline-offset-2" onClick={pendingDrafts.refresh}>重试</button></p> : null}
-              </div>
-            </div>
-            <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 gap-1" onClick={() => { setTab('tasks'); if (pendingDrafts.error) pendingDrafts.refresh(); }}>去待办<ChevronRight className="h-3.5 w-3.5" aria-hidden /></Button>
+
+        {/* Compact Single-Line Pending Bar when inside an active conversation */}
+        {tab === 'chat' && messages.length > 0 && (hasPendingWork || pendingDrafts.error) && (
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 bg-surface/50 px-4 py-2 text-xs">
+            <span className="min-w-0 truncate text-muted-foreground">
+              <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500 align-middle" aria-hidden />
+              {workSummary || '待审核草稿暂未更新'}
+            </span>
+            <button
+              type="button"
+              onClick={() => { setTab('tasks'); if (pendingDrafts.error) pendingDrafts.refresh(); }}
+              className="shrink-0 font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              去待办 →
+            </button>
           </div>
-          {pendingDrafts.items.length > 0 && <div className="mt-2 space-y-0.5">
-            {pendingDrafts.items.slice(0, 2).map((letter) => <button key={letter.id} type="button" onClick={() => openPendingDraft(letter)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium">{letter.subject || '（无主题）'}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{letter.outreachStep ? `第 ${letter.outreachStep} 封 · ` : ''}{letter.customer?.name || letter.recipientName || letter.recipientEmail} · {formatRelative(letter.updatedAt)}</span>
-              </span>
-              <span className="shrink-0 text-[11px] font-medium text-muted-foreground">审核</span>
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            </button>)}
-            {pendingDrafts.total > 2 ? <button type="button" onClick={() => setTab('tasks')} className="flex w-full items-center justify-between rounded px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">还有 {pendingDrafts.total - 2} 封，去待办查看<ChevronRight className="h-3.5 w-3.5" aria-hidden /></button> : null}
-          </div>}
-        </div>}
+        )}
         {secondaryLabels[tab] && <div className="flex shrink-0 items-center gap-2 border-b px-4 py-1.5">
-          <Button variant="ghost" className="min-h-11 px-2 text-muted-foreground" onClick={() => setTab(['customer-preview','customer-analysis','mail-analysis'].includes(tab) ? 'chat' : 'tools')}><ArrowLeft className="h-4 w-4" aria-hidden />返回{['customer-preview','customer-analysis','mail-analysis'].includes(tab) ? '对话' : '工具'}</Button>
-          <span className="text-sm font-medium">{secondaryLabels[tab]}</span>
+          <Button variant="ghost" className="min-h-9 px-2 text-xs text-muted-foreground" onClick={() => setTab(['customer-preview','customer-analysis','mail-analysis'].includes(tab) ? 'chat' : 'tools')}><ArrowLeft className="h-3.5 w-3.5" aria-hidden />返回{['customer-preview','customer-analysis','mail-analysis'].includes(tab) ? '对话' : '工具'}</Button>
+          <span className="text-xs font-semibold">{secondaryLabels[tab]}</span>
         </div>}
 
-        <TabsContent value="tools" className="m-0 min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-          <h3 className="text-base font-semibold">更多销售工具</h3>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">需要审核的草稿在待办中，历史操作可以随时回看。</p>
-          <div className="mt-5 divide-y">
+        <TabsContent value="tools" className="m-0 min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <div className="divide-y divide-border/60">
             {[
-              { value: 'inbox', label: '来信与提醒', description: '查看客户来信、到期跟进，设置自动准备', icon: Inbox },
-              { value: 'batches', label: '批量写信', description: '先选客户，再逐一准备专属开发信', icon: Layers3 },
-              { value: 'knowledge', label: '项目知识库', description: '查阅公司、产品和交易依据，查看客户附件', icon: BookOpen },
-              { value: 'records', label: '操作记录', description: '回看资料查询、草稿及确认结果', icon: FileClock },
-            ].map(item => <button type="button" key={item.value} onClick={() => setTab(item.value)} className="flex min-h-20 w-full items-center gap-3 rounded-md py-4 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-primary"><item.icon className="h-5 w-5" aria-hidden /></span>
-              <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{item.label}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.description}</span></span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              { value: 'inbox', label: '来信与提醒', description: '查看客户来信、到期跟进与自动准备', icon: Inbox, accent: 'text-indigo-600 dark:text-indigo-400' },
+              { value: 'batches', label: '批量写信', description: '批量选择客户并逐一准备开发信', icon: Layers3, accent: 'text-sky-600 dark:text-sky-400' },
+              { value: 'knowledge', label: '项目知识库', description: '查阅产品资料、对外口径与客户附件', icon: BookOpen, accent: 'text-teal-600 dark:text-teal-400' },
+              { value: 'records', label: '操作记录', description: '回看历史查询、草稿与确认结果', icon: FileClock, accent: 'text-violet-600 dark:text-violet-400' },
+            ].map(item => <button type="button" key={item.value} onClick={() => setTab(item.value)} className="group flex w-full items-center gap-3 py-3.5 text-left transition-colors hover:bg-surface/60 focus-visible:outline-none">
+              <item.icon className={`h-4 w-4 shrink-0 ${item.accent}`} aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground">{item.label}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{item.description}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" aria-hidden />
             </button>)}
           </div>
         </TabsContent>
 
         <TabsContent value="chat" className="m-0 flex min-h-0 flex-1 flex-col focus-visible:ring-0">
-          {(activeSession || activeSessionId || sessions.length > 0) && <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+          {(activeSession || activeSessionId || sessions.length > 0) && <div className="flex shrink-0 items-center gap-1 border-b border-border/70 px-4 py-1.5">
             <DropdownMenu open={sessionListOpen} onOpenChange={setSessionListOpen}>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" className="h-10 min-w-0 flex-1 justify-between gap-3 px-2 text-left" aria-label="选择会话">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">{activeSession?.title ?? '新会话'}</span>
-
-                  </span>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <Button type="button" variant="ghost" className="h-8 min-w-0 flex-1 justify-between gap-2 px-1.5 text-left" aria-label="选择会话">
+                  <span className="truncate text-xs font-medium text-foreground/90">{activeSession?.title ?? '新对话'}</span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="max-h-80 w-[min(400px,calc(100vw-2rem))] overflow-y-auto">
-                <DropdownMenuItem className="min-h-11" onSelect={startNewSession}>
-                  <Plus className="h-4 w-4 text-primary" aria-hidden />
-                  <span><span className="block font-medium">开始新会话</span><span className="block text-xs text-muted-foreground">发送第一条问题后才会保存</span></span>
+                <DropdownMenuItem className="min-h-10" onSelect={startNewSession}>
+                  <Plus className="h-4 w-4 text-indigo-600" aria-hidden />
+                  <span><span className="block font-medium">开始新会话</span><span className="block text-xs text-muted-foreground">发送第一条问题后自动保存</span></span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>最近会话</DropdownMenuLabel>
-                {sessions.length === 0 && <DropdownMenuItem disabled className="min-h-11">还没有已保存的会话</DropdownMenuItem>}
+                {sessions.length === 0 && <DropdownMenuItem disabled className="min-h-10">还没有已保存的会话</DropdownMenuItem>}
                 {sessions.map((session) => (
-                  <DropdownMenuItem key={session.id} className="min-h-14 items-start py-2.5" onSelect={() => setActiveSessionId(session.id)}>
-                    {session.id === activeSessionId ? <Check className="mt-0.5 h-4 w-4 text-primary" aria-hidden /> : <span className="h-4 w-4 shrink-0" />}
+                  <DropdownMenuItem key={session.id} className="min-h-12 items-start py-2" onSelect={() => setActiveSessionId(session.id)}>
+                    {session.id === activeSessionId ? <Check className="mt-0.5 h-4 w-4 text-indigo-600" aria-hidden /> : <span className="h-4 w-4 shrink-0" />}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium" title={session.title}>{session.title}</span>
                       <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -639,126 +633,153 @@ export function AgentPanel(): React.JSX.Element | null {
                         <span aria-hidden>·</span>
                         <span className="shrink-0">{formatRelative(session.lastMessageAt ?? session.updatedAt)}</span>
                       </span>
-                      {session.lastMessagePreview && <span className="mt-1 block truncate text-xs text-muted-foreground/80" title={session.lastMessagePreview}>{session.lastMessagePreview}</span>}
                     </span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu open={sessionActionsOpen} onOpenChange={setSessionActionsOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-11 w-11" disabled={!activeSession} aria-label="当前会话操作">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuItem onSelect={() => { setRenameTitle(activeSession?.title ?? ''); setRenameOpen(true); }}>
-                  <Pencil className="h-4 w-4" aria-hidden />重命名
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setArchiveOpen(true)}>
-                  <Archive className="h-4 w-4" aria-hidden />归档会话
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button type="button" variant="ghost" size="icon" className="h-11 w-11" onClick={startNewSession} aria-label="开始新会话">
-              <Plus className="h-4 w-4" />
-            </Button>
+            {activeSession ? (
+              <DropdownMenu open={sessionActionsOpen} onOpenChange={setSessionActionsOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label="当前会话操作">
+                    <MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem onSelect={() => { setRenameTitle(activeSession?.title ?? ''); setRenameOpen(true); }}>
+                    <Pencil className="h-3.5 w-3.5" aria-hidden />重命名
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setArchiveOpen(true)}>
+                    <Archive className="h-3.5 w-3.5" aria-hidden />归档会话
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>}
 
-          {activeContext.type === 'customer' && <div aria-label="当前会话客户" className="shrink-0 px-3 pt-3">
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-card text-xs font-semibold text-foreground">
-                {(currentCustomer?.company || currentCustomer?.name || activeSession?.contextName || '客').slice(0, 1)}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold leading-5">{currentCustomer?.company || currentCustomer?.name || activeSession?.contextName || '客户资料'}</p>
-                {currentCustomer && <p className="mt-0.5 truncate text-xs leading-5 text-muted-foreground">{[currentCustomer.company && currentCustomer.name !== currentCustomer.company ? currentCustomer.name : '', currentCustomer.country, CUSTOMER_STATUS_LABEL[currentCustomer.status], currentCustomer.email ? '已有联系邮箱' : '尚未填写邮箱'].filter(Boolean).join(' · ')}</p>}
-              </div>
+          {activeContext.type === 'customer' && (
+            <div aria-label="当前会话客户" className="flex shrink-0 items-center gap-2.5 border-b border-border/60 bg-surface/40 px-4 py-2 text-xs">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-indigo-500" aria-hidden />
+              <span className="truncate font-semibold text-foreground">{currentCustomer?.company || currentCustomer?.name || activeSession?.contextName || '客户资料'}</span>
+              {currentCustomer ? (
+                <span className="truncate text-muted-foreground">
+                  {[currentCustomer.country, CUSTOMER_STATUS_LABEL[currentCustomer.status]].filter(Boolean).join(' · ')}
+                </span>
+              ) : null}
             </div>
-          </div>}
-          <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto p-4" aria-live="polite" aria-busy={loading || sending}>
+          )}
+
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-5 py-5" aria-live="polite" aria-busy={loading || sending}>
             {loading && messages.length === 0 && <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />正在加载会话…</div>}
+
+            {/* Clean, Minimal, Card-Free Empty State */}
             {!loading && messages.length === 0 && (
-              <div className="space-y-4 py-1">
-                <section className="hero-wash rounded-xl border border-border p-4">
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm"><Sparkles className="h-4 w-4" aria-hidden /></span>
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{project.name} · {activeContext.type === 'global' ? '当前工作区' : contextLabel(activeContext)}</p>
-                      <p className="mt-1 text-base font-semibold leading-6 tracking-tight text-foreground">{activeContext.type === 'customer' ? '这位客户，下一步怎么推进？' : activeContext.type === 'mail' ? '一起处理这封客户来信' : hasPendingWork ? '先把眼前的工作处理掉' : '今天想先推进哪项工作？'}</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{activeContext.type === 'customer' ? '结合客户资料写信、梳理跟进，或直接告诉我你的需求。' : activeContext.type === 'mail' ? '整理往来内容与客户需求，再准备合适的回复。' : hasPendingWork ? '审核草稿、处理待办，或直接告诉助手要做什么。' : '找客户、看跟进、准备开发信，用一句话交给助手。'}</p>
+              <div className="flex min-h-full flex-col justify-between py-2">
+                <div className="space-y-6">
+                  <div className="space-y-1.5 pt-2">
+                    <p className="text-base font-semibold tracking-tight text-foreground">
+                      {activeContext.type === 'customer'
+                        ? '这位客户，想从哪里推进？'
+                        : activeContext.type === 'mail'
+                          ? '一起处理这封来信'
+                          : '有什么可以帮你？'}
+                    </p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {activeContext.type === 'customer'
+                        ? '结合客户档案、官网与历史往来起草邮件或梳理策略。'
+                        : activeContext.type === 'mail'
+                          ? '提炼客户诉求、对照口径并准备回复草稿。'
+                          : '直接问我客户跟进、开发信撰写、知识库口径或业绩分析。'}
+                    </p>
+                  </div>
+
+                  {/* Single Compact Pending Strip (No Multi-Card Stacking!) */}
+                  {hasPendingWork && (
+                    <button
+                      type="button"
+                      onClick={() => setTab('tasks')}
+                      className="group flex w-full items-center justify-between gap-3 rounded-xl bg-amber-50/75 px-3.5 py-2.5 text-left text-xs transition-colors hover:bg-amber-50 dark:bg-amber-500/10 dark:hover:bg-amber-500/15"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden />
+                        <span className="truncate font-medium text-amber-950 dark:text-amber-100">{workSummary}</span>
+                      </span>
+                      <span className="shrink-0 font-medium text-amber-700 group-hover:underline dark:text-amber-300">
+                        去处理 →
+                      </span>
+                    </button>
+                  )}
+
+                  {/* Contextual One-Click Action for Customer / Mail */}
+                  {activeContext.type === 'customer' && (
+                    <Button type="button" size="sm" className="gap-2" onClick={() => void sendMessage('请分析这个客户，结合官网与历史往来准备合适的邮件，不要发送')} disabled={sending}>
+                      <Send className="h-3.5 w-3.5" aria-hidden />分析客户并准备邮件
+                    </Button>
+                  )}
+                  {activeContext.type === 'mail' && (
+                    <Button type="button" size="sm" className="gap-2" onClick={() => void startMailAnalysis()} disabled={analyzing}>
+                      {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MailSearch className="h-3.5 w-3.5" />}整理来信并准备回复
+                    </Button>
+                  )}
+
+                  {/* Minimal Hairline Prompt Suggestions (Zero Boxed Cards) */}
+                  <div>
+                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">快捷提问</p>
+                    <div className="divide-y divide-border/55">
+                      {suggestions(activeContext)
+                        .filter(item => activeContext.type !== 'customer' || !item.includes('第一封'))
+                        .map(item => (
+                          <button
+                            key={item}
+                            type="button"
+                            disabled={sending}
+                            onClick={() => void sendMessage(item)}
+                            className="group -mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left text-[0.8125rem] text-foreground/90 transition-colors hover:bg-surface disabled:opacity-50"
+                          >
+                            <span>{item}</span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
+                          </button>
+                        ))}
                     </div>
                   </div>
-                  {hasPendingWork && <div className={`mt-3 grid gap-2 ${summaryGridClass}`}>
-                    {pendingDrafts.total > 0 && <button type="button" onClick={() => setTab('tasks')} className="rounded-md border border-border bg-muted/30 px-2.5 py-2 text-left transition-colors hover:bg-muted">
-                      <span className="block text-lg font-semibold tabular-nums text-foreground">{pendingDrafts.total}</span>
-                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">草稿待审核</span>
-                    </button>}
-                    {taskTodoCount > 0 && <button type="button" onClick={() => { setFocusTaskId(contextualTasks.find(task => task.status === 'awaiting_review' || task.status === 'waiting_input' || task.status === 'paused' || task.status === 'failed')?.id ?? null); setTab('tasks'); }} className="rounded-md border border-border bg-muted/30 px-2.5 py-2 text-left transition-colors hover:bg-muted">
-                      <span className="block text-lg font-semibold tabular-nums text-foreground">{taskTodoCount}</span>
-                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">任务待处理</span>
-                    </button>}
-                    {contextCounts.active > 0 && <button type="button" onClick={() => setTab('tasks')} className="rounded-md border border-border bg-muted/30 px-2.5 py-2 text-left transition-colors hover:bg-muted">
-                      <span className="block text-lg font-semibold tabular-nums text-foreground">{contextCounts.active}</span>
-                      <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">任务准备中</span>
-                    </button>}
-                  </div>}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {activeContext.type === 'customer' && <Button type="button" className="min-h-11 gap-2" onClick={() => void sendMessage('请分析这个客户，结合官网与历史往来准备合适的邮件，不要发送')} disabled={sending}><Send className="h-4 w-4" aria-hidden />分析客户并准备邮件</Button>}
-                    {activeContext.type === 'mail' && <Button type="button" className="min-h-11 gap-2" onClick={() => void startMailAnalysis()} disabled={analyzing}>{analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailSearch className="h-4 w-4" />}整理来信并准备回复</Button>}
-                    {activeContext.type === 'global' && <Button type="button" className="min-h-11 gap-2" onClick={() => { setFocusTaskId(null); setTab('tasks'); }}><ListChecks className="h-4 w-4" aria-hidden />{hasPendingWork ? '处理待办' : '查看待办'}</Button>}
-                    <Button type="button" variant="outline" className="min-h-11 gap-2" onClick={() => setTab('inbox')}><Inbox className="h-4 w-4" aria-hidden />看来信与提醒</Button>
-                  </div>
-                </section>
-
-                {pendingDrafts.items.length > 0 && <section className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-2 text-sm font-semibold"><FilePenLine className="h-4 w-4 text-primary" aria-hidden />待审核草稿 <span className="text-xs font-normal tabular-nums text-muted-foreground">{pendingDrafts.total} 封</span></p>
-                    <button type="button" className="flex items-center gap-0.5 text-xs font-medium text-primary hover:underline" onClick={() => setTab('tasks')}>查看全部<ChevronRight className="h-3.5 w-3.5" aria-hidden /></button>
-                  </div>
-                  <div className="mt-2 divide-y">
-                    {pendingDrafts.items.slice(0, 3).map((letter) => <button key={letter.id} type="button" onClick={() => openPendingDraft(letter)} className="flex w-full items-center gap-2 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{letter.subject || '（无主题）'}</span>
-                        <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
-                          {letter.outreachStep ? <Badge variant="outline" className="shrink-0">第 {letter.outreachStep} 封</Badge> : null}
-                          <span className="min-w-0 truncate">{letter.customer?.name || letter.recipientName || letter.recipientEmail}</span>
-                          <span aria-hidden>·</span><span className="shrink-0">{formatRelative(letter.updatedAt)}</span>
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary">审核<ChevronRight className="h-3.5 w-3.5" aria-hidden /></span>
-                    </button>)}
-                  </div>
-                  {pendingDrafts.total > 3 ? <button type="button" className="mt-1 w-full rounded-lg py-1.5 text-xs font-medium text-primary hover:bg-muted/40" onClick={() => setTab('tasks')}>还有 {pendingDrafts.total - 3} 封，打开待办查看</button> : null}
-                  <p className="mt-2 border-t pt-2 text-[11px] leading-5 text-muted-foreground">第 2、3 封会在对应跟进到期后进入待办；提前生成的草稿不会占用审核名额。</p>
-                </section>}
-
-                <div className="space-y-2">
-                  <p className="px-1 text-xs font-medium text-muted-foreground">也可以直接问我</p>
-                  {suggestions(activeContext).filter(item => activeContext.type !== 'customer' || !item.includes('第一封')).map(item => <Button key={item} type="button" variant="outline" className="h-auto min-h-11 w-full justify-between gap-3 whitespace-normal rounded-xl px-3.5 py-2.5 text-left font-normal leading-6 shadow-none transition-colors hover:border-primary/30 hover:bg-primary/[0.04]" disabled={sending} onClick={() => void sendMessage(item)}><span>{item}</span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /></Button>)}
                 </div>
-                <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  助手自动结合客户官网、授权往来与项目资料分析，再准备合适的邮件；由你审核发送。
-                </p>
               </div>
             )}
+
+            {/* Clean Editorial Message Stream */}
             {messages.map((message) => (
-              <article key={message.id} className={message.role === 'user' ? 'ml-auto w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm bg-primary px-3.5 py-2.5 text-sm text-primary-foreground' : `min-w-0 rounded-lg rounded-bl-sm border border-border bg-card px-3.5 py-3 text-sm ${message.status === 'failed' ? 'border-amber-500/40 bg-amber-500/5' : ''}`}>
-                {message.role === 'assistant' && <p className="mb-3 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">AI 生成 · 请核对关键信息</p>}
+              <article
+                key={message.id}
+                className={
+                  message.role === 'user'
+                    ? 'ml-auto w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-primary px-3.5 py-2.5 text-sm text-primary-foreground'
+                    : `min-w-0 text-sm ${message.status === 'failed' ? 'rounded-xl border border-amber-500/40 bg-amber-500/5 px-3.5 py-3' : 'py-0.5'}`
+                }
+              >
+                {message.role === 'assistant' && (
+                  <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                    <Sparkles className="h-3 w-3 text-indigo-500" aria-hidden />
+                    AI 助手 · 请核对关键信息
+                  </p>
+                )}
                 {message.role === 'assistant' ? <AgentMessageContent content={message.content} /> : <p className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
-                {message.batchId&&<Button variant="outline" className="mt-3 min-h-11" onClick={()=>setTab('batches')}>查看批量计划</Button>}
-                {message.taskId && <Button variant="outline" className="mt-3 min-h-11" onClick={()=>showTask(message.taskId!)}>查看任务进度</Button>}
-                {message.role === 'assistant' && message.uiAction && <Button type="button" className="mt-3" onClick={() => openOutreachComposer(message.uiAction!)}>打开首封开发信</Button>}
+                {message.batchId&&<Button variant="outline" size="sm" className="mt-3" onClick={()=>setTab('batches')}>查看批量计划</Button>}
+                {message.taskId && <Button variant="outline" size="sm" className="mt-3" onClick={()=>showTask(message.taskId!)}>查看任务进度</Button>}
+                {message.role === 'assistant' && message.uiAction && <Button type="button" size="sm" className="mt-3" onClick={() => openOutreachComposer(message.uiAction!)}>打开首封开发信</Button>}
               </article>
             ))}
-            {sending && <div className="mr-20 flex items-center gap-2 rounded-2xl border border-border/80 bg-card shadow-card px-3 py-3 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 shrink-0 animate-spin" />正在读取 CRM 数据并分析，复杂问题可能需要约 1 分钟…</div>}
+            {sending && (
+              <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-indigo-500" />
+                正在读取资料并分析…
+              </div>
+            )}
           </div>
 
-          {error && <p role="alert" className="mx-4 mb-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
-          <form className="shrink-0 border-t bg-card p-3" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
-            <label htmlFor="agent-message" className="sr-only">向销售助手提问</label>
-            <div className="rounded-lg border border-border bg-card p-2.5 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
+          {error && <p role="alert" className="mx-4 mb-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>}
+          <form className="shrink-0 border-t border-border/80 bg-card px-4 py-3" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
+            <label htmlFor="agent-message" className="sr-only">向 AI 助手提问</label>
+            <div className="rounded-2xl border border-border/90 bg-surface/45 px-3 py-2.5 transition-colors focus-within:border-indigo-500/45 focus-within:bg-card">
               <Textarea
                 ref={textareaRef}
                 id="agent-message"
@@ -773,14 +794,16 @@ export function AgentPanel(): React.JSX.Element | null {
                 maxLength={8000}
                 rows={2}
                 disabled={sending}
-                placeholder={activeContext.type === 'customer' ? '例如：结合客户需求，准备一封英文跟进信…' : '告诉助手，你想完成什么…'}
-                className="min-h-12 max-h-32 resize-none border-0 bg-transparent p-0 text-base shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-sm"
+                placeholder={activeContext.type === 'customer' ? '例如：结合客户需求，准备一封英文跟进信…' : '输入问题或任务指令…'}
+                className="min-h-10 max-h-32 resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
               />
-              <div className="mt-2 flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-xs leading-5 text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />邮件由你审核发送</span><Button type="submit" size="icon" className="h-8 w-8 shrink-0 rounded-md" disabled={!draft.trim() || sending} aria-label="发送消息">
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button></div>
+              <div className="mt-1.5 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">Enter 发送 · 邮件均需人工确认</span>
+                <Button type="submit" size="icon" className="h-7 w-7 shrink-0 rounded-lg" disabled={!draft.trim() || sending} aria-label="发送消息">
+                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
             </div>
-            <p className="mt-1.5 text-center text-xs text-muted-foreground">Enter 发送 · Shift + Enter 换行</p>
           </form>
         </TabsContent>
 
