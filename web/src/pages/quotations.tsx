@@ -442,41 +442,61 @@ export function QuotationsPage(): React.JSX.Element {
       />
 
       {/* Top 4 KPI Cards */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">草稿待报价</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{summary?.draft ?? 0}</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">累计报价单 {summary?.total ?? 0} 份</p>
-          </CardContent>
+      <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="p-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
+              <FileText className="h-[18px] w-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">草稿待报价</p>
+              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{summary?.draft ?? 0}</p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">累计报价单 {summary?.total ?? 0} 份</p>
+            </div>
+          </div>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">已发送 / 谈判中</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{(summary?.sent ?? 0) + (summary?.negotiating ?? 0)}</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">在谈金额 {formatMoney(summary?.activePipelineAmount ?? 0, 'USD')}</p>
-          </CardContent>
+        <Card className="p-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
+              <ReceiptText className="h-[18px] w-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">已发送 / 谈判中</p>
+              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{(summary?.sent ?? 0) + (summary?.negotiating ?? 0)}</p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">在谈金额 {formatMoney(summary?.activePipelineAmount ?? 0, 'USD')}</p>
+            </div>
+          </div>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">待主管审批 / RFQ</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{summary?.pendingApproval ?? 0} <span className="text-sm font-normal text-muted-foreground">/ {rfqs.length} RFQ</span></p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">支持非标多档核价与内部核准</p>
-          </CardContent>
+        <Card className="p-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amberx-soft text-amberx" aria-hidden>
+              <ShieldCheck className="h-[18px] w-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">待主管审批 / RFQ</p>
+              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{summary?.pendingApproval ?? 0} <span className="text-sm font-normal text-muted-foreground">/ {rfqs.length} RFQ</span></p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">支持非标多档核价与内部核准</p>
+            </div>
+          </div>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">已成交报价额</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
-              {formatMoney(summary?.acceptedAmount ?? 0, 'USD')}
-            </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">成交 {summary?.accepted ?? 0} 份</p>
-          </CardContent>
+        <Card className="p-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft text-gold" aria-hidden>
+              <CheckCircle2 className="h-[18px] w-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">已成交报价额</p>
+              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em] text-primary">
+                {formatMoney(summary?.acceptedAmount ?? 0, 'USD')}
+              </p>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">成交 {summary?.accepted ?? 0} 份</p>
+            </div>
+          </div>
         </Card>
       </div>
 
       {/* Mode Tabs */}
-      <nav className="flex flex-wrap items-center gap-1 border-b border-border">
+      <nav className="flex flex-wrap items-center gap-4 border-b border-border">
         {([
           ['builder', '创建 / 编辑外贸报价单'],
           ['rfq', `非标定制 RFQ 核价表 (${rfqs.length})`],
@@ -486,8 +506,8 @@ export function QuotationsPage(): React.JSX.Element {
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`-mb-px inline-flex h-9 items-center border-b-2 px-3 text-xs font-medium transition-colors ${
-              tab === key ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
+              tab === key ? 'border-primary font-semibold text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
             {label}

@@ -4,8 +4,8 @@ import animate from 'tailwindcss-animate';
 /**
  * Tailwind 配置
  * ------------------------------------------------------------------
- * 颜色全部走 CSS 变量（LoopAI 风格：淡薰衣草底 + 紫色主色 + 薄荷/玫瑰柔色标签），
- * 深色模式只需切换 .dark 类下的变量值，无需为每个组件写 dark: 前缀。
+ * Atelier Trade 设计系统：温润象牙白画布 + 暖石侧栏 + 深森林绿品牌主色 + 克制古铜金点缀。
+ * 深色模式通过 .dark 下的语义变量自动切换。
  */
 export default {
   darkMode: ['class'],
@@ -52,7 +52,6 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
-        /** 内凹/次级面板底色（列表头、工具条、漏斗背景） */
         surface: {
           DEFAULT: 'hsl(var(--surface))',
           foreground: 'hsl(var(--surface-foreground))',
@@ -63,13 +62,11 @@ export default {
           accent: 'hsl(var(--sidebar-accent))',
           border: 'hsl(var(--sidebar-border))',
         },
-        /** 状态色：待开发（靛蓝）/ 已开发（薄荷绿）/ 失败（玫瑰红） */
         status: {
           pending: 'hsl(var(--status-pending))',
           developed: 'hsl(var(--status-developed))',
           failed: 'hsl(var(--status-failed))',
         },
-        /** 柔色标签：薄荷 / 玫瑰 / 琥珀 / 紫罗兰 */
         mint: {
           DEFAULT: 'hsl(var(--mint))',
           soft: 'hsl(var(--mint-soft))',
@@ -85,8 +82,13 @@ export default {
         violet: {
           soft: 'hsl(var(--violet-soft))',
         },
+        gold: {
+          DEFAULT: 'hsl(var(--gold))',
+          soft: 'hsl(var(--gold-soft))',
+        },
       },
       borderRadius: {
+        xl: 'calc(var(--radius) + 2px)',
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 4px)',
         sm: 'calc(var(--radius) - 6px)',
@@ -96,18 +98,18 @@ export default {
         card: 'var(--shadow-card)',
         island: 'var(--shadow-island)',
         pop: 'var(--shadow-pop)',
-        soft: '0 1px 2px hsl(252 30% 25% / 0.04)',
+        soft: '0 2px 8px -4px hsl(150 22% 14% / 0.08), 0 1px 2px hsl(150 22% 14% / 0.04)',
       },
       fontFamily: {
         sans: [
           'Inter',
-          'system-ui',
           '-apple-system',
-          'Segoe UI',
-          'Roboto',
+          'BlinkMacSystemFont',
           'PingFang SC',
           'Hiragino Sans GB',
           'Microsoft YaHei',
+          'Segoe UI',
+          'Roboto',
           'sans-serif',
         ],
         mono: ['JetBrains Mono', 'SFMono-Regular', 'Consolas', 'monospace'],
@@ -136,7 +138,7 @@ export default {
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
-        'fade-in': 'fade-in 0.3s cubic-bezier(.22,.68,.34,1)',
+        'fade-in': 'fade-in 0.28s cubic-bezier(.22,.68,.34,1)',
         'pop-in': 'pop-in 0.16s ease-out',
       },
       fontSize: {

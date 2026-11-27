@@ -52,11 +52,11 @@ export function KnowledgePage(){
  };
  return <section className="workspace-page">
   <PageHeader title="知识库" description={descriptions[active]} />
-  <nav aria-label="知识库视图" className="flex flex-wrap items-center gap-1 border-b border-border">
-   {tabs.map(([id,label])=><button key={id} type="button" aria-current={active===id?'page':undefined} className={'-mb-px inline-flex h-9 items-center border-b-2 px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 '+(active===id?'border-foreground text-foreground':'border-transparent text-muted-foreground hover:text-foreground')} onClick={()=>tab(id)}>{label}</button>)}
-   <span className="ml-auto hidden pr-1 text-[11px] text-muted-foreground sm:block">{project?.name} · 本项目资料</span>
+  <nav aria-label="知识库视图" className="flex flex-wrap items-center gap-4 border-b border-border">
+   {tabs.map(([id,label])=><button key={id} type="button" aria-current={active===id?'page':undefined} className={'-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 '+(active===id?'border-primary font-semibold text-primary':'border-transparent text-muted-foreground hover:text-foreground')} onClick={()=>tab(id)}>{label}</button>)}
+   <span className="ml-auto hidden pr-1 text-xs text-muted-foreground sm:block">{project?.name} · 项目隔离资料库</span>
   </nav>
-  <div className={full?'min-w-0':'min-w-0 overflow-hidden rounded-lg border border-border bg-card xl:flex xl:h-[calc(100dvh-12rem)] xl:flex-col'}>
+  <div className={full?'min-w-0':'panel min-w-0 overflow-hidden xl:flex xl:h-[calc(100dvh-13rem)] xl:flex-col'}>
    {active==='qa'?<KnowledgeQaPanel key={`qa:${key}`} admin={admin}/>
     :active==='policies'?<PolicyLedgerPanel key={`pol:${key}`} canManage={canManage}/>
     :active==='playbook'?<PlaybookAdmin key={key}/>

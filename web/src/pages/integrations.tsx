@@ -119,9 +119,36 @@ function IntegrationWorkspace({ projectId, projectName }: { projectId: string; p
   };
   return <div className="workspace-page space-y-6">
     <PageHeader title={t('integrations.title')} description={t('integrations.subtitle')} actions={<Button className="min-h-11" onClick={openCreate} disabled={!settings || loading || settings.quota.used >= settings.quota.limit}><Plus className="h-4 w-4" aria-hidden />{t('integrations.create')}</Button>} />
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
-      <div className="flex min-w-0 items-center gap-3"><ShieldCheck className="h-5 w-5 shrink-0 text-primary" aria-hidden /><div className="min-w-0"><p className="text-xs text-muted-foreground">{t('integrations.project')}</p><p className="break-words font-medium" data-user-content>{projectName}</p></div></div>
-      <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-muted-foreground">{settings ? t('integrations.quota', settings.quota) : t('common.loading')}</span><Button className="min-h-11" variant="outline" onClick={() => setRefresh(n => n + 1)} disabled={loading || logLoading}><RefreshCw className="h-4 w-4" aria-hidden />{t('common.refresh')}</Button></div>
+    <div className="grid gap-3.5 sm:grid-cols-3">
+      <div className="panel flex items-center gap-3.5 p-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
+          <ShieldCheck className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-muted-foreground">{t('integrations.project')}</p>
+          <p className="mt-1 truncate text-base font-bold text-foreground" data-user-content>{projectName}</p>
+        </div>
+      </div>
+      <div className="panel flex items-center gap-3.5 p-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
+          <KeyRound className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-muted-foreground">{settings ? t('integrations.quota', settings.quota) : t('common.loading')}</p>
+          <p className="mt-1 text-xl font-bold leading-none tabular-nums text-foreground">
+            {settings ? `${settings.quota.used} / ${settings.quota.limit}` : '—'}
+          </p>
+        </div>
+      </div>
+      <div className="panel flex items-center justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-muted-foreground">{t('integrations.logs')}</p>
+          <p className="mt-1 text-xl font-bold leading-none tabular-nums text-foreground">{logs?.total ?? '—'}</p>
+        </div>
+        <Button className="min-h-11 shrink-0" variant="outline" onClick={() => setRefresh(n => n + 1)} disabled={loading || logLoading}>
+          <RefreshCw className="h-4 w-4" aria-hidden />{t('common.refresh')}
+        </Button>
+      </div>
     </div>
     {loadError ? <p role="alert" className="text-sm text-destructive">{t('integrations.loadError')}</p> : loading ? <p role="status">{t('common.loading')}</p> : <>
       {settings && settings.quota.used >= settings.quota.limit ? <p role="note" className="rounded-md border p-3 text-sm">{t('integrations.quotaReached')}</p> : null}

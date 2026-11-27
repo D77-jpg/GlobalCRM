@@ -29,23 +29,30 @@ function socialHref(value:string,host:string,prefix=''){
  catch{return /^[\w.%-]{1,100}$/.test(value)?'https://'+host+'/'+prefix+encodeURIComponent(value):undefined;}
 }
 function scoreClass(score: number) {
-  if (score >= 80) return 'border-foreground bg-foreground text-background';
-  if (score >= 60) return 'border-border bg-muted text-foreground';
-  return 'border-border bg-card text-muted-foreground';
+  if (score >= 80) return 'border-primary/20 bg-primary-soft text-primary';
+  if (score >= 60) return 'border-amberx/25 bg-amberx-soft text-amberx';
+  return 'border-border bg-surface text-muted-foreground';
 }
 
-function ProspectCard({ prospect, today, busy, onApprove, onReject, onClaim, onRelease, onSync,onRefresh,selectable,selected,onToggle }: {
+function ProspectCard({ prospect, today, busy, onApprove, onReject, onClaim, onRelease, onSync, onRefresh, selectable, selected, onToggle, active, onSelect }: {
   prospect: Prospect; today: string; busy: boolean;
   onApprove: (id: string) => void; onReject: (id: string) => void; onClaim?: (id: string) => void; onRelease?: (id: string) => void;
-  onSync?:(id:string)=>void;onRefresh?:(id:string)=>void;
-  /** 可批量转换的候选才显示勾选框 */
+  onSync?: (id: string) => void; onRefresh?: (id: string) => void;
   selectable?: boolean; selected?: boolean; onToggle?: (id: string) => void;
+  active?: boolean; onSelect?: () => void;
 }) {
   const currentUser = useAuthStore((state) => state.user);
   const converted = prospect.status === 'converted';
   const mine = Boolean(prospect.ownerId && prospect.ownerId === currentUser?.id);
   return (
-    <div className={cn('rounded-lg border border-border bg-card p-3.5', selected && 'border-foreground/40 ring-1 ring-foreground/10')}>
+    <div
+      onClick={onSelect}
+      className={cn(
+        'panel cursor-pointer p-4 transition-[border-color,background-color,box-shadow] duration-150 hover:border-primary/35',
+        active && 'border-primary/50 bg-primary-soft/25 ring-1 ring-primary/15',
+        selected && 'border-primary/45 ring-1 ring-primary/20',
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2.5">
           {selectable ? (
@@ -315,10 +322,19 @@ export function ProspectingPage(): React.JSX.Element {
   const refreshContact=async(id:string)=>{setBusy(id);try{const result=await apiPost<{filledFields:string[]}>('/prospecting/'+id+'/refresh-contact',{},{timeout:600000});toast.success(result.filledFields.length?'官网已更新并补齐 '+result.filledFields.length+' 个空白字段':'官网已重新读取，未发现新的空白项可补齐',{description:'客户原有资料保持不变。'});await load();}catch(error){toast.error('重新读取官网资料失败',{description:toErrorMessage(error)});}finally{setBusy(null);}};
   const openConfig = () => setConfigOpen(true);
 
-  /** 勾中的候选 id（只对可转换的候选生效） */
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  /** 本次确认框要转换的候选 */
   const [pendingTargets, setPendingTargets] = React.useState<Prospect[]>([]);
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const first = data?.prospects[0]?.id ?? null;
+    setActiveId((prev) => (prev && data?.prospects.some((p) => p.id === prev) ? prev : first));
+  }, [data?.prospects]);
+
+  const activeProspect = React.useMemo(
+    () => (activeId ? data?.prospects.find((p) => p.id === activeId) ?? null : null),
+    [data?.prospects, activeId],
+  );
 
   React.useEffect(() => { setSelected(new Set()); }, [scope, statusFilter]);
 
@@ -426,16 +442,21 @@ export function ProspectingPage(): React.JSX.Element {
         }
       />
 
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3.5 xl:grid-cols-4">
         {[
-          { label: '待处理线索', value: counts?.total ?? 0, icon: Target },
-          { label: '可以发送', value: counts?.ready ?? 0, icon: Check },
-          { label: '待补联系方式', value: counts?.needsContact ?? 0, icon: AtSign },
-          { label: '已转客户', value: counts?.converted ?? 0, icon: Sparkles },
+          { label: '待处理线索', value: counts?.total ?? 0, icon: Target, tone: 'bg-primary-soft text-primary' },
+          { label: '可以发送', value: counts?.ready ?? 0, icon: Check, tone: 'bg-mint-soft text-mint' },
+          { label: '待补联系方式', value: counts?.needsContact ?? 0, icon: AtSign, tone: 'bg-amberx-soft text-amberx' },
+          { label: '已转客户', value: counts?.converted ?? 0, icon: Sparkles, tone: 'bg-gold-soft text-gold' },
         ].map((item) => (
-          <div key={item.label} className="flex items-center justify-between bg-card px-3.5 py-2.5 sm:px-4 sm:py-3">
-            <div><p className="text-[11px] text-muted-foreground">{item.label}</p><p className="mt-1 text-xl font-semibold tabular-nums tracking-[-0.02em]">{item.value}</p></div>
-            <item.icon className="h-4 w-4 text-muted-foreground/70" aria-hidden />
+          <div key={item.label} className="panel flex items-center gap-3.5 p-4">
+            <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-full', item.tone)} aria-hidden>
+              <item.icon className="h-[18px] w-[18px]" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
+              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em] text-foreground">{item.value}</p>
+            </div>
           </div>
         ))}
       </div>
@@ -461,7 +482,7 @@ export function ProspectingPage(): React.JSX.Element {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1 border-b border-border">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border">
         {([
           { key: 'mine' as const, label: '我的线索池', count: data?.scopeTotals?.mine ?? 0 },
           { key: 'shared' as const, label: '公共线索池', count: data?.scopeTotals?.shared ?? 0 },
@@ -473,17 +494,17 @@ export function ProspectingPage(): React.JSX.Element {
             aria-pressed={scope === tab.key}
             onClick={() => { setScope(tab.key); setStatusFilter('all'); }}
             className={cn(
-              '-mb-px inline-flex h-9 items-center gap-1.5 border-b-2 px-2.5 text-xs font-medium transition-colors',
+              '-mb-px inline-flex h-10 items-center gap-2 border-b-2 px-3 text-[0.8125rem] font-medium transition-colors',
               scope === tab.key
-                ? 'border-foreground text-foreground'
+                ? 'border-primary font-semibold text-primary'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
           >
             {tab.label}
-            <span className="text-[11px] font-normal tabular-nums text-muted-foreground">{tab.count}</span>
+            <span className={cn('rounded-full px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums', scope === tab.key ? 'bg-primary-soft text-primary' : 'bg-muted text-muted-foreground')}>{tab.count}</span>
           </button>
         ))}
-        <span className="ml-auto hidden pb-2 text-[11px] text-muted-foreground lg:block">
+        <span className="ml-auto hidden pb-2 text-xs text-muted-foreground lg:block">
           {scope === 'mine' ? '只显示你搜索生成、领取或导入的线索；不会和公共线索池重复。' : scope === 'shared' ? '未领取的共用线索；领取或转化后归你负责。' : '其他业务员名下的线索；由管理员查看。'}
         </span>
       </div>
@@ -497,7 +518,7 @@ export function ProspectingPage(): React.JSX.Element {
         ];
         if ((data?.counts.low ?? 0) > 0) tabs.push({ key: 'low', label: '低优先', count: data?.counts.low ?? 0 });
         return (
-          <div ref={resultsTopRef} className="scroll-mt-4 flex flex-wrap items-center gap-1">
+          <div ref={resultsTopRef} className="scroll-mt-4 flex flex-wrap items-center gap-1.5">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
@@ -505,19 +526,19 @@ export function ProspectingPage(): React.JSX.Element {
                 aria-pressed={statusFilter === tab.key}
                 onClick={() => setStatusFilter(tab.key)}
                 className={cn(
-                  'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] transition-colors',
+                  'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors',
                   statusFilter === tab.key
-                    ? 'bg-muted font-medium text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'border border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground',
                 )}
               >
                 {tab.label}
-                <span className="tabular-nums text-muted-foreground">{tab.count}</span>
+                <span className={cn('tabular-nums text-[11px]', statusFilter === tab.key ? 'text-primary-foreground/85' : 'text-muted-foreground')}>{tab.count}</span>
               </button>
             ))}
             {data ? (
-              <span className="ml-auto text-[11px] text-muted-foreground">
-                共 {data.openTotal ?? 0} 条
+              <span className="ml-auto text-xs text-muted-foreground">
+                共 <strong className="font-semibold text-foreground tabular-nums">{data.openTotal ?? 0}</strong> 条线索
               </span>
             ) : null}
           </div>
@@ -554,22 +575,21 @@ export function ProspectingPage(): React.JSX.Element {
         </div>
       ) : null}
 
+      <div className={cn('min-w-0', activeProspect && 'xl:grid xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-start xl:gap-5')}>
+        <div className="min-w-0 space-y-5">
       {groups.filter((group) => group.items.length).map((group) => {
-        // 只对「可以发送 / 需要补联系方式」提供批量转换：评分不足和已跳过不应该被一键转走
         const supportsBulk = group.key === 'ready' || group.key === 'needs_contact';
         const convertible = supportsBulk ? group.items.filter(isConvertible) : [];
         const chosen = convertible.filter((item) => selected.has(item.id));
         const allChosen = convertible.length > 0 && chosen.length === convertible.length;
-        // 「全部待处理」只加载当前页，分组标题必须写「已加载 / 全库」，
-        // 否则会出现「可以发送 2」但顶部卡片是 401 的错觉。
         const totalForGroup = group.key === 'ready' ? counts?.ready : group.key === 'needs_contact' ? counts?.needsContact : group.key === 'low' ? counts?.low : undefined;
         const truncated = statusFilter === 'all' && totalForGroup !== undefined && totalForGroup > group.items.length;
         const filterKey = group.key === 'ready' || group.key === 'needs_contact' || group.key === 'low' ? group.key : undefined;
         return (
-        <section key={group.key} className="space-y-2">
+        <section key={group.key} className="space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-medium">{group.title}</h2>
-            <Badge variant="muted">{truncated ? `${group.items.length} / ${totalForGroup}` : group.items.length}</Badge>
+            <h2 className="section-title">{group.title}</h2>
+            <Badge variant="developed">{truncated ? `${group.items.length} / ${totalForGroup}` : group.items.length}</Badge>
             {truncated && filterKey ? (
               <Button type="button" size="sm" variant="ghost" onClick={() => setStatusFilter(filterKey)}>
                 查看全部 {totalForGroup}
@@ -608,10 +628,11 @@ export function ProspectingPage(): React.JSX.Element {
               </div>
             ) : null}
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {group.items.map((prospect) => (
               <ProspectCard key={prospect.id} prospect={prospect} today={data?.day ?? ''} busy={busy === prospect.id || Boolean(batch)}
                 selectable={supportsBulk && isConvertible(prospect)} selected={selected.has(prospect.id)} onToggle={toggleSelected}
+                active={activeProspect?.id === prospect.id} onSelect={() => setActiveId(prospect.id)}
                 onClaim={scope === 'shared' ? (id) => void claim(id) : undefined}
                 onRelease={scope === 'mine' ? (id) => void release(id) : undefined}
                 onRefresh={isAdmin?id=>void refreshContact(id):undefined} onApprove={(id) => void approve(id)} onReject={(id) => void reject(id)} />
@@ -622,15 +643,132 @@ export function ProspectingPage(): React.JSX.Element {
       })}
 
       {converted.length ? (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium">今天已转客户</h2>
-          <div className="space-y-2">
+        <section className="space-y-2.5">
+          <h2 className="section-title">今天已转客户</h2>
+          <div className="space-y-2.5">
             {converted.map((prospect) => (
-              <ProspectCard key={prospect.id} prospect={prospect} today={data?.day ?? ''} busy={busy===prospect.id} onSync={id=>void sync(id)} onRefresh={isAdmin?id=>void refreshContact(id):undefined} onApprove={() => undefined} onReject={() => undefined} />
+              <ProspectCard key={prospect.id} prospect={prospect} today={data?.day ?? ''} busy={busy===prospect.id} active={activeProspect?.id === prospect.id} onSelect={() => setActiveId(prospect.id)} onSync={id=>void sync(id)} onRefresh={isAdmin?id=>void refreshContact(id):undefined} onApprove={() => undefined} onReject={() => undefined} />
             ))}
           </div>
         </section>
       ) : null}
+        </div>
+
+        {/* Sticky Right Research Inspector Panel (Desktop XL) */}
+        {activeProspect ? (
+          <aside className="panel sticky top-20 hidden space-y-4 p-5 xl:block" aria-label="线索研究详情">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-sm font-bold tabular-nums', scoreClass(activeProspect.score))}>
+                    {activeProspect.score}
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold text-foreground">{activeProspect.name || activeProspect.company || activeProspect.domain}</h3>
+                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {activeProspect.country ? <CountryFlag value={activeProspect.country} /> : null}
+                      <span className="truncate">{activeProspect.domain}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {activeProspect.website ? (
+                <a href={activeProspect.website} target="_blank" rel="noreferrer" className="rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary" aria-label="打开客户官网">
+                  <ExternalLink className="h-4 w-4" aria-hidden />
+                </a>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              <Badge variant="developed">匹配度 {activeProspect.score}</Badge>
+              {activeProspect.aiScore !== undefined ? <Badge variant="gold">AI 评分 {activeProspect.aiScore}</Badge> : null}
+              {activeProspect.industry ? <Badge variant="secondary">{activeProspect.industry}</Badge> : null}
+            </div>
+
+            {activeProspect.notes || activeProspect.excerpt ? (
+              <div className="callout-sage">
+                <p className="font-semibold text-primary">AI 研究摘要</p>
+                <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-foreground/85">
+                  {activeProspect.notes || activeProspect.excerpt}
+                </p>
+              </div>
+            ) : null}
+
+            {activeProspect.reasons.length ? (
+              <div>
+                <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">匹配与评分依据</h4>
+                <ul className="mt-2 space-y-1.5 text-xs text-foreground/85">
+                  {activeProspect.reasons.map((reason) => (
+                    <li key={reason} className="flex items-start gap-2">
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+                      <span>{reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="border-t border-border/75 pt-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">关键资料</h4>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                {[
+                  ['公司', activeProspect.company],
+                  ['联系人', activeProspect.contactName],
+                  ['职位', activeProspect.contactTitle],
+                  ['电话', activeProspect.phone],
+                ].map(([label, val]) => (
+                  <div key={label} className="min-w-0">
+                    <dt className="text-[10.5px] text-muted-foreground">{label}</dt>
+                    <dd className="mt-0.5 truncate font-medium text-foreground">{val || '—'}</dd>
+                  </div>
+                ))}
+              </dl>
+              {activeProspect.emails.length ? (
+                <div className="mt-3 space-y-1">
+                  {activeProspect.emails.map((email) => (
+                    <a key={email} href={`mailto:${email}`} className="flex items-center gap-1.5 truncate text-xs font-medium text-primary hover:underline">
+                      <AtSign className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span className="truncate">{email}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2.5 text-xs text-muted-foreground">暂未发现联系邮箱，可先转为客户后补录。</p>
+              )}
+            </div>
+
+            <div className="space-y-2 border-t border-border/75 pt-3.5">
+              {activeProspect.status === 'converted' && activeProspect.customerId ? (
+                <Button className="w-full" onClick={() => { window.location.assign(`/customers/${activeProspect.customerId}`); }}>
+                  <ExternalLink className="h-4 w-4" aria-hidden />
+                  查看正式客户档案
+                </Button>
+              ) : (
+                <>
+                  <Button className="w-full" disabled={busy === activeProspect.id || Boolean(batch)} onClick={() => void approve(activeProspect.id)}>
+                    <Check className="h-4 w-4" aria-hidden />
+                    转为客户并准备开发信
+                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    {scope === 'shared' && !activeProspect.ownerId ? (
+                      <Button variant="outline" size="sm" disabled={busy === activeProspect.id || Boolean(batch)} onClick={() => void claim(activeProspect.id)}>
+                        <UserPlus className="h-3.5 w-3.5" aria-hidden />领取线索
+                      </Button>
+                    ) : scope === 'mine' && activeProspect.ownerId ? (
+                      <Button variant="outline" size="sm" disabled={busy === activeProspect.id || Boolean(batch)} onClick={() => void release(activeProspect.id)}>
+                        <UserMinus className="h-3.5 w-3.5" aria-hidden />放回公海
+                      </Button>
+                    ) : null}
+                    <Button variant="outline" size="sm" disabled={busy === activeProspect.id || Boolean(batch)} onClick={() => void reject(activeProspect.id)}>
+                      <X className="h-3.5 w-3.5" aria-hidden />跳过此线索
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </aside>
+        ) : null}
+      </div>
 
       {data && (data.openTotal ?? 0) > 0 ? (
         <DataPagination

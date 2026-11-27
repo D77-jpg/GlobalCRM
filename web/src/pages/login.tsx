@@ -1,10 +1,8 @@
 /**
- * 登录页
+ * 登录页 — Atelier Trade 高端外贸品牌入口
  * ------------------------------------------------------------------
- * 这里只做「表单校验 + 调用 store.login」，登录态与 token 持久化都在 auth.store 里。
- *
- * 视觉上采用「外贸货运场景 + 右侧悬浮登录卡」的布局：左侧讲清楚业务闭环，
- * 右侧只保留登录所需动作，避免把登录页做成营销落地页。
+ * 温润象牙白与深森林绿视觉语言，完整保留密码登录、记住用户名、
+ * 邮箱两步验证 OTP、忘记密码弹窗、语言/主题切换与公开合规链接。
  */
 import * as React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -59,10 +57,16 @@ const FLOW_STEPS: Array<{
 
 function LoginMark(): React.JSX.Element {
   return (
-    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.9rem] bg-slate-950 text-white shadow-[0_8px_24px_-12px_rgba(15,23,42,0.6)]">
-      <svg viewBox="0 0 32 32" fill="none" className="h-7 w-7" aria-hidden>
-        <path d="M16 3.5 27 10v12L16 28.5 5 22V10L16 3.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-        <path d="m10.5 18.5 5.5-3.2 5.5 3.2M10.5 13.5l5.5-3.2 5.5 3.2M16 15.3v9.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    <span className="brand-mark flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white">
+      <svg viewBox="0 0 28 28" fill="none" className="h-6 w-6" aria-hidden>
+        <path
+          d="M14 4.5a9.5 9.5 0 1 0 9.5 9.5H15.5"
+          stroke="#E8D7A8"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="14" cy="14" r="2.2" fill="currentColor" />
       </svg>
     </span>
   );
@@ -70,11 +74,11 @@ function LoginMark(): React.JSX.Element {
 
 function BrandLockup(): React.JSX.Element {
   return (
-    <div className="flex items-center gap-3 text-slate-950 dark:text-white">
+    <div className="flex items-center gap-3 text-foreground">
       <LoginMark />
       <div className="min-w-0">
-        <p className="text-[15px] font-semibold leading-5 tracking-[0.015em]">{PRODUCT_NAME_UPPER}</p>
-        <p className="mt-0.5 truncate text-[11px] leading-4 text-slate-600 dark:text-slate-300">{PRODUCT_TAGLINE_EN}</p>
+        <p className="text-[15px] font-bold leading-5 tracking-[0.04em]">{PRODUCT_NAME_UPPER}</p>
+        <p className="mt-0.5 truncate text-[11px] leading-4 text-muted-foreground">{PRODUCT_TAGLINE_EN}</p>
       </div>
     </div>
   );
@@ -91,11 +95,11 @@ function FlowStep({
 }): React.JSX.Element {
   return (
     <div className="flex min-w-0 flex-col items-center text-center">
-      <span className="flex h-[60px] w-[60px] items-center justify-center rounded-full border border-white/90 bg-white text-slate-950 shadow-[0_2px_8px_rgba(15,23,42,0.12)] dark:border-white/25 dark:bg-slate-900 dark:text-white">
+      <span className="flex h-[58px] w-[58px] items-center justify-center rounded-2xl border border-primary/15 bg-card/95 text-primary shadow-card backdrop-blur-md">
         <Icon className="h-5 w-5" aria-hidden />
       </span>
-      <span className="mt-3 text-[14px] font-semibold leading-4 text-slate-950 dark:text-white">{label}</span>
-      <span className="mt-1 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-800 dark:text-slate-100">{en}</span>
+      <span className="mt-2.5 text-[13.5px] font-semibold leading-4 text-foreground">{label}</span>
+      <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{en}</span>
     </div>
   );
 }
@@ -145,7 +149,6 @@ export function LoginPage(): React.JSX.Element {
     mode: 'onBlur',
   });
 
-  // 已登录时不再停留在登录页；from 用于登录后回到原本想访问的页面
   const from = React.useMemo(() => {
     const state = location.state as { from?: string } | null;
     return state?.from ?? ROUTES.dashboard;
@@ -161,7 +164,6 @@ export function LoginPage(): React.JSX.Element {
       setOtpError(null);
       const result = await login(values.username, values.password);
       if (result === 'failed') {
-        // store 里已把中文错误写进 loginError，这里补一个字段级提示便于定位
         setError('password', { message: '用户名或密码不正确' });
         return;
       }
@@ -175,7 +177,6 @@ export function LoginPage(): React.JSX.Element {
         return;
       }
 
-      // 登录成功后拉一次元数据（占位符 / 公司信息 / 邮件通道）
       await fetchMeta({ force: true });
       toast.success('登录成功', { description: '欢迎回来' });
       navigate(from, { replace: true });
@@ -206,53 +207,54 @@ export function LoginPage(): React.JSX.Element {
     clearTwoFactor();
   };
 
-  // Radix Checkbox 不是原生 input，走 watch + setValue 而不是 register，避免事件形状不匹配
   const remember = watch('remember');
 
   return (
-    <div className="login-page relative min-h-screen overflow-hidden bg-slate-200" style={{ colorScheme: 'light' }}>
+    <div className="login-page relative min-h-screen overflow-hidden bg-background text-foreground">
       <img
         src="/login/export-logistics.jpg"
         alt=""
-        className="absolute inset-0 h-full w-full object-cover object-center"
+        className="absolute inset-0 h-full w-full object-cover object-center opacity-25 dark:opacity-15"
       />
-      {/* 左侧轻微提亮保证深色标题可读；底部压暗避免浅色图片与白色卡片同时发灰。 */}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.46)_0%,rgba(255,255,255,0.16)_42%,rgba(255,255,255,0.02)_68%,rgba(15,23,42,0.1)_100%)] dark:bg-[linear-gradient(90deg,rgba(2,6,23,0.54)_0%,rgba(2,6,23,0.2)_48%,rgba(2,6,23,0.24)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-slate-950/20 to-transparent" />
+      {/* Warm ivory & forest-emerald architectural atmosphere */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_90%_at_12%_18%,hsl(45_28%_96%_/_0.96)_0%,hsl(45_22%_95%_/_0.88)_55%,hsl(148_30%_20%_/_0.12)_100%)] dark:bg-[radial-gradient(70%_90%_at_12%_18%,hsl(150_14%_7%_/_0.95)_0%,hsl(150_12%_8%_/_0.88)_60%,hsl(148_36%_18%_/_0.35)_100%)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background/85 to-transparent" />
 
       <header className="absolute inset-x-0 top-0 z-20">
-        <div className="mx-auto flex h-[84px] max-w-[1600px] items-center justify-between px-5 sm:px-8 lg:px-12 xl:px-20">
+        <div className="mx-auto flex h-[84px] max-w-[1560px] items-center justify-between px-5 sm:px-8 lg:px-12 xl:px-20">
           <BrandLockup />
           <div className="flex items-center gap-2">
             <LanguageToggle />
-            <ThemeToggle className="text-slate-800 hover:bg-white/45 hover:text-slate-950 dark:text-white dark:hover:bg-white/15 dark:hover:text-white" />
+            <ThemeToggle />
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto grid min-h-screen w-full max-w-[1600px] grid-cols-1 items-center gap-8 px-5 pb-10 pt-28 sm:px-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-12 lg:px-12 lg:pb-14 lg:pt-24 xl:grid-cols-[minmax(0,1fr)_512px] xl:pl-20 xl:pr-10">
+      <main className="relative z-10 mx-auto grid min-h-screen w-full max-w-[1560px] grid-cols-1 items-center gap-10 px-5 pb-12 pt-28 sm:px-8 lg:grid-cols-[minmax(0,1fr)_440px] lg:gap-14 lg:px-12 lg:pb-16 lg:pt-24 xl:grid-cols-[minmax(0,1fr)_496px] xl:px-20">
         <section className="hidden min-w-0 lg:block" aria-label="产品介绍">
-          <div className="max-w-[720px]">
-            <p className="text-[11px] font-semibold tracking-[0.3em] text-slate-700 dark:text-slate-200">FROM INQUIRY TO GLOBAL GROWTH</p>
-            <h1 className="mt-5 text-[clamp(2.9rem,4.2vw,4.55rem)] font-semibold leading-[1.02] tracking-[-0.055em] text-slate-950 dark:text-white">
+          <div className="max-w-[700px]">
+            <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary-soft/80 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-primary">
+              FROM INQUIRY TO GLOBAL GROWTH
+            </span>
+            <h1 className="mt-6 text-[clamp(2.85rem,4.1vw,4.35rem)] font-semibold leading-[1.04] tracking-[-0.045em] text-foreground">
               Simplify
               <br />
               Your Export Business.
               <br />
-              <span className="text-slate-500 dark:text-slate-300">All in One CRM.</span>
+              <span className="text-primary">All in One CRM.</span>
             </h1>
-            <p className="mt-6 max-w-[570px] text-[15px] leading-7 text-slate-700 dark:text-slate-200">
+            <p className="mt-6 max-w-[560px] text-[15px] leading-7 text-muted-foreground">
               {language === 'zh'
-                ? '从询盘、客户、报价到订单与出货，把外贸业务的每个关键节点放进同一个工作台，让团队少一点来回确认，多一点成交推进。'
-                : 'From inquiry and customer management to quotations, orders and shipping, keep every export milestone in one workspace and spend less time chasing updates.'}
+                ? '从客户发现、智能开发、邮件与全渠道沟通，到精准报价与订单交付——在高度隔离的多品牌外贸工作台中，以 AI 副驾驶驱动每一次专业成交。'
+                : 'From prospecting and automated outreach to omnichannel communication, quotations, and fulfillment — orchestrate every global trade milestone in one project-isolated workspace.'}
             </p>
 
-            <div className="mt-10 flex max-w-[650px] items-start justify-between gap-1.5 xl:mt-12 xl:max-w-[690px]">
+            <div className="mt-10 flex max-w-[640px] items-start justify-between gap-2 xl:mt-12">
               {FLOW_STEPS.map((step, index) => (
                 <React.Fragment key={step.en}>
                   <FlowStep {...step} />
                   {index < FLOW_STEPS.length - 1 ? (
-                    <ArrowRight className="mt-4 h-4 w-4 shrink-0 text-slate-900 dark:text-white" aria-hidden />
+                    <ArrowRight className="mt-5 h-4 w-4 shrink-0 text-primary/45" aria-hidden />
                   ) : null}
                 </React.Fragment>
               ))}
@@ -260,16 +262,16 @@ export function LoginPage(): React.JSX.Element {
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-[32rem] lg:mx-0 lg:justify-self-end" aria-label="登录">
-          <div className="rounded-[1.75rem] border border-white/75 bg-white/95 p-6 text-slate-950 shadow-[0_28px_80px_-36px_rgba(15,23,42,0.48),0_2px_12px_rgba(15,23,42,0.06)] backdrop-blur-2xl sm:p-10 dark:border-white/10 dark:bg-slate-950/90 dark:text-white">
+        <section className="mx-auto w-full max-w-[31rem] lg:mx-0 lg:justify-self-end" aria-label="登录">
+          <div className="rounded-[1.5rem] border border-border bg-card/95 p-6 text-card-foreground shadow-[0_28px_72px_-32px_hsl(150_24%_12%_/_0.22),0_2px_10px_hsl(150_20%_12%_/_0.05)] backdrop-blur-xl sm:p-9">
             <div>
-              <p className="text-[10px] font-semibold tracking-[0.22em] text-[#7658f6] dark:text-[#b7a6ff]">
+              <p className="text-[10.5px] font-semibold uppercase tracking-[0.2em] text-primary">
                 {twoFactorChallenge ? 'TWO-FACTOR VERIFICATION' : 'WELCOME BACK'}
               </p>
-              <h2 className="mt-2 text-[2.15rem] font-semibold leading-tight tracking-[-0.045em] text-slate-950 dark:text-white">
+              <h2 className="mt-2 text-[2rem] font-semibold leading-tight tracking-[-0.035em] text-foreground">
                 {twoFactorChallenge ? t('auth.twoFactor') : t('auth.welcome')}
               </h2>
-              <p className="mt-1.5 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
                 {twoFactorChallenge
                   ? `${t('auth.twoFactorHint')} · ${twoFactorChallenge.emailHint}`
                   : t('auth.subtitle')}
@@ -277,13 +279,13 @@ export function LoginPage(): React.JSX.Element {
             </div>
 
             {twoFactorChallenge ? (
-              <form className="mt-8 space-y-5" noValidate onSubmit={(event) => void onVerify(event)}>
+              <form className="mt-7 space-y-5" noValidate onSubmit={(event) => void onVerify(event)}>
                 {twoFactorError || otpError ? (
-                  <div role="alert" className="flex gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm leading-5 text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-200">
+                  <div role="alert" className="flex gap-2.5 rounded-xl border border-rose/25 bg-rose-soft px-3.5 py-3 text-sm leading-5 text-rose">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                     <div>
                       <p className="font-medium">验证失败</p>
-                      <p className="mt-0.5 text-rose-600/90 dark:text-rose-200/80">{otpError || twoFactorError}</p>
+                      <p className="mt-0.5 opacity-90">{otpError || twoFactorError}</p>
                     </div>
                   </div>
                 ) : null}
@@ -291,10 +293,10 @@ export function LoginPage(): React.JSX.Element {
                 <div>
                   <Label htmlFor="login-otp">{t('auth.twoFactor')}</Label>
                   <div className="relative mt-1.5">
-                    <MailCheck className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" aria-hidden />
+                    <MailCheck className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
                     <Input
                       id="login-otp"
-                      className="h-[52px] rounded-xl border-slate-200 bg-white pl-12 pr-4 text-center text-[20px] tracking-[0.45em] text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.03)] focus-visible:border-[#8a70ff] focus-visible:ring-[#8a70ff]/15 dark:border-white/10 dark:bg-slate-900 dark:text-white"
+                      className="h-[50px] rounded-xl pl-12 pr-4 text-center text-[20px] tracking-[0.45em]"
                       placeholder="000000"
                       inputMode="numeric"
                       autoComplete="one-time-code"
@@ -310,7 +312,7 @@ export function LoginPage(): React.JSX.Element {
                   <FieldMessage hint={t('auth.twoFactorHint')} className="pl-1" />
                 </div>
 
-                <Button type="submit" className="login-submit h-[52px] w-full rounded-xl text-[15px] font-semibold" size="lg" loading={verifyingTwoFactor} disabled={verifyingTwoFactor || otp.length !== 6}>
+                <Button type="submit" className="login-submit h-[50px] w-full rounded-xl text-[15px] font-semibold" size="lg" loading={verifyingTwoFactor} disabled={verifyingTwoFactor || otp.length !== 6}>
                   {verifyingTwoFactor ? t('common.loading') : (
                     <>
                       {t('auth.verify')}
@@ -322,137 +324,136 @@ export function LoginPage(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={handleBackToPassword}
-                  className="w-full text-center text-[13px] font-medium text-slate-500 transition-colors hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8a70ff]/30 dark:text-slate-400 dark:hover:text-white"
+                  className="w-full text-center text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
                 >
                   {t('auth.backLogin')}
                 </button>
               </form>
             ) : (
-            <form
-              className="mt-8 space-y-5"
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleSubmit(onSubmit)();
-              }}
-            >
-              {loginError ? (
-                <div role="alert" className="flex gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm leading-5 text-rose-700 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-200">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                  <div>
-                    <p className="font-medium">登录失败</p>
-                    <p className="mt-0.5 text-rose-600/90 dark:text-rose-200/80">{loginError}</p>
+              <form
+                className="mt-7 space-y-4"
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleSubmit(onSubmit)();
+                }}
+              >
+                {loginError ? (
+                  <div role="alert" className="flex gap-2.5 rounded-xl border border-rose/25 bg-rose-soft px-3.5 py-3 text-sm leading-5 text-rose">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <div>
+                      <p className="font-medium">登录失败</p>
+                      <p className="mt-0.5 opacity-90">{loginError}</p>
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              <div>
-                <Label htmlFor="login-username" className="sr-only">
-                  {t('auth.username')}
-                </Label>
-                <div className="relative">
-                  <UserRound className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" aria-hidden />
-                  <Input
-                    id="login-username"
-                    className="h-[52px] rounded-xl border-slate-200 bg-white pl-12 pr-4 text-[15px] text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.03)] placeholder:text-slate-400 focus-visible:border-[#8a70ff] focus-visible:ring-[#8a70ff]/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
-                    placeholder={t('auth.username')}
-                    autoComplete="username"
-                    autoFocus
-                    invalid={Boolean(errors.username)}
-                    {...register('username')}
-                  />
+                <div>
+                  <Label htmlFor="login-username" className="sr-only">
+                    {t('auth.username')}
+                  </Label>
+                  <div className="relative">
+                    <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <Input
+                      id="login-username"
+                      className="h-[48px] rounded-xl pl-11 pr-4 text-[14.5px]"
+                      placeholder={t('auth.username')}
+                      autoComplete="username"
+                      autoFocus
+                      invalid={Boolean(errors.username)}
+                      {...register('username')}
+                    />
+                  </div>
+                  <FieldMessage error={errors.username?.message} className="pl-1" />
                 </div>
-                <FieldMessage error={errors.username?.message} className="pl-1" />
-              </div>
 
-              <div>
-                <Label htmlFor="login-password" className="sr-only">
-                  {t('auth.password')}
-                </Label>
-                <div className="relative">
-                  <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" aria-hidden />
-                  <Input
-                    id="login-password"
-                    type={showPassword ? 'text' : 'password'}
-                    className="h-[52px] rounded-xl border-slate-200 bg-white pl-12 pr-12 text-[15px] text-slate-950 shadow-[0_1px_2px_rgba(15,23,42,0.03)] placeholder:text-slate-400 focus-visible:border-[#8a70ff] focus-visible:ring-[#8a70ff]/15 dark:border-white/10 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
-                    placeholder={t('auth.password')}
-                    autoComplete="current-password"
-                    invalid={Boolean(errors.password)}
-                    {...register('password')}
-                  />
+                <div>
+                  <Label htmlFor="login-password" className="sr-only">
+                    {t('auth.password')}
+                  </Label>
+                  <div className="relative">
+                    <LockKeyhole className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <Input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      className="h-[48px] rounded-xl pl-11 pr-11 text-[14.5px]"
+                      placeholder={t('auth.password')}
+                      autoComplete="current-password"
+                      invalid={Boolean(errors.password)}
+                      {...register('password')}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+                      aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                    >
+                      {showPassword ? <EyeOff className="h-[18px] w-[18px]" aria-hidden /> : <Eye className="h-[18px] w-[18px]" aria-hidden />}
+                    </button>
+                  </div>
+                  <FieldMessage error={errors.password?.message} className="pl-1" />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <label htmlFor="login-remember" className="flex cursor-pointer items-center gap-2 text-[13px] text-muted-foreground">
+                    <Checkbox
+                      id="login-remember"
+                      checked={Boolean(remember)}
+                      onCheckedChange={(checked) => setValue('remember', checked === true)}
+                    />
+                    {language === 'zh' ? '记住用户名' : 'Remember username'}
+                  </label>
                   <button
                     type="button"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8a70ff]/30 dark:hover:bg-white/10 dark:hover:text-white"
-                    aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                    onClick={() => setForgotOpen(true)}
+                    className="text-[13px] font-medium text-primary transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
                   >
-                    {showPassword ? <EyeOff className="h-[18px] w-[18px]" aria-hidden /> : <Eye className="h-[18px] w-[18px]" aria-hidden />}
+                    {t('auth.forgot')}
                   </button>
                 </div>
-                <FieldMessage error={errors.password?.message} className="pl-1" />
-              </div>
 
-              <div className="flex items-center justify-between gap-3 pt-0.5">
-                <label htmlFor="login-remember" className="flex cursor-pointer items-center gap-2.5 text-[13px] text-slate-600 dark:text-slate-300">
-                  <Checkbox
-                    id="login-remember"
-                    checked={Boolean(remember)}
-                    onCheckedChange={(checked) => setValue('remember', checked === true)}
-                    className="border-slate-300 bg-white data-[state=checked]:border-[#7658f6] data-[state=checked]:bg-[#7658f6] dark:border-white/20 dark:bg-slate-900"
-                  />
-                  {language === 'zh' ? '记住用户名' : 'Remember username'}
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setForgotOpen(true)}
-                  className="text-[13px] font-medium text-[#6547ee] transition-colors hover:text-[#4c2fd1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8a70ff]/30 dark:text-[#b7a6ff] dark:hover:text-[#d4c9ff]"
-                >
-                  {t('auth.forgot')}
-                </button>
-              </div>
-
-              <Button type="submit" className="login-submit mt-2 h-[52px] w-full rounded-xl text-[15px] font-semibold" size="lg" loading={loggingIn} disabled={loggingIn}>
-                {loggingIn ? t('auth.loggingIn') : (
-                  <>
-                    {t('auth.login')}
-                    <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
-                  </>
-                )}
-              </Button>
-            </form>
+                <Button type="submit" className="login-submit mt-2 h-[50px] w-full rounded-xl text-[15px] font-semibold" size="lg" loading={loggingIn} disabled={loggingIn}>
+                  {loggingIn ? t('auth.loggingIn') : (
+                    <>
+                      {t('auth.login')}
+                      <ArrowRight className="h-[18px] w-[18px]" aria-hidden />
+                    </>
+                  )}
+                </Button>
+              </form>
             )}
 
             <div className="my-6 flex items-center gap-3">
-              <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" aria-hidden />
-              <span className="text-[11px] text-slate-400 dark:text-slate-500">{language === 'zh' ? '或' : 'or'}</span>
-              <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" aria-hidden />
+              <span className="h-px flex-1 bg-border" aria-hidden />
+              <span className="text-[11px] text-muted-foreground">{language === 'zh' ? '或' : 'or'}</span>
+              <span className="h-px flex-1 bg-border" aria-hidden />
             </div>
 
             <button
               type="button"
               onClick={() => toast.info(language === 'zh' ? '请联系系统管理员开通账号' : 'Contact your system administrator to request an account')}
-              className="flex h-[50px] w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[14px] font-medium text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8a70ff]/25 dark:border-white/10 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-white/5"
+              className="flex h-[46px] w-full items-center justify-center gap-2 rounded-xl border border-border bg-surface text-[13.5px] font-medium text-foreground transition-colors hover:border-primary/35 hover:bg-primary-soft/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
-              <Mail className="h-[18px] w-[18px] text-slate-500 dark:text-slate-400" aria-hidden />
+              <Mail className="h-4 w-4 text-primary" aria-hidden />
               {language === 'zh' ? '联系管理员开通账号' : 'Request an account'}
             </button>
 
-            <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11px] leading-5 text-slate-400 dark:text-slate-500">
-              <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+            <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-[11px] leading-5 text-muted-foreground">
+              <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden />
               仅限授权成员使用 · 登录信息加密传输
             </p>
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
               {features.publicPricing ? (
                 <>
-                  <Link className="hover:text-slate-800 dark:hover:text-white" to={ROUTES.pricing}>{language === 'zh' ? '价格与套餐' : 'Pricing'}</Link>
+                  <Link className="hover:text-foreground" to={ROUTES.pricing}>{language === 'zh' ? '价格与套餐' : 'Pricing'}</Link>
                   <span aria-hidden>·</span>
                 </>
               ) : null}
-              <Link className="hover:text-slate-800 dark:hover:text-white" to={ROUTES.help}>{language === 'zh' ? '帮助中心' : 'Help center'}</Link>
+              <Link className="hover:text-foreground" to={ROUTES.help}>{language === 'zh' ? '帮助中心' : 'Help center'}</Link>
               <span aria-hidden>·</span>
-              <Link className="hover:text-slate-800 dark:hover:text-white" to={`${ROUTES.legal}/terms`}>{language === 'zh' ? '服务条款' : 'Terms'}</Link>
+              <Link className="hover:text-foreground" to={`${ROUTES.legal}/terms`}>{language === 'zh' ? '服务条款' : 'Terms'}</Link>
               <span aria-hidden>·</span>
-              <Link className="hover:text-slate-800 dark:hover:text-white" to={`${ROUTES.legal}/privacy`}>{language === 'zh' ? '隐私政策' : 'Privacy'}</Link>
+              <Link className="hover:text-foreground" to={`${ROUTES.legal}/privacy`}>{language === 'zh' ? '隐私政策' : 'Privacy'}</Link>
             </div>
           </div>
         </section>

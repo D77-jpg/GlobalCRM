@@ -671,13 +671,13 @@ export function AgentPanel(): React.JSX.Element | null {
             {loading && messages.length === 0 && <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />正在加载会话…</div>}
             {!loading && messages.length === 0 && (
               <div className="space-y-4 py-1">
-                <section className="rounded-lg border border-border bg-card p-3.5">
+                <section className="hero-wash rounded-xl border border-primary/15 p-4">
                   <div className="flex items-start gap-3">
-                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground"><Sparkles className="h-4 w-4" aria-hidden /></span>
+                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm"><Sparkles className="h-4 w-4 text-[#E8D7A8]" aria-hidden /></span>
                     <div className="min-w-0">
-                      <p className="text-xs font-medium text-muted-foreground">{project.name} · {activeContext.type === 'global' ? '当前工作区' : contextLabel(activeContext)}</p>
-                      <p className="mt-1 text-base font-semibold leading-6 tracking-tight">{activeContext.type === 'customer' ? '这位客户，下一步怎么推进？' : activeContext.type === 'mail' ? '一起处理这封客户来信' : hasPendingWork ? '先把眼前的工作处理掉' : '今天想先推进哪项工作？'}</p>
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{activeContext.type === 'customer' ? '结合客户资料写信、梳理跟进，或直接告诉我你的需求。' : activeContext.type === 'mail' ? '整理往来内容与客户需求，再准备合适的回复。' : hasPendingWork ? '审核草稿、处理待办，或直接告诉助手要做什么。' : '找客户、看跟进、准备开发信，用一句话交给助手。'}</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">{project.name} · {activeContext.type === 'global' ? '当前工作区' : contextLabel(activeContext)}</p>
+                      <p className="mt-1 text-base font-semibold leading-6 tracking-tight text-foreground">{activeContext.type === 'customer' ? '这位客户，下一步怎么推进？' : activeContext.type === 'mail' ? '一起处理这封客户来信' : hasPendingWork ? '先把眼前的工作处理掉' : '今天想先推进哪项工作？'}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{activeContext.type === 'customer' ? '结合客户资料写信、梳理跟进，或直接告诉我你的需求。' : activeContext.type === 'mail' ? '整理往来内容与客户需求，再准备合适的回复。' : hasPendingWork ? '审核草稿、处理待办，或直接告诉助手要做什么。' : '找客户、看跟进、准备开发信，用一句话交给助手。'}</p>
                     </div>
                   </div>
                   {hasPendingWork && <div className={`mt-3 grid gap-2 ${summaryGridClass}`}>

@@ -524,9 +524,9 @@ export function AiSettingsPage(): React.JSX.Element {
   const insecureHttp = draft.kind === 'openai' && draft.baseUrl.trim().toLowerCase().startsWith('http://');
 
   return (
-    <div className="workspace-page max-w-[1060px]">
+    <div className="workspace-page">
       <PageHeader
-        title="AI 配置"
+        title="AI 服务与模型配置"
         description="配置多个 AI 服务商，并选择当前使用的一个。设置全局生效，所有项目共用。"
         actions={
           <Button type="button" onClick={() => openCreate()}>
@@ -536,9 +536,57 @@ export function AiSettingsPage(): React.JSX.Element {
         }
       />
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
+      {/* 4 Executive Status KPI Cards */}
+      <div className="grid grid-cols-2 gap-3.5 xl:grid-cols-4">
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
+            <Server className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">已配置服务商</p>
+            <p className="mt-1 text-2xl font-bold leading-none tabular-nums text-foreground">{providers.length}</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">全局共享同一激活服务</p>
+          </div>
+        </div>
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
+            <Zap className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">当前使用</p>
+            <p className="mt-1 truncate text-base font-bold text-foreground">{activeProvider?.name ?? '系统默认'}</p>
+            <p className="mt-1 text-[11px] text-primary">{activeProvider ? '运行中' : '回退环境变量'}</p>
+          </div>
+        </div>
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft text-gold" aria-hidden>
+            <Bot className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">当前模型</p>
+            <p className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
+              {activeProvider?.model || catalog?.fallback.model || '—'}
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{activeProvider ? kindLabel(activeProvider) : '系统默认'}</p>
+          </div>
+        </div>
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
+            <ShieldCheck className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">最近验证</p>
+            <p className="mt-1 text-base font-bold text-foreground">{formatTime(activeProvider?.lastTestedAt ?? null)}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {activeProvider?.lastTestStatus === 'ok' ? '连接正常' : activeProvider?.lastTestStatus === 'failed' ? '上次测试失败' : '以实际测试为准'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
-          <Card className="overflow-hidden border-primary/20 bg-primary/[0.022] shadow-none">
+          <Card className="hero-wash overflow-hidden border-primary/25">
             <CardContent className="p-4 sm:pt-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="flex min-w-0 items-start gap-3">

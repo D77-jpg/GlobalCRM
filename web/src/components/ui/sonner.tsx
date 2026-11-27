@@ -11,7 +11,7 @@ export function Toaster(props: ToasterProps): React.JSX.Element {
   return (
     <SonnerToaster
       theme={theme}
-      position="top-right"
+      position="bottom-right"
       closeButton
       richColors
       duration={4000}

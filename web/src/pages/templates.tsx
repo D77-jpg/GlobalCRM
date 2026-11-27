@@ -145,6 +145,29 @@ export function TemplatesPage(): React.JSX.Element {
         }
       />
 
+      {/* Quick Category Underline Tabs */}
+      <nav aria-label="模板分类切换" className="flex flex-wrap items-center gap-4 border-b border-border">
+        {TEMPLATE_CATEGORY_FILTER_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setFilters({ category: option.value as TemplateCategory | 'all' })}
+            className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
+              category === option.value
+                ? 'border-primary font-semibold text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {option.label}
+            {option.value === 'all' && items.length > 0 ? (
+              <span className="ml-1.5 rounded-full bg-primary-soft px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-primary">
+                {items.length}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </nav>
+
       {/* ---------------------------- 筛选栏 ---------------------------- */}
 
       <WorkspaceToolbar>

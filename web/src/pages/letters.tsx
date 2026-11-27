@@ -241,6 +241,35 @@ export function LettersPage(): React.JSX.Element {
         </Alert>
       ) : null}
 
+      {/* Quick Status Tabs */}
+      <nav aria-label="开发信状态快速切换" className="flex flex-wrap items-center gap-4 border-b border-border">
+        {([
+          ['all', '全部记录'],
+          ['draft', '草稿'],
+          ['sent', '已发送'],
+          ['opened', '已打开'],
+          ['failed', '失败与待确认'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilters({ status: key })}
+            className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
+              status === key
+                ? 'border-primary font-semibold text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}
+            {status === key && total > 0 ? (
+              <span className="ml-1.5 rounded-full bg-primary-soft px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-primary">
+                {total}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </nav>
+
       {/* ---------------------------- 筛选栏 ---------------------------- */}
 
       <WorkspaceToolbar>

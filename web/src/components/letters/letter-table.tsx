@@ -247,19 +247,19 @@ export function LetterTable({
                     aria-label="全选本页"
                   />
                 </TableHead>
-                <SortableHeader field="subject" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort} className="min-w-[16rem]">
+                <SortableHeader field="subject" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort} className="min-w-[12rem]">
                   主题 / 正文摘要
                 </SortableHeader>
-                <TableHead className="min-w-[12rem]">收件人</TableHead>
-                <TableHead className="min-w-[10rem]">所属客户</TableHead>
+                <TableHead className="min-w-[9.5rem]">收件人</TableHead>
+                <TableHead className="min-w-[7rem]">所属客户</TableHead>
                 <SortableHeader field="status" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort}>
                   状态
                 </SortableHeader>
-                <TableHead>发送方式</TableHead>
-                <SortableHeader field="sentAt" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort}>
+                <TableHead className="whitespace-nowrap">发送方式</TableHead>
+                <SortableHeader field="sentAt" activeField={sortBy} activeOrder={sortOrder} onSort={handleSort} className="whitespace-nowrap">
                   发送时间
                 </SortableHeader>
-                <TableHead className="w-28 text-right pr-3">操作</TableHead>
+                <TableHead className="w-[7.75rem] whitespace-nowrap pr-3 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -283,7 +283,7 @@ export function LetterTable({
                     <TableCell>
                       <button
                         type="button"
-                        className="block max-w-[24rem] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="block max-w-[16rem] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:max-w-[19rem]"
                         onClick={() => onView(letter)}
                       >
                         <span className="block truncate text-sm font-medium hover:text-primary hover:underline">
@@ -295,7 +295,7 @@ export function LetterTable({
                       </button>
                     </TableCell>
 
-                    <TableCell>
+                    <TableCell className="max-w-[11.5rem]">
                       <span className="block truncate text-xs">{letter.recipientName || '—'}</span>
                       <a
                         href={`mailto:${letter.recipientEmail}`}
@@ -310,7 +310,7 @@ export function LetterTable({
                       {letter.customer ? (
                         <Link
                           to={customerDetailPath(letter.customer.id)}
-                          className="inline-flex max-w-[12rem] items-center gap-1.5 text-xs hover:text-primary hover:underline"
+                          className="inline-flex max-w-[8.5rem] items-center gap-1.5 text-xs hover:text-primary hover:underline"
                         >
                           <User className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                           <span className="truncate">{letter.customer.name}</span>

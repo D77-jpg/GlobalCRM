@@ -1,97 +1,119 @@
 /**
- * 左侧导航栏
+ * 左侧导航栏 — Atelier Trade 三段式工作空间架构
  * ------------------------------------------------------------------
- * 桌面端：悬浮岛内的固定侧栏，可折叠成图标条；移动端：覆盖式抽屉。
- * 两种形态共用同一份 NAV_ITEMS 与渲染逻辑，避免维护两套结构。
+ * 顶部品牌标识 + 独立工作空间项目切换卡 + 三组语义导航（工作空间 / 业务资源 / 系统管理）
+ * + 底部成员信息卡。完整保留全部角色权限、部署模式与项目隔离机制。
  */
 import * as React from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import {
+  Activity,
   BookOpen,
   Bot,
   Building2,
+  Check,
+  ChevronsUpDown,
   CreditCard,
   FileText,
   FolderKanban,
   Globe2,
+  KeyRound,
   LayoutDashboard,
   Mail,
   MessageSquare,
   Package,
   ReceiptText,
+  Send,
   Settings2,
-  KeyRound,
   ShieldCheck,
+  Sparkles,
   Target,
   UserCog,
   Users,
   X,
 } from 'lucide-react';
-import { ROUTES } from '@/constants';
+import { ROUTES, USER_ROLE_LABEL } from '@/constants';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/constants/brand';
 import { selectDeploymentFeatures, useMetaStore } from '@/store/meta.store';
 import { selectCanManageProjects, selectIsAdmin, selectIsPlatformAdmin, useAuthStore } from '@/store/auth.store';
 import { cn } from '@/lib/utils';
+import { initials } from '@/lib/format';
 import { useProjectStore } from '@/store/project.store';
 import { ProjectLogo, projectLogoSrc } from '@/components/projects/project-logo';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useI18n, type TranslationKey } from '@/i18n';
+
+export type NavGroupKey = 'workspace' | 'resources' | 'manage';
 
 export interface NavItem {
   to: string;
   labelKey: TranslationKey;
+  group: NavGroupKey;
   icon: React.ComponentType<{ className?: string }>;
-  /** 精确匹配（根路径必须为 true，否则任何页面都会高亮） */
   end?: boolean;
-  /** Only system admins can see this entry. */
   adminOnly?: boolean;
-  /** Admins and project admins can see this entry. */
   managerOnly?: boolean;
-  /** Only platform operators can see this entry. */
   platformOnly?: boolean;
-  /** Optional deployment feature gate (hidden in self_hosted mode when false). */
   featureFlag?: 'billing' | 'multiOrg';
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { to: ROUTES.dashboard, labelKey: 'nav.dashboard', icon: LayoutDashboard, end: true },
-  { to: ROUTES.customers, labelKey: 'nav.customers', icon: Users, end: false },
-  { to: ROUTES.customs, labelKey: 'nav.tradeIntelligence', icon: Globe2, end: false },
-  { to: ROUTES.prospecting, labelKey: 'nav.prospecting', icon: Target, end: false },
-  { to: ROUTES.outreachAutomation, labelKey: 'nav.outreach', icon: Bot, end: false },
-  { to: '/mail', labelKey: 'nav.mail', icon: Mail, end: false },
-  { to: ROUTES.channels, labelKey: 'nav.channels', icon: MessageSquare, end: false },
-  { to: ROUTES.quotations, labelKey: 'nav.quotations', icon: ReceiptText, end: false },
-  { to: ROUTES.letters, labelKey: 'nav.letters', icon: Mail, end: false },
-  { to: '/knowledge', labelKey: 'nav.knowledge', icon: BookOpen, end: false },
-  { to: ROUTES.products, labelKey: 'nav.products', icon: Package, end: false },
-  { to: ROUTES.templates, labelKey: 'nav.templates', icon: FileText, end: false },
-  { to: ROUTES.onboarding, labelKey: 'nav.onboarding', icon: ShieldCheck, end: false, managerOnly: true },
-  { to: ROUTES.users, labelKey: 'nav.users', icon: UserCog, end: false, adminOnly: true },
-  { to: ROUTES.projects, labelKey: 'nav.projects', icon: FolderKanban, end: true, managerOnly: true },
-  { to: '/projects/integrations', labelKey: 'integrations.title', icon: KeyRound, end: true, managerOnly: true },
-  { to: ROUTES.mailCompliance, labelKey: 'nav.compliance', icon: ShieldCheck, end: false, managerOnly: true },
-  { to: ROUTES.agentDiagnostics, labelKey: 'nav.agentDiagnostics', icon: ShieldCheck, end: false, adminOnly: true },
-  { to: ROUTES.aiSettings, labelKey: 'nav.aiSettings', icon: Settings2, end: false, adminOnly: true },
-  { to: ROUTES.organization, labelKey: 'nav.organization', icon: Building2, end: false, managerOnly: true },
-  { to: ROUTES.billing, labelKey: 'nav.billing', icon: CreditCard, end: false, adminOnly: true, featureFlag: 'billing' },
-  { to: ROUTES.oauthApplications, labelKey: 'oauth.title', icon: ShieldCheck, end: false },
-  { to: ROUTES.oauthClients, labelKey: 'oauth.clients', icon: KeyRound, end: false, platformOnly: true, featureFlag: 'multiOrg' },
-  { to: ROUTES.platform, labelKey: 'nav.platform', icon: Globe2, end: false, platformOnly: true, featureFlag: 'multiOrg' },
+  // 工作空间 · 核心外贸销售主链路
+  { to: ROUTES.dashboard, labelKey: 'nav.dashboard', group: 'workspace', icon: LayoutDashboard, end: true },
+  { to: ROUTES.prospecting, labelKey: 'nav.prospecting', group: 'workspace', icon: Target, end: false },
+  { to: ROUTES.customers, labelKey: 'nav.customers', group: 'workspace', icon: Users, end: false },
+  { to: ROUTES.customs, labelKey: 'nav.tradeIntelligence', group: 'workspace', icon: Globe2, end: false },
+  { to: '/mail', labelKey: 'nav.mail', group: 'workspace', icon: Mail, end: false },
+  { to: ROUTES.channels, labelKey: 'nav.channels', group: 'workspace', icon: MessageSquare, end: false },
+  { to: ROUTES.quotations, labelKey: 'nav.quotations', group: 'workspace', icon: ReceiptText, end: false },
+  { to: ROUTES.outreachAutomation, labelKey: 'nav.outreach', group: 'workspace', icon: Bot, end: false },
+  { to: ROUTES.letters, labelKey: 'nav.letters', group: 'workspace', icon: Send, end: false },
+
+  // 业务资源 · 知识、产品、模板与项目空间
+  { to: '/knowledge', labelKey: 'nav.knowledge', group: 'resources', icon: BookOpen, end: false },
+  { to: ROUTES.products, labelKey: 'nav.products', group: 'resources', icon: Package, end: false },
+  { to: ROUTES.templates, labelKey: 'nav.templates', group: 'resources', icon: FileText, end: false },
+  { to: ROUTES.projects, labelKey: 'nav.projects', group: 'resources', icon: FolderKanban, end: true, managerOnly: true },
+
+  // 系统管理 · 引导、团队、集成、合规与 AI 治理
+  { to: ROUTES.onboarding, labelKey: 'nav.onboarding', group: 'manage', icon: Sparkles, end: false, managerOnly: true },
+  { to: ROUTES.users, labelKey: 'nav.users', group: 'manage', icon: UserCog, end: false, adminOnly: true },
+  { to: '/projects/integrations', labelKey: 'integrations.title', group: 'manage', icon: KeyRound, end: true, managerOnly: true },
+  { to: ROUTES.mailCompliance, labelKey: 'nav.compliance', group: 'manage', icon: ShieldCheck, end: false, managerOnly: true },
+  { to: ROUTES.agentDiagnostics, labelKey: 'nav.agentDiagnostics', group: 'manage', icon: Activity, end: false, adminOnly: true },
+  { to: ROUTES.aiSettings, labelKey: 'nav.aiSettings', group: 'manage', icon: Settings2, end: false, adminOnly: true },
+  { to: ROUTES.organization, labelKey: 'nav.organization', group: 'manage', icon: Building2, end: false, managerOnly: true },
+  { to: ROUTES.billing, labelKey: 'nav.billing', group: 'manage', icon: CreditCard, end: false, adminOnly: true, featureFlag: 'billing' },
+  { to: ROUTES.oauthApplications, labelKey: 'oauth.title', group: 'manage', icon: ShieldCheck, end: false },
+  { to: ROUTES.oauthClients, labelKey: 'oauth.clients', group: 'manage', icon: KeyRound, end: false, platformOnly: true, featureFlag: 'multiOrg' },
+  { to: ROUTES.platform, labelKey: 'nav.platform', group: 'manage', icon: Globe2, end: false, platformOnly: true, featureFlag: 'multiOrg' },
 ];
 
 interface SidebarProps {
   collapsed: boolean;
-  /** 移动端抽屉是否展开 */
   mobile?: boolean;
   onNavigate?: () => void;
 }
 
 function BrandMark(): React.JSX.Element {
   return (
-    <span className="brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white">
-      <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden>
-        <path d="M7.2 16.8a4.6 4.6 0 0 1 0-9.2h9.6a4.6 4.6 0 0 1 0 9.2H7.2Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-        <circle cx="12" cy="12.2" r="2.1" fill="currentColor" />
+    <span className="brand-mark flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white">
+      <svg viewBox="0 0 28 28" fill="none" className="h-5 w-5" aria-hidden>
+        <path
+          d="M14 4.5a9.5 9.5 0 1 0 9.5 9.5H15.5"
+          stroke="#E8D7A8"
+          strokeWidth="2.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="14" cy="14" r="2.2" fill="currentColor" />
       </svg>
     </span>
   );
@@ -105,15 +127,28 @@ function Brand({ collapsed }: { collapsed: boolean }): React.JSX.Element {
   const hasLogo = Boolean(project && projectLogoSrc(project));
 
   return (
-    <div className={cn('flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-3', collapsed && 'justify-center px-0')}>
-      <Link to={ROUTES.dashboard} className="flex min-w-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40" aria-label={t('nav.backDashboard')}>
-        {project ? <ProjectLogo project={project} size={collapsed ? 'sm' : 'md'} compact={collapsed} className={collapsed ? undefined : 'dark:rounded dark:bg-white dark:px-1 dark:py-0.5'} /> : <BrandMark />}
+    <div className={cn('flex h-14 shrink-0 items-center gap-2.5 px-4', collapsed && 'justify-center px-0')}>
+      <Link
+        to={ROUTES.dashboard}
+        className="flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        aria-label={t('nav.backDashboard')}
+      >
+        {project && hasLogo ? (
+          <ProjectLogo
+            project={project}
+            size={collapsed ? 'sm' : 'md'}
+            compact={collapsed}
+            className={collapsed ? undefined : 'dark:rounded-md dark:bg-white/95 dark:px-1.5 dark:py-0.5'}
+          />
+        ) : (
+          <BrandMark />
+        )}
         {!collapsed && !hasLogo ? (
           <span className="min-w-0">
-            <span className="block truncate text-[0.8125rem] font-semibold leading-tight tracking-[-0.01em]">
-              {project?.name || PRODUCT_NAME}
+            <span className="block truncate text-[0.9375rem] font-bold leading-tight tracking-[-0.02em] text-foreground">
+              {PRODUCT_NAME}
             </span>
-            <span className="mt-0.5 block truncate text-[10px] leading-tight text-muted-foreground" title={subtitle}>
+            <span className="mt-0.5 block truncate text-[10.5px] leading-tight text-muted-foreground" title={subtitle}>
               {subtitle}
             </span>
           </span>
@@ -123,13 +158,78 @@ function Brand({ collapsed }: { collapsed: boolean }): React.JSX.Element {
   );
 }
 
+/** 顶部项目工作空间切换卡（对应设计稿左上角独立白卡，保留完整多项目隔离与切换） */
+function SidebarWorkspaceCard({ collapsed }: { collapsed: boolean }): React.JSX.Element | null {
+  const { t, language } = useI18n();
+  const items = useProjectStore((state) => state.items).filter((item) => item.status === 'active');
+  const active = useProjectStore((state) => state.activeProject);
+  const switchProject = useProjectStore((state) => state.switchProject);
+
+  if (!active) return null;
+
+  return (
+    <div className={cn('shrink-0 px-3 pb-2', collapsed && 'px-2')}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title={collapsed ? `${t('nav.currentProject')}: ${active.name}` : undefined}
+            aria-label={`切换项目，当前为 ${active.name}`}
+            className={cn(
+              'group flex w-full items-center gap-2.5 rounded-xl border border-border/90 bg-card text-left shadow-[0_1px_2px_hsl(150_18%_12%_/_0.04)] transition-[border-color,box-shadow] hover:border-primary/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+              collapsed ? 'justify-center p-1.5' : 'px-3 py-2.5',
+            )}
+          >
+            {collapsed ? (
+              <ProjectLogo project={active} size="sm" compact />
+            ) : (
+              <>
+                <ProjectLogo project={active} size="sm" compact />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+                    {language === 'zh' ? '工作空间' : 'Workspace'}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[0.8125rem] font-semibold leading-tight text-foreground">
+                    {active.name}
+                  </span>
+                </span>
+                <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" aria-hidden />
+              </>
+            )}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side={collapsed ? 'right' : 'bottom'} className="max-h-[min(24rem,70vh)] w-64 overflow-y-auto">
+          <DropdownMenuLabel className="flex items-center justify-between">
+            <span>{language === 'zh' ? '切换工作空间' : 'Switch workspace'}</span>
+            <span className="text-[10px] font-normal tabular-nums text-muted-foreground">{items.length}</span>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {items.map((project) => {
+            const isCurrent = project.id === active.id;
+            return (
+              <DropdownMenuItem key={project.id} onSelect={() => void switchProject(project.id)} className="min-h-10 gap-2.5">
+                <ProjectLogo project={project} size="sm" compact />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium">{project.name}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">{project.industry || project.companyName}</span>
+                </span>
+                {isCurrent ? <Check className="h-4 w-4 shrink-0 text-primary" aria-label={t('nav.currentProject')} /> : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }): React.JSX.Element {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const isAdmin = useAuthStore(selectIsAdmin);
   const isPlatformAdmin = useAuthStore(selectIsPlatformAdmin);
   const canManageProjects = useAuthStore(selectCanManageProjects);
   const features = useMetaStore(selectDeploymentFeatures);
-  // 按角色与部署模式过滤导航：自用模式隐藏商业账单与多组织平台入口
+
   const items = React.useMemo(
     () => NAV_ITEMS.filter(
       (item) => (!item.adminOnly || isAdmin)
@@ -140,100 +240,84 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
     [isAdmin, isPlatformAdmin, canManageProjects, features],
   );
 
+  const rawGroups: Array<{ key: NavGroupKey; label: string; items: NavItem[] }> = [
+    { key: 'workspace', label: language === 'zh' ? '工作空间' : 'Workspace', items: items.filter((item) => item.group === 'workspace') },
+    { key: 'resources', label: language === 'zh' ? '业务资源' : 'Resources', items: items.filter((item) => item.group === 'resources') },
+    { key: 'manage', label: language === 'zh' ? '系统管理' : 'Administration', items: items.filter((item) => item.group === 'manage') },
+  ];
+  const groups = rawGroups.filter((g) => g.items.length > 0);
+
   return (
-    <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-3" aria-label={t('nav.main')}>
-      {[
-        { label: t('nav.workspace'), items: items.filter((item) => !item.adminOnly && !item.managerOnly && !item.platformOnly) },
-        { label: t('nav.manage'), items: items.filter((item) => item.adminOnly || item.managerOnly || item.platformOnly) },
-      ]
-        .filter((group) => group.items.length > 0)
-        .map((group) => (
-          <div key={group.label} className="space-y-0.5">
-            {!collapsed ? (
-              <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/65">{group.label}</p>
-            ) : (
-              <div className="mx-auto mb-2 h-px w-6 bg-border" aria-hidden />
-            )}
-            {group.items.map((item) => (
-              <NavLink
-                key={`${group.label}-${item.labelKey}-${item.to}`}
-                to={item.to}
-                end={item.end}
-                onClick={onNavigate}
-                title={collapsed ? t(item.labelKey) : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    'group flex min-h-8 items-center gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] font-medium transition-colors',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-                    collapsed && 'justify-center px-0',
-                    isActive
-                      ? 'bg-muted text-foreground'
-                      : 'text-muted-foreground hover:bg-muted/65 hover:text-foreground',
-                  )
-                }
-              >
-                <item.icon className="h-4 w-4 shrink-0" aria-hidden />
-                {!collapsed && <span className="truncate">{t(item.labelKey)}</span>}
-              </NavLink>
-            ))}
-          </div>
-        ))}
+    <nav className="sidebar-project-list flex-1 space-y-4 overflow-y-auto px-3 py-2" aria-label={t('nav.main')}>
+      {groups.map((group) => (
+        <div key={group.key} className="space-y-0.5">
+          {!collapsed ? (
+            <p className="mb-1.5 px-2.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/75">
+              {group.label}
+            </p>
+          ) : (
+            <div className="mx-auto my-2 h-px w-6 bg-sidebar-border" aria-hidden />
+          )}
+          {group.items.map((item) => (
+            <NavLink
+              key={`${group.key}-${item.labelKey}-${item.to}`}
+              to={item.to}
+              end={item.end}
+              onClick={onNavigate}
+              title={collapsed ? t(item.labelKey) : undefined}
+              className={({ isActive }) =>
+                cn(
+                  'group relative flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[0.8125rem] font-medium transition-[background-color,color] duration-150',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+                  collapsed && 'justify-center px-0',
+                  isActive
+                    ? 'bg-primary-soft font-semibold text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)_/_0.12)]'
+                    : 'text-sidebar-foreground/75 hover:bg-card/75 hover:text-foreground',
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <item.icon
+                    className={cn(
+                      'h-[17px] w-[17px] shrink-0 transition-colors',
+                      isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground',
+                    )}
+                    aria-hidden
+                  />
+                  {!collapsed ? <span className="truncate">{t(item.labelKey)}</span> : null}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </div>
+      ))}
     </nav>
   );
 }
 
-/** The project rail keeps multi-project context visible without a second dropdown. */
-function ProjectRail({ collapsed }: { collapsed: boolean }): React.JSX.Element | null {
-  const { t } = useI18n();
-  const items = useProjectStore((state) => state.items).filter((item) => item.status === 'active');
-  const active = useProjectStore((state) => state.activeProject);
-  const switchProject = useProjectStore((state) => state.switchProject);
-  const activeRef = React.useRef<HTMLButtonElement | null>(null);
-
-  // With many projects the rail scrolls independently. Keep the active project
-  // visible when it changes, without moving the main workspace scroll.
-  React.useEffect(() => {
-    if (active?.id) activeRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [active?.id, items.length]);
-
-  if (!items.length) return null;
+/** 底部成员名片（展示真实登录用户信息，无硬编码演示人名） */
+function SidebarUserCard({ collapsed }: { collapsed: boolean }): React.JSX.Element | null {
+  const user = useAuthStore((state) => state.user);
+  if (!user) return null;
+  const displayName = user.displayName || user.username;
+  const roleText = USER_ROLE_LABEL[user.role] ?? '销售';
 
   return (
-    <div className="shrink-0 border-t border-border px-2 py-2">
-      {!collapsed ? (
-        <div className="mb-1 flex items-center justify-between px-2">
-          <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/65">{t('nav.projectsRail')}</p>
-          <span className="text-[10px] tabular-nums text-muted-foreground/45">{items.length}</span>
-        </div>
-      ) : null}
-      <div
-        className={cn('sidebar-project-list max-h-[10rem] space-y-0.5 overflow-y-auto overscroll-contain pr-0.5', collapsed && 'max-h-[12rem]')}
-        role="list"
-        aria-label={t('nav.projectList')}
-      >
-        {items.map((project) => {
-          const isActive = project.id === active?.id;
-          return (
-            <button
-              key={project.id}
-              ref={isActive ? activeRef : undefined}
-              type="button"
-              onClick={() => void switchProject(project.id)}
-              title={collapsed ? project.name : undefined}
-              aria-pressed={isActive}
-              className={cn(
-                'flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[0.75rem] font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-                collapsed && 'justify-center px-0',
-                isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/65 hover:text-foreground',
-              )}
-            >
-              <ProjectLogo project={project} size="sm" compact />
-              {!collapsed ? <span className="min-w-0 flex-1 truncate">{project.name}</span> : null}
-              {!collapsed && isActive ? <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-label={t('nav.currentProject')} /> : null}
-            </button>
-          );
-        })}
+    <div className={cn('shrink-0 border-t border-sidebar-border px-3 py-3', collapsed && 'px-2')}>
+      <div className={cn('flex items-center gap-2.5 rounded-xl px-2 py-1.5', collapsed && 'justify-center px-0')}>
+        <span className="avatar-bubble flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-primary/15">
+          {initials(displayName)}
+        </span>
+        {!collapsed ? (
+          <>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[0.8125rem] font-semibold leading-tight text-foreground">{displayName}</span>
+              <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">{roleText}</span>
+            </span>
+            <span className="h-2 w-2 shrink-0 rounded-full bg-status-developed ring-2 ring-sidebar" title="在线" aria-hidden />
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -241,11 +325,10 @@ function ProjectRail({ collapsed }: { collapsed: boolean }): React.JSX.Element |
 
 export function Sidebar({ collapsed, mobile = false, onNavigate }: SidebarProps): React.JSX.Element {
   const { t } = useI18n();
-  // 移动端抽屉始终展开显示文字
   const isCollapsed = collapsed && !mobile;
 
   return (
-    <div className="flex h-full flex-col bg-card text-foreground">
+    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex items-center">
         <div className="min-w-0 flex-1">
           <Brand collapsed={isCollapsed} />
@@ -255,16 +338,18 @@ export function Sidebar({ collapsed, mobile = false, onNavigate }: SidebarProps)
             type="button"
             onClick={onNavigate}
             aria-label={t('nav.close')}
-            className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
         )}
       </div>
 
+      <SidebarWorkspaceCard collapsed={isCollapsed} />
+
       <NavList collapsed={isCollapsed} onNavigate={onNavigate} />
 
-      <ProjectRail collapsed={isCollapsed} />
+      <SidebarUserCard collapsed={isCollapsed} />
     </div>
   );
 }

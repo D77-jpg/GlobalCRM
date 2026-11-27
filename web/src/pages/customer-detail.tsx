@@ -623,39 +623,19 @@ export function CustomerDetailPage(): React.JSX.Element {
 
   return (
     <div className="workspace-page">
-      <PageHeader
-        backTo={ROUTES.customers}
-        backLabel="返回客户列表"
-        title={
-          <span className="flex items-center gap-2.5">
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground"
-              aria-hidden
-            >
-              {initials(customer.name)}
-            </span>
-            <EditableCustomerName name={customer.name} onSave={saveName} />
-            <CustomerStatusBadge status={customer.status} className="hidden sm:inline-flex" />
-          </span>
-        }
-        description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-            {companyText ? <span>{companyText}{customer.title ? ` · ${customer.title}` : ''}</span> : null}
-            {/* 潜客转来的记录常常只有公司没有联系人，姓名栏等于公司名，这里明确标出来 */}
-            {companyOnly ? (
-              <span className="chip chip-muted"><UserX className="h-3 w-3" aria-hidden />未填联系人</span>
-            ) : null}
-            {/* 行业、国家做成胶囊，顺序与列表一致（先行业再国家），业务员一眼确认客户画像 */}
-            {customer.industry ? (
-              <span className="chip chip-muted"><Building2 className="h-3 w-3" aria-hidden />{customer.industry}</span>
-            ) : null}
-            {customer.country ? (
-              <span className="chip chip-muted"><CountryFlag value={customer.country} />{countryInfo(customer.country)?.name ?? customer.country}</span>
-            ) : null}
-          </span>
-        }
-        actions={
-          <>
+      {/* Executive Customer Identity Hero Card */}
+      <section className="hero-wash panel p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-ml-2 h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => navigate(ROUTES.customers)}
+          >
+            ← 返回客户列表
+          </Button>
+          <div className="flex flex-wrap items-center gap-2">
             {isAdmin ? (
               <Button type="button" variant="outline" size="sm" onClick={() => setHandoffOpen(true)}>
                 <ArrowRightLeft className="h-4 w-4" aria-hidden />
@@ -665,7 +645,7 @@ export function CustomerDetailPage(): React.JSX.Element {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" size="sm" disabled={quickGenerating}>
-                  {quickGenerating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
+                  {quickGenerating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4 text-primary" aria-hidden />}
                   {quickGenerating ? '生成中…' : '生成草稿'}
                   <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                 </Button>
@@ -701,9 +681,94 @@ export function CustomerDetailPage(): React.JSX.Element {
               <Send className="h-4 w-4" aria-hidden />
               发送开发信
             </Button>
-          </>
-        }
-      />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4 border-t border-border/75 pt-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3.5">
+            <span
+              className="avatar-bubble flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ring-1 ring-primary/15"
+              aria-hidden
+            >
+              {initials(customer.name)}
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="min-w-0 text-xl font-semibold leading-tight tracking-[-0.025em] text-foreground sm:text-2xl">
+                  <EditableCustomerName name={customer.name} onSave={saveName} />
+                </h1>
+                <CustomerStatusBadge status={customer.status} />
+                {customer.grade ? <Badge variant="gold">{customer.grade} 级客户</Badge> : null}
+                {customer.priority ? (
+                  <Badge variant="outline" className={CUSTOMER_PRIORITY_BADGE_CLASS[customer.priority]}>
+                    优先级 · {customer.priority === 'high' ? '高' : customer.priority === 'medium' ? '中' : '低'}
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+                {companyText ? <span className="font-medium text-foreground/80">{companyText}{customer.title ? ` · ${customer.title}` : ''}</span> : null}
+                {companyOnly ? <span className="chip chip-muted"><UserX className="h-3 w-3" aria-hidden />未填联系人</span> : null}
+                {customer.country ? (
+                  <span className="inline-flex items-center gap-1">
+                    <CountryFlag value={customer.country} />
+                    {countryInfo(customer.country)?.name ?? customer.country}
+                  </span>
+                ) : null}
+                {customer.industry ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Building2 className="h-3 w-3" aria-hidden />
+                    {customer.industry}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          {/* Key Metadata Columns */}
+          <dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-2 border-t border-border/75 pt-3 text-xs sm:grid-cols-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <div>
+              <dt className="text-[11px] text-muted-foreground">跟进负责人</dt>
+              <dd className="mt-0.5 font-semibold text-foreground">{customer.owner?.name || '未分配'}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-muted-foreground">开发信</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums text-foreground">{customer.letterCount} 封</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-muted-foreground">最近联系</dt>
+              <dd className="mt-0.5 font-semibold text-foreground">{customer.lastContactAt ? formatRelative(customer.lastContactAt) : '尚未联系'}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] text-muted-foreground">下次跟进</dt>
+              <dd className={`mt-0.5 font-semibold ${getFollowUpState(customer.nextFollowUpAt) === 'overdue' ? 'text-rose' : 'text-foreground'}`}>
+                {customer.nextFollowUpAt ? formatDate(customer.nextFollowUpAt) : '未设置'}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        {/* Quick Section Navigation Strip */}
+        <nav aria-label="客户资料分区" className="-mb-5 mt-4 flex items-center gap-4 overflow-x-auto border-t border-border/75 pt-0.5 text-xs">
+          {[
+            { label: '客户概览', href: '#customer-contact-title' },
+            { label: '采购需求', href: '#customer-needs-section' },
+            { label: '询盘与动态', href: '#globalsite-inquiries' },
+            { label: '开发信记录', href: '#customer-letter-history' },
+          ].map((item, idx) => (
+            <a
+              key={item.href}
+              href={item.href}
+              className={`inline-flex h-10 shrink-0 items-center border-b-2 px-1 font-medium transition-colors ${
+                idx === 0
+                  ? 'border-primary font-semibold text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      </section>
 
       <PendingDrafts feed={pendingDrafts} onOpenDraft={letter=>navigate('/customers/'+customer.id+'?knowledgeDraft='+letter.id)} busy={letterBusy}/>
 
@@ -1097,10 +1162,10 @@ export function CustomerDetailPage(): React.JSX.Element {
 
       {/* ---------------------------- 客户需求 ---------------------------- */}
 
-      <Card>
+      <Card id="customer-needs-section">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-muted-foreground" aria-hidden />
+            <Package className="h-4 w-4 text-primary" aria-hidden />
             客户需求
           </CardTitle>
           <CardDescription>客户到底想买什么：产品、型号、分类、数量、目标价与 MOQ</CardDescription>

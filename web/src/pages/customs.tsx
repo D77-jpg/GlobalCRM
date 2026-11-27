@@ -267,26 +267,62 @@ export function CustomsPage(): React.JSX.Element {
 
       {error ? <ErrorState description={error} onRetry={() => void load()} /> : null}
 
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {loading ? '正在读取海关公司...' : `共 ${total.toLocaleString('zh-CN')} 家公司`}
-        </p>
-        <Badge variant="outline" className="gap-1.5"><Globe2 className="h-3.5 w-3.5" aria-hidden />欧美优先</Badge>
-      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem] xl:items-start">
+        <Card className="overflow-hidden">
+          <CardContent className="p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <h2 className="section-title">采购商结果</h2>
+                <Badge variant="developed" className="tabular-nums">{total.toLocaleString('zh-CN')}</Badge>
+              </div>
+              <Badge variant="outline" className="gap-1.5"><Globe2 className="h-3.5 w-3.5 text-primary" aria-hidden />欧美优先</Badge>
+            </div>
 
-      {!loading && !error && companies.length === 0 ? (
-        <EmptyState
-          icon={<Ship className="h-5 w-5" aria-hidden />}
-          title="还没有海关公司"
-          description="管理员可以先通过 CSV 或供应商接口导入海关数据。导入后，这里会按公司维度展示采购记录。"
-        />
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {companies.map((company) => (
-            <CompanyCard key={company._id} company={company} onOpen={() => void openCompany(company)} />
-          ))}
-        </div>
-      )}
+            {!loading && !error && companies.length === 0 ? (
+              <EmptyState
+                icon={<Ship className="h-7 w-7" aria-hidden />}
+                title="开始你的市场调查"
+                description="当前项目暂无海关数据。管理员可通过 CSV 或授权供应商接口导入，导入后即可按公司维度查看真实采购记录与匹配画像。"
+                action={isAdmin ? (
+                  <Button size="sm" onClick={() => void openImport()}>导入海关数据</Button>
+                ) : undefined}
+              />
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {companies.map((company) => (
+                  <CompanyCard key={company._id} company={company} onOpen={() => void openCompany(company)} />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="p-5">
+          <h2 className="section-title flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-primary" aria-hidden />
+            研究流程
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">四步从真实海关提单沉淀高价值外贸线索</p>
+          <ol className="mt-4 space-y-2.5">
+            {[
+              { step: '01', title: '导入数据', desc: '通过 CSV 或授权供应商接口导入真实提单' },
+              { step: '02', title: '筛选采购商', desc: '按产品关键词、HS 编码与目标进口国家检索' },
+              { step: '03', title: '核实公司画像', desc: '查看采购频次、金额趋势与主要供应商结构' },
+              { step: '04', title: '加入客户线索池', desc: '一键转入线索池补齐决策人邮箱并推进开发' },
+            ].map((item) => (
+              <li key={item.step} className="flex items-start gap-3 rounded-xl border border-border/80 bg-surface/65 p-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-xs font-bold tabular-nums text-primary">
+                  {item.step}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[0.8125rem] font-semibold text-foreground">{item.title}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{item.desc}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Card>
+      </div>
 
       <Dialog open={Boolean(selected) || detailLoading} onOpenChange={(open) => { if (!open) setSelected(null); }}>
         <DialogContent className="max-w-4xl">

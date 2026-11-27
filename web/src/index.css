@@ -3,132 +3,137 @@
 @tailwind utilities;
 
 /* ==========================================================================
-   Design tokens
+   GlobalCRM · Atelier Trade Design Tokens
    ------------------------------------------------------------------
-   A quiet, content-first workspace: warm neutral canvas, crisp white surfaces,
-   one restrained violet accent, compact type and 8px radii. No decorative
-   gradients or ambient glows; hierarchy comes from type, spacing and borders.
+   Warm linen-ivory canvas, parchment sidebar, crisp elevated white surfaces,
+   deep British forest-emerald brand accent, restrained antique-gold highlights.
+   Zero cheap neon or generic admin templates; calm executive clarity.
    ========================================================================== */
 @layer base {
   :root {
-    --background: 240 10% 97%;
-    --foreground: 240 10% 7%;
+    --background: 45 22% 96%;
+    --foreground: 150 18% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 7%;
+    --card-foreground: 150 18% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 7%;
+    --popover-foreground: 150 18% 12%;
 
-    --primary: 252 62% 58%;
+    /* Deep Forest Emerald (#1E5B3A) */
+    --primary: 148 51% 24%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 252 60% 96%;
+    --primary-soft: 146 34% 92%;
 
-    --secondary: 240 6% 96%;
-    --secondary-foreground: 240 8% 18%;
+    --secondary: 44 18% 93%;
+    --secondary-foreground: 150 16% 20%;
 
-    --muted: 240 6% 95.5%;
-    --muted-foreground: 240 4% 45%;
+    --muted: 44 16% 93.5%;
+    --muted-foreground: 148 7% 43%;
 
-    --accent: 240 6% 95%;
-    --accent-foreground: 240 8% 12%;
+    --accent: 146 24% 93%;
+    --accent-foreground: 148 42% 20%;
 
-    --destructive: 0 68% 52%;
+    --destructive: 2 62% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 240 6% 90%;
-    --input: 240 6% 84%;
-    --ring: 252 62% 58%;
+    --border: 42 15% 88%;
+    --input: 42 14% 83%;
+    --ring: 148 48% 28%;
 
-    --surface: 240 8% 97.5%;
-    --surface-foreground: 240 10% 7%;
+    --surface: 45 20% 97%;
+    --surface-foreground: 150 18% 12%;
 
-    --mint: 160 62% 30%;
-    --mint-soft: 158 50% 94%;
-    --rose: 352 66% 48%;
-    --rose-soft: 352 80% 96.5%;
-    --amber: 32 80% 38%;
-    --amber-soft: 38 90% 94%;
-    --violet-soft: 252 60% 96%;
+    /* Harmonized botanical semantic palette */
+    --mint: 150 54% 28%;
+    --mint-soft: 146 38% 92%;
+    --rose: 356 60% 47%;
+    --rose-soft: 356 70% 96%;
+    --amber: 34 78% 36%;
+    --amber-soft: 40 82% 93%;
+    --violet-soft: 146 34% 92%;
+    --gold: 40 48% 44%;
+    --gold-soft: 43 60% 93%;
 
-    --radius: 0.5rem;
-    /* Data pages should use the available workspace width; forms keep their own
-       inner max-widths. A global 1480px cap left visible side gutters on wide /
-       collapsed-sidebar layouts. */
+    --radius: 0.75rem;
     --workspace-content-width: 100%;
-    --workspace-shadow: 0 1px 2px hsl(240 10% 10% / 0.03);
-    --workspace-panel-shadow: 0 8px 24px -16px hsl(240 10% 10% / 0.22);
-    --workspace-motion: 140ms;
+    --workspace-shadow: 0 1px 2px hsl(150 20% 12% / 0.04);
+    --workspace-panel-shadow: 0 10px 30px -16px hsl(150 20% 12% / 0.16);
+    --workspace-motion: 150ms;
 
-    --shadow-card: 0 1px 2px hsl(240 10% 10% / 0.035);
-    --shadow-island: 0 8px 24px -20px hsl(240 10% 10% / 0.22);
-    --shadow-pop: 0 10px 28px -18px hsl(240 10% 10% / 0.26), 0 1px 3px hsl(240 10% 10% / 0.06);
+    --shadow-card: 0 1px 2px hsl(150 18% 14% / 0.04), 0 4px 14px -10px hsl(150 18% 14% / 0.08);
+    --shadow-island: 0 10px 28px -18px hsl(150 18% 14% / 0.16);
+    --shadow-pop: 0 14px 36px -16px hsl(150 20% 12% / 0.22), 0 2px 6px hsl(150 20% 12% / 0.06);
 
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 240 10% 9%;
-    --sidebar-accent: 240 6% 95%;
-    --sidebar-border: 240 6% 90%;
+    /* Parchment stone sidebar */
+    --sidebar: 44 20% 94%;
+    --sidebar-foreground: 150 16% 16%;
+    --sidebar-accent: 146 32% 89%;
+    --sidebar-border: 42 16% 87%;
 
-    --status-pending: 244 62% 55%;
-    --status-developed: 160 62% 30%;
-    --status-failed: 352 66% 48%;
+    --status-pending: 204 52% 38%;
+    --status-developed: 150 54% 28%;
+    --status-failed: 356 60% 47%;
   }
 
   .dark {
-    --background: 240 8% 6%;
-    --foreground: 240 6% 96%;
+    --background: 150 10% 7%;
+    --foreground: 44 14% 94%;
 
-    --card: 240 7% 9%;
-    --card-foreground: 240 6% 96%;
+    --card: 150 10% 10.5%;
+    --card-foreground: 44 14% 94%;
 
-    --popover: 240 7% 10%;
-    --popover-foreground: 240 6% 96%;
+    --popover: 150 10% 12%;
+    --popover-foreground: 44 14% 94%;
 
-    --primary: 252 76% 70%;
-    --primary-foreground: 240 10% 7%;
-    --primary-soft: 252 24% 18%;
+    /* Luminous Sage Emerald for dark surfaces */
+    --primary: 148 44% 46%;
+    --primary-foreground: 150 25% 7%;
+    --primary-soft: 148 28% 16%;
 
-    --secondary: 240 6% 14%;
-    --secondary-foreground: 240 6% 94%;
+    --secondary: 150 8% 15%;
+    --secondary-foreground: 44 12% 92%;
 
-    --muted: 240 6% 14%;
-    --muted-foreground: 240 5% 62%;
+    --muted: 150 8% 15%;
+    --muted-foreground: 145 7% 62%;
 
-    --accent: 240 6% 15%;
-    --accent-foreground: 240 6% 96%;
+    --accent: 148 20% 17%;
+    --accent-foreground: 148 42% 76%;
 
-    --destructive: 0 62% 58%;
+    --destructive: 2 62% 58%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 240 6% 18%;
-    --input: 240 6% 22%;
-    --ring: 252 76% 70%;
+    --border: 150 8% 19%;
+    --input: 150 8% 24%;
+    --ring: 148 44% 48%;
 
-    --surface: 240 6% 11%;
-    --surface-foreground: 240 6% 96%;
+    --surface: 150 9% 12.5%;
+    --surface-foreground: 44 14% 94%;
 
-    --mint: 158 58% 60%;
-    --mint-soft: 158 28% 16%;
-    --rose: 352 72% 68%;
-    --rose-soft: 352 28% 18%;
-    --amber: 38 76% 64%;
-    --amber-soft: 36 28% 17%;
-    --violet-soft: 252 24% 18%;
+    --mint: 150 52% 56%;
+    --mint-soft: 150 28% 16%;
+    --rose: 356 68% 66%;
+    --rose-soft: 356 30% 18%;
+    --amber: 38 78% 62%;
+    --amber-soft: 36 30% 17%;
+    --violet-soft: 148 28% 16%;
+    --gold: 42 56% 62%;
+    --gold-soft: 42 28% 17%;
 
-    --workspace-shadow: 0 1px 2px hsl(0 0% 0% / 0.3);
-    --workspace-panel-shadow: 0 10px 28px -20px hsl(0 0% 0% / 0.7);
-    --shadow-card: 0 1px 2px hsl(0 0% 0% / 0.25);
-    --shadow-island: 0 12px 28px -22px hsl(0 0% 0% / 0.7);
-    --shadow-pop: 0 12px 32px -20px hsl(0 0% 0% / 0.75), 0 1px 3px hsl(0 0% 0% / 0.35);
+    --workspace-shadow: 0 1px 2px hsl(0 0% 0% / 0.35);
+    --workspace-panel-shadow: 0 12px 32px -18px hsl(0 0% 0% / 0.72);
+    --shadow-card: 0 1px 2px hsl(0 0% 0% / 0.28), 0 6px 18px -14px hsl(0 0% 0% / 0.5);
+    --shadow-island: 0 14px 32px -20px hsl(0 0% 0% / 0.72);
+    --shadow-pop: 0 16px 38px -18px hsl(0 0% 0% / 0.78), 0 1px 4px hsl(0 0% 0% / 0.4);
 
-    --sidebar: 240 7% 8%;
-    --sidebar-foreground: 240 6% 94%;
-    --sidebar-accent: 240 6% 14%;
-    --sidebar-border: 240 6% 17%;
+    --sidebar: 150 11% 9%;
+    --sidebar-foreground: 44 12% 92%;
+    --sidebar-accent: 148 24% 16%;
+    --sidebar-border: 150 8% 17%;
 
-    --status-pending: 244 76% 70%;
-    --status-developed: 158 58% 54%;
-    --status-failed: 352 72% 66%;
+    --status-pending: 204 60% 62%;
+    --status-developed: 150 52% 54%;
+    --status-failed: 356 68% 66%;
   }
 
   * {
@@ -143,10 +148,9 @@
     @apply bg-background text-foreground font-sans antialiased;
     line-height: 1.5;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-    letter-spacing: -0.006em;
+    letter-spacing: -0.008em;
     background-color: hsl(var(--background));
     background-image: none;
-    /* Avoid layout shift when dialogs lock body scrolling. */
     scrollbar-gutter: stable;
   }
 
@@ -159,14 +163,13 @@
     background: hsl(var(--primary) / 0.18);
   }
 
-  /* 键盘可达性：仅在键盘操作时显示 focus ring（保持轻柔，避免和组件自带聚焦环叠成粗描边） */
   :focus-visible {
-    @apply outline-none ring-2 ring-ring/30 ring-offset-2 ring-offset-background;
+    @apply outline-none ring-2 ring-ring/35 ring-offset-2 ring-offset-background;
   }
 
   ::-webkit-scrollbar {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
     @apply bg-transparent;
@@ -176,7 +179,7 @@
     background: hsl(var(--foreground) / 0.14);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--foreground) / 0.24);
+    background: hsl(var(--foreground) / 0.26);
   }
 }
 
@@ -188,7 +191,6 @@
     text-wrap: balance;
   }
 
-  /* 单行 / 多行截断 */
   .truncate-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -196,7 +198,6 @@
     overflow: hidden;
   }
 
-  /* 表格容器：小屏横向滚动 */
   .table-scroll {
     @apply w-full overflow-x-auto;
     -webkit-overflow-scrolling: touch;
@@ -204,19 +205,15 @@
 }
 
 /* ==========================================================================
-   工作区共享节奏
-   业务页保留自己的数据与操作，只统一定义容器、工具条、表格等外壳样式。
+   工作区共享节奏 & 高级材质表面
    ========================================================================== */
 @layer components {
-  /* 视口兜底：部分内嵌浏览器/缩放环境里 dvh 会小于实际可视高度，
-     导致应用外壳只铺到内容底部，下面露出 body 的淡紫空白。
-     固定到视口，避免 body 被整页滚动后露出空白。 */
   .workspace-shell {
     position: fixed;
     inset: 0;
     min-height: 100vh;
     min-height: 100dvh;
-    background-color: hsl(var(--card));
+    background-color: hsl(var(--background));
   }
   .workspace-shell-body {
     min-height: 100vh;
@@ -225,12 +222,12 @@
   @media (min-width: 1024px) {
     .workspace-shell,
     .workspace-shell-body {
-      /* 桌面端用最稳定的 vh；max(100vh, 100dvh) 在部分内嵌浏览器里不生效。 */
       min-height: 100vh;
     }
   }
-  .workspace-page { @apply min-w-0 space-y-4 sm:space-y-5; }
+  .workspace-page { @apply min-w-0 space-y-5; }
   .workspace-surface { box-shadow: none; }
+
   .sidebar-project-list {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--border)) transparent;
@@ -243,30 +240,48 @@
   }
   .sidebar-project-list::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.35); }
 
-  /* Surfaces: crisp 8px corners, hairline borders, no floating-card effect. */
+  /* Atelier Surfaces: refined 12px-14px corners, warm hairline borders, subtle paper elevation */
   .panel {
-    @apply min-w-0 rounded-lg border border-border bg-card text-card-foreground;
+    @apply min-w-0 rounded-xl border border-border bg-card text-card-foreground;
     box-shadow: var(--shadow-card);
   }
   .panel-flat {
-    @apply min-w-0 rounded-lg border border-border bg-card text-card-foreground;
+    @apply min-w-0 rounded-xl border border-border bg-card text-card-foreground;
   }
   .well {
-    @apply rounded-lg border border-border bg-surface;
+    @apply rounded-xl border border-border/80 bg-surface;
+  }
+
+  /* Subtle warm editorial backdrop for executive hero areas (brand-neutral, never gaudy) */
+  .hero-wash {
+    background: radial-gradient(62% 140% at 92% 10%, hsl(var(--primary) / 0.08) 0%, transparent 64%),
+                radial-gradient(40% 120% at 72% 95%, hsl(var(--gold) / 0.09) 0%, transparent 65%),
+                hsl(var(--card));
+  }
+  .dark .hero-wash {
+    background: radial-gradient(62% 140% at 92% 10%, hsl(var(--primary) / 0.14) 0%, transparent 64%),
+                radial-gradient(40% 120% at 72% 95%, hsl(var(--gold) / 0.08) 0%, transparent 65%),
+                hsl(var(--card));
+  }
+
+  /* Green-accented editorial callout strip (matching reference knowledge/compliance/isolation callouts) */
+  .callout-sage {
+    @apply rounded-lg border border-primary/15 bg-primary-soft/60 px-3.5 py-2.5 text-xs leading-relaxed text-foreground;
+    border-left: 3px solid hsl(var(--primary));
   }
 
   .workspace-toolbar {
-    @apply flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5;
-    box-shadow: none;
+    @apply flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2.5;
+    box-shadow: var(--shadow-card);
   }
   .workspace-toolbar > :first-child { flex-shrink: 0; }
-  [data-ui="field"] { min-height: 34px; }
+  [data-ui="field"] { min-height: 36px; }
   .workspace-main:focus { outline: none; box-shadow: none; }
   .workspace-skip-link {
     @apply sr-only;
   }
   .workspace-skip-link:focus {
-    @apply fixed left-4 top-3 z-[100] h-auto w-auto rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground;
+    @apply fixed left-4 top-3 z-[100] h-auto w-auto rounded-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground shadow-pop;
     clip: auto;
     clip-path: none;
   }
@@ -280,8 +295,8 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background-color: hsl(var(--card) / 0.96);
-    backdrop-filter: blur(4px);
+    background-color: hsl(var(--surface) / 0.96);
+    backdrop-filter: blur(6px);
     box-shadow: inset 0 -1px 0 hsl(var(--border));
   }
   .workspace-table :is(td, th) { overflow-wrap: anywhere; }
@@ -293,73 +308,76 @@
   .workspace-page :is(dl, article, section) { min-width: 0; }
   .workspace-page :is(dd, article p) { overflow-wrap: anywhere; }
   .workspace-page select:not([aria-hidden="true"]) {
-    @apply min-h-9 rounded-md border border-input bg-card px-2.5 py-1 text-sm;
+    @apply min-h-9 rounded-lg border border-input bg-card px-2.5 py-1 text-sm transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/15;
   }
   .workspace-page details > summary {
     @apply rounded-md transition-colors hover:text-foreground;
   }
   .workspace-page-actions > button { flex-shrink: 0; }
 
-  /* ---------------------------- restrained status labels ---------------------------- */
+  /* ---------------------------- Botanical Semantic Chips ---------------------------- */
   .chip {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium leading-none;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-tight;
   }
   .chip-mint { background: hsl(var(--mint-soft)); color: hsl(var(--mint)); }
   .chip-rose { background: hsl(var(--rose-soft)); color: hsl(var(--rose)); }
   .chip-amber { background: hsl(var(--amber-soft)); color: hsl(var(--amber)); }
-  .chip-violet { background: hsl(var(--violet-soft)); color: hsl(var(--primary)); }
+  .chip-violet { background: hsl(var(--primary-soft)); color: hsl(var(--primary)); }
+  .chip-gold { background: hsl(var(--gold-soft)); color: hsl(var(--gold)); }
   .chip-muted { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
   .chip-outline {
     @apply border border-border bg-card text-muted-foreground;
   }
 
-  /* ---------------------------- brand + avatars ---------------------------- */
+  /* ---------------------------- Brand + Avatars ---------------------------- */
   .brand-mark {
-    background-image: none;
-    background-color: hsl(var(--foreground));
-    box-shadow: none;
+    background: linear-gradient(145deg, hsl(148 52% 26%) 0%, hsl(150 54% 19%) 100%);
+    box-shadow: 0 2px 6px -2px hsl(148 52% 18% / 0.38);
   }
   .avatar-bubble {
-    background-image: none;
-    background-color: hsl(var(--muted));
-    color: hsl(var(--foreground) / 0.7);
+    background-color: hsl(var(--primary-soft));
+    color: hsl(var(--primary));
   }
   .dark .avatar-bubble {
-    background-image: none;
-    background-color: hsl(var(--muted));
-    color: hsl(var(--foreground) / 0.75);
+    background-color: hsl(var(--primary-soft));
+    color: hsl(var(--primary));
   }
   .avatar-stack > * + * { margin-left: -0.5rem; }
 
+  /* Deep Forest Emerald Primary CTA */
   .btn-gradient {
-    background-image: none;
     background-color: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
-    box-shadow: 0 1px 2px hsl(var(--primary) / 0.25);
+    box-shadow: 0 1px 2px hsl(var(--primary) / 0.25), inset 0 1px 0 hsl(0 0% 100% / 0.12);
   }
-  .btn-gradient:hover { filter: none; background-color: hsl(var(--primary) / 0.9); }
-  /* 登录页主按钮：与参考稿的紫色渐变保持一致，不跟随工作区的蓝紫渐变 */
-  .login-submit {
-    background-image: none;
-    background-color: hsl(var(--primary));
-    box-shadow: 0 1px 2px hsl(var(--primary) / 0.25);
+  .btn-gradient:hover {
+    background-color: hsl(148 52% 20%);
   }
-  .login-submit:hover { filter: none; background-color: hsl(var(--primary) / 0.9); }
+  .dark .btn-gradient:hover {
+    background-color: hsl(148 44% 51%);
+  }
 
-  /* AI surfaces stay neutral so assistant content reads as work product, not decoration. */
+  .login-submit {
+    background: linear-gradient(135deg, hsl(148 52% 24%) 0%, hsl(152 56% 19%) 100%);
+    color: #ffffff;
+    box-shadow: 0 8px 20px -10px hsl(148 52% 18% / 0.55);
+  }
+  .login-submit:hover {
+    background: linear-gradient(135deg, hsl(148 52% 21%) 0%, hsl(152 56% 16%) 100%);
+  }
+
+  /* AI Surfaces: warm botanical editorial feel, zero cheap purple glow */
   .assistant-surface {
-    background-image: none;
     background-color: hsl(var(--surface));
     border: 1px solid hsl(var(--border));
   }
   .dark .assistant-surface {
-    background-image: none;
     background-color: hsl(var(--surface));
     border-color: hsl(var(--border));
   }
 
   .section-title {
-    @apply text-[0.8125rem] font-semibold tracking-[-0.01em] text-foreground;
+    @apply text-[0.9375rem] font-semibold tracking-[-0.015em] text-foreground;
   }
   .section-subtitle {
     @apply text-xs leading-relaxed text-muted-foreground;
@@ -373,8 +391,8 @@
   .workspace-topbar button[aria-label] { min-width: 44px; min-height: 44px; }
   .workspace-toolbar > * { max-width: 100%; }
   .workspace-toolbar > [role="combobox"] { flex: 1 1 8rem; }
-  .workspace-page-header h1 { font-size: 1.25rem; }
-  .workspace-project-switcher { margin-right: auto; max-width: 6rem; }
+  .workspace-page-header h1 { font-size: 1.375rem; }
+  .workspace-project-switcher { margin-right: auto; max-width: 7rem; }
   .workspace-topbar { gap: 0.25rem; }
   .workspace-tabs { width: 100%; }
 }
@@ -390,7 +408,6 @@
 
 /* ==========================================================================
    React Quill 适配
-   quill.snow.css 自带白底 + 深色文字，深色模式下必须覆盖。
    ========================================================================== */
 .ql-container {
   @apply font-sans text-sm;
@@ -402,14 +419,14 @@
 }
 
 .ql-toolbar.ql-snow {
-  @apply rounded-t-md border-b bg-muted/40 px-2 py-1.5;
+  @apply rounded-t-lg border-b bg-surface px-2.5 py-1.5;
 }
 
 .ql-toolbar.ql-snow button {
   width: 32px;
   height: 32px;
   padding: 7px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 .ql-toolbar.ql-snow button:hover { background: hsl(var(--accent)); }
 @media (max-width: 639px) {
@@ -418,7 +435,7 @@
 }
 
 .ql-container.ql-snow {
-  @apply rounded-b-md bg-card;
+  @apply rounded-b-lg bg-card;
 }
 
 .ql-editor {
@@ -430,236 +447,153 @@
   font-style: italic;
 }
 
-/* 工具栏图标颜色跟随主题 */
-.ql-snow .ql-stroke {
-  @apply stroke-foreground;
-}
+.ql-snow .ql-stroke { @apply stroke-foreground; }
 .ql-snow .ql-fill,
-.ql-snow .ql-stroke.ql-fill {
-  @apply fill-foreground;
-}
+.ql-snow .ql-stroke.ql-fill { @apply fill-foreground; }
 .ql-snow .ql-picker,
-.ql-snow .ql-picker-label {
-  @apply text-foreground;
-}
+.ql-snow .ql-picker-label { @apply text-foreground; }
 .ql-snow .ql-picker-label:hover,
 .ql-snow .ql-active .ql-stroke,
-.ql-snow .ql-picker-label.ql-active {
-  @apply text-primary;
-}
-.ql-snow .ql-stroke-miter {
-  @apply stroke-foreground;
-}
-
-/* 下拉面板（字号 / 标题选择器） */
-.ql-snow .ql-picker-options {
-  @apply rounded-md border border-border bg-popover shadow-md;
-}
-.ql-snow .ql-picker-item {
-  @apply text-popover-foreground;
-}
+.ql-snow .ql-picker-label.ql-active { @apply text-primary; }
+.ql-snow .ql-stroke-miter { @apply stroke-foreground; }
+.ql-snow .ql-picker-options { @apply rounded-lg border border-border bg-popover shadow-md; }
+.ql-snow .ql-picker-item { @apply text-popover-foreground; }
 .ql-snow .ql-picker-item:hover,
-.ql-snow .ql-picker-item.ql-selected {
-  @apply text-primary;
-}
-
-/* 链接 / 图片弹窗 */
+.ql-snow .ql-picker-item.ql-selected { @apply text-primary; }
 .ql-snow .ql-tooltip {
-  @apply rounded-md border-border bg-popover text-popover-foreground shadow-md;
+  @apply rounded-lg border-border bg-popover text-popover-foreground shadow-md;
   z-index: 60;
 }
-.ql-snow .ql-tooltip input[type='text'] {
-  @apply rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground;
-}
+.ql-snow .ql-tooltip input[type='text'] { @apply rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground; }
 .ql-snow .ql-tooltip a.ql-action,
-.ql-snow .ql-tooltip a.ql-remove {
-  @apply text-primary;
-}
+.ql-snow .ql-tooltip a.ql-remove { @apply text-primary; }
 
-/* 编辑器内的邮件正文样式 */
-.ql-editor a {
-  @apply text-primary underline underline-offset-2;
-}
-.ql-editor blockquote {
-  @apply border-l-4 border-border pl-3 italic text-muted-foreground;
-}
-.ql-editor h1 {
-  @apply text-2xl font-bold;
-}
-.ql-editor h2 {
-  @apply text-xl font-semibold;
-}
+.ql-editor a { @apply text-primary underline underline-offset-2; }
+.ql-editor blockquote { @apply border-l-4 border-primary/35 pl-3 italic text-muted-foreground; }
+.ql-editor h1 { @apply text-2xl font-bold; }
+.ql-editor h2 { @apply text-xl font-semibold; }
 .ql-editor ul,
-.ql-editor ol {
-  @apply pl-6;
-}
-.ql-editor ul {
-  @apply list-disc;
-}
-.ql-editor ol {
-  @apply list-decimal;
-}
+.ql-editor ol { @apply pl-6; }
+.ql-editor ul { @apply list-disc; }
+.ql-editor ol { @apply list-decimal; }
 
 /* ==========================================================================
-   邮件预览区（只读渲染 HTML）
+   邮件预览区
    ========================================================================== */
-.mail-preview {
-  @apply text-sm leading-relaxed;
-}
-.mail-preview p {
-  @apply my-2;
-}
-.mail-preview a {
-  @apply text-primary underline underline-offset-2 break-all;
-}
-/* 结尾里的品牌 logo：块级显示、去掉行内基线留白，避免和下一行之间出现大空档 */
-.mail-preview img {
-  @apply my-1.5 block h-auto max-w-full;
-}
-/*
- * 早期版本的固定结尾在 logo 下面画了一条 <hr>，新版签名已经不带分隔线。
- * 历史草稿/已发信件的 HTML 是固化的，这里在渲染层统一隐藏，
- * 只针对「紧跟图片之后的分隔线」，不影响正文里作者自己插的分隔线。
- */
-.mail-preview img + hr {
-  display: none;
-}
-.mail-preview ul {
-  @apply my-2 list-disc pl-6;
-}
-.mail-preview ol {
-  @apply my-2 list-decimal pl-6;
-}
-.mail-preview blockquote {
-  @apply my-2 border-l-4 border-border pl-3 italic text-muted-foreground;
-}
+.mail-preview { @apply text-sm leading-relaxed; }
+.mail-preview p { @apply my-2; }
+.mail-preview a { @apply text-primary underline underline-offset-2 break-all; }
+.mail-preview img { @apply my-1.5 block h-auto max-w-full rounded-md; }
+.mail-preview img + hr { display: none; }
+.mail-preview ul { @apply my-2 list-disc pl-6; }
+.mail-preview ol { @apply my-2 list-decimal pl-6; }
+.mail-preview blockquote { @apply my-2 border-l-4 border-primary/30 pl-3 italic text-muted-foreground; }
 .mail-preview h1,
 .mail-preview h2,
-.mail-preview h3 {
-  @apply mb-2 mt-4 font-semibold;
-}
-.mail-preview img {
-  @apply max-w-full rounded-md;
+.mail-preview h3 { @apply mb-2 mt-4 font-semibold; }
+
+/* ==========================================================================
+   打印
+   ========================================================================== */
+@media print {
+  .no-print { display: none !important; }
+  body { @apply bg-white text-black; }
 }
 
 /* ==========================================================================
-   打印（开发信需要能直接打印/另存为 PDF）
+   AI 消息内容排版
    ========================================================================== */
-@media print {
-  .no-print {
-    display: none !important;
-  }
-  body {
-    @apply bg-white text-black;
-  }
-}
-
-/* Scoped to assistant replies; plain user messages retain their original text. */
 .agent-message-content {
   min-width: 0;
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.75;
   overflow-wrap: anywhere;
   color: hsl(var(--foreground));
 }
 .agent-message-content > :first-child { margin-top: 0; }
 .agent-message-content > :last-child { margin-bottom: 0; }
-.agent-message-content p { margin: 0.75rem 0; white-space: pre-line; }
+.agent-message-content p { margin: 0.65rem 0; white-space: pre-line; }
 .agent-message-content :is(h1, h2, h3, h4, h5, h6) {
-  margin: 1.25rem 0 0.5rem;
-  font-size: 1rem;
+  margin: 1.15rem 0 0.45rem;
+  font-size: 0.95rem;
   line-height: 1.5;
   font-weight: 650;
 }
-.agent-message-content h1 { font-size: 1.125rem; }
+.agent-message-content h1 { font-size: 1.075rem; }
 .agent-message-content strong { font-weight: 650; }
-.agent-message-content :is(ul, ol) { margin: 0.75rem 0; padding-left: 1.5rem; }
+.agent-message-content :is(ul, ol) { margin: 0.65rem 0; padding-left: 1.4rem; }
 .agent-message-content ul { list-style-type: disc; }
 .agent-message-content ol { list-style-type: decimal; }
-.agent-message-content li { margin: 0.375rem 0; padding-left: 0.125rem; }
+.agent-message-content li { margin: 0.35rem 0; padding-left: 0.125rem; }
 .agent-message-content li > p { margin: 0.25rem 0; }
 .agent-message-content li :is(ul, ol) { margin: 0.25rem 0; }
 .agent-message-content blockquote {
-  margin: 1rem 0; padding: 0.5rem 0.875rem;
-  border-left: 3px solid hsl(var(--primary) / 0.5);
+  margin: 0.875rem 0; padding: 0.5rem 0.875rem;
+  border-left: 3px solid hsl(var(--primary) / 0.55);
   border-radius: 0 0.5rem 0.5rem 0;
-  background: hsl(var(--muted) / 0.6);
-  color: hsl(var(--muted-foreground));
+  background: hsl(var(--primary-soft) / 0.5);
+  color: hsl(var(--foreground) / 0.85);
 }
 .agent-message-content blockquote p { margin: 0; }
 .agent-message-content a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 3px; }
-.agent-message-content code { border-radius: 0.25rem; background: hsl(var(--muted)); padding: 0.125rem 0.3rem; font-size: 0.9em; }
-.agent-message-content pre { max-width: 100%; overflow-x: auto; margin: 1rem 0; border: 1px solid hsl(var(--border)); border-radius: 0.5rem; background: hsl(var(--muted) / 0.6); padding: 0.75rem; line-height: 1.6; }
+.agent-message-content code { border-radius: 0.25rem; background: hsl(var(--muted)); padding: 0.125rem 0.35rem; font-size: 0.88em; }
+.agent-message-content pre { max-width: 100%; overflow-x: auto; margin: 0.875rem 0; border: 1px solid hsl(var(--border)); border-radius: 0.625rem; background: hsl(var(--surface)); padding: 0.75rem; line-height: 1.6; }
 .agent-message-content pre code { padding: 0; background: transparent; white-space: pre; }
-.agent-message-content hr { margin: 1.25rem 0; border-color: hsl(var(--border)); }
-.agent-message-table { max-width: 100%; overflow-x: auto; margin: 1rem 0; border: 1px solid hsl(var(--border)); border-radius: 0.625rem; }
+.agent-message-content hr { margin: 1.15rem 0; border-color: hsl(var(--border)); }
+.agent-message-table { max-width: 100%; overflow-x: auto; margin: 0.875rem 0; border: 1px solid hsl(var(--border)); border-radius: 0.625rem; }
 .agent-message-table table { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.65; }
-.agent-message-table th { background: hsl(var(--muted)); font-weight: 600; text-align: left; }
-.agent-message-table :is(th, td) { padding: 0.625rem 0.75rem; vertical-align: top; border-bottom: 1px solid hsl(var(--border)); overflow-wrap: anywhere; }
+.agent-message-table th { background: hsl(var(--surface)); font-weight: 600; text-align: left; }
+.agent-message-table :is(th, td) { padding: 0.6rem 0.75rem; vertical-align: top; border-bottom: 1px solid hsl(var(--border)); overflow-wrap: anywhere; }
 .agent-message-table th:first-child, .agent-message-table td:first-child { width: 7rem; }
-/* Five or more columns would be squeezed by a fixed layout: keep natural width and scroll. */
 .agent-message-table table:has(> thead > tr > th:nth-child(5)) { table-layout: auto; width: max-content; min-width: 100%; }
 .agent-message-table table:has(> thead > tr > th:nth-child(5)) :is(th, td) { min-width: 7rem; max-width: 26rem; }
 .agent-message-table tr:last-child td { border-bottom: 0; }
-.agent-message-table tbody tr:nth-child(even) { background: hsl(var(--muted) / 0.3); }
-/* Article search hits: painted through the CSS Custom Highlight API, not DOM edits. */
+.agent-message-table tbody tr:nth-child(even) { background: hsl(var(--surface) / 0.55); }
+
 ::highlight(kb-hit) { background-color: rgb(253 230 138); color: hsl(var(--foreground)); }
 ::highlight(kb-hit-active) { background-color: rgb(245 158 11); color: #111827; }
 
-/* --------------------------------------------------------------------------
-   Legacy surface normalization
-   Keep older feature components on the same visual grammar while they are
-   progressively refactored: no oversized radii or floating-card shadows.
-   -------------------------------------------------------------------------- */
-.rounded-2xl,
-.rounded-3xl {
-  border-radius: var(--radius);
-}
-.rounded-xl {
-  border-radius: calc(var(--radius) - 1px);
-}
+/* ==========================================================================
+   Surface harmonization & Knowledge Library accents
+   ========================================================================== */
 .shadow-card {
   box-shadow: var(--shadow-card);
 }
-.workspace-page .bg-gradient-to-r,
-.workspace-page .bg-gradient-to-t,
-.workspace-page .bg-gradient-to-br {
-  background-image: none;
-}
-/* Desktop density: keep mobile touch targets, tighten pointer-sized controls. */
+
 @media (min-width: 640px) {
-  .workspace-page .min-h-11 { min-height: 2rem; }
-  .workspace-page .min-h-12 { min-height: 2.25rem; }
-  .workspace-page .min-h-10 { min-height: 1.875rem; }
+  .workspace-page .min-h-11 { min-height: 2.25rem; }
+  .workspace-page .min-h-12 { min-height: 2.5rem; }
+  .workspace-page .min-h-10 { min-height: 2.125rem; }
 }
-/* Knowledge library: categories read as navigation, not as a row of buttons. */
+
 .knowledge-sales-library nav[aria-label="销售资料分类"] {
-  gap: 0;
+  gap: 0.25rem;
   border-bottom: 1px solid hsl(var(--border));
 }
 .knowledge-sales-library nav[aria-label="销售资料分类"] button {
-  min-height: 2rem;
+  min-height: 2.25rem;
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   background: transparent;
-  padding: 0 0.625rem;
+  padding: 0 0.75rem;
   color: hsl(var(--muted-foreground));
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 500;
 }
 .knowledge-sales-library nav[aria-label="销售资料分类"] button[aria-pressed="true"] {
-  border-bottom-color: hsl(var(--foreground));
+  border-bottom-color: hsl(var(--primary));
   background: transparent;
-  color: hsl(var(--foreground));
+  color: hsl(var(--primary));
+  font-weight: 600;
 }
 .knowledge-sales-library [aria-current="true"] {
-  border-left-color: hsl(var(--foreground)) !important;
-  background: hsl(var(--muted)) !important;
+  border-left-color: hsl(var(--primary)) !important;
+  background: hsl(var(--primary-soft) / 0.7) !important;
 }
 .knowledge-sales-library .bg-primary\/5 {
-  background: hsl(var(--muted) / 0.55);
+  background: hsl(var(--primary-soft) / 0.55);
 }
 .knowledge-sales-library .border-primary {
-  border-left-color: hsl(var(--foreground) / 0.4);
+  border-left-color: hsl(var(--primary));
 }

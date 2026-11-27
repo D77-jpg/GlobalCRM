@@ -6,6 +6,7 @@ import { ErrorState } from '@/components/common/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { GuardSelftestCard } from '@/components/workbench/guard-selftest-card';
+import { DonutChart } from '@/components/common/charts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, StatCard } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableSkeleton } from '@/components/ui/separator';
@@ -104,12 +105,32 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
         )}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="AI 调用次数" value={tokens(data.totals.runs)} hint={`${data.totals.failed} 次没成功`} icon={<Activity className="h-4 w-4" aria-hidden />} tone="primary" />
-        <StatCard label="用量（Token）" value={tokens(data.totals.totalTokens)} hint={`每人每天上限 ${tokens(data.limits.dailyTokensPerUser)}`} icon={<ShieldCheck className="h-4 w-4" aria-hidden />} />
-        <StatCard label="估算花费" value={money(data.totals.estimatedCostUsd)} hint={data.pricing.configured ? '按设置的单价估算' : '还没设置单价'} icon={<Coins className="h-4 w-4" aria-hidden />} />
-        <StatCard label="自检" value={latestEval ? percent(latestEval.score) : '还没跑过'} hint={`共 ${data.dataset.cases} 项检查`} icon={<CheckCircle2 className="h-4 w-4" aria-hidden />} tone={latestEval?.score === 1 ? 'developed' : 'pending'} />
+        <StatCard label="用量（Token）" value={tokens(data.totals.totalTokens)} hint={`每人每天上限 ${tokens(data.limits.dailyTokensPerUser)}`} icon={<ShieldCheck className="h-4 w-4" aria-hidden />} tone="developed" />
+        <StatCard label="估算花费" value={money(data.totals.estimatedCostUsd)} hint={data.pricing.configured ? '按设置的单价估算' : '还没设置单价'} icon={<Coins className="h-4 w-4" aria-hidden />} tone="gold" />
+        <StatCard label="自检通过率" value={latestEval ? percent(latestEval.score) : '还没跑过'} hint={`共 ${data.dataset.cases} 项检查`} icon={<CheckCircle2 className="h-4 w-4" aria-hidden />} tone={latestEval?.score === 1 ? 'developed' : 'pending'} />
       </div>
+
+      {data.users.length > 0 ? (
+        <Card className="p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="section-title">成员调用分布（TOP 5）</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">按最近 {data.periodDays} 天 AI 调用次数汇总</p>
+            </div>
+            <Badge variant="developed" className="tabular-nums">共 {tokens(data.totals.runs)} 次调用</Badge>
+          </div>
+          <DonutChart
+            slices={data.users.slice(0, 5).map((u) => ({
+              label: u.displayName || u.username,
+              value: u.runs,
+            }))}
+            centerValue={tokens(data.totals.runs)}
+            centerLabel="总调用次数"
+          />
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -138,22 +159,30 @@ export function AgentDiagnosticsPage(): React.JSX.Element {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-        <div className="space-y-4">
+      <div className="grid items-stretch gap-4 xl:grid-cols-[1.4fr_1fr]">
+        <div className="flex flex-col space-y-4">
           {data.evaluations.length ? data.evaluations.map((evaluation) => <EvaluationCard key={evaluation.id} evaluation={evaluation} />) : (
-            <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">还没跑过自检。</CardContent></Card>
+            <Card className="flex flex-1 flex-col">
+              <CardHeader>
+                <CardTitle>AI 助手自检记录</CardTitle>
+                <CardDescription>点击右上角「自检一下」可校验工具调用、权限护栏与模型响应链路。</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-1 items-center justify-center py-6 text-center text-sm text-muted-foreground">
+                还没跑过自检。
+              </CardContent>
+            </Card>
           )}
         </div>
-        <Card>
+        <Card className="flex flex-col">
           <CardHeader><CardTitle>没做完或出错的</CardTitle><CardDescription>看看哪些处理没做完、卡在哪一步；这里不会显示客户邮件正文和密钥。</CardDescription></CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="flex-1 space-y-2">
             {data.recentFailures.length ? data.recentFailures.map((failure) => (
               <div key={failure.id} className="flex items-start gap-2 rounded-md border p-3">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-pending" aria-hidden />
                 <div className="min-w-0"><p className="break-all text-sm font-medium">{agentFailureLabel(failure.errorCode)}</p><p className="text-xs text-muted-foreground">{agentRunLabel(failure.kind)} · {formatDateTime(failure.createdAt)}</p></div>
                 <span className="ml-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground"><Timer className="h-3.5 w-3.5" aria-hidden />{failure.durationMs} ms</span>
               </div>
-            )) : <p className="py-6 text-center text-sm text-muted-foreground">这段时间都跑得很顺，没有出错记录。</p>}
+            )) : <p className="flex h-full items-center justify-center py-6 text-center text-sm text-muted-foreground">这段时间都跑得很顺，没有出错记录。</p>}
           </CardContent>
         </Card>
       </div>

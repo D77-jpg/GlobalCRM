@@ -120,7 +120,7 @@ function initialsOf(value: string): string {
  */
 function mailSrcdoc(html: string): string {
   const csp = "default-src 'none'; img-src http: https: data: cid:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
-  const style = 'body{margin:0;padding:16px;font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere;color:#202124;background:#fff}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}a{color:#6d4aff}img+hr{display:none}';
+  const style = 'body{margin:0;padding:18px;font:14px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:anywhere;color:#1c2620;background:#fff}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}a{color:#1e5b3a}img+hr{display:none}';
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><base target="_blank"><style>${style}</style>${html}`;
 }
 
@@ -357,8 +357,8 @@ export function MailPage(): React.JSX.Element {
         </Button>
       </>} />
 
-    <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border pb-0" aria-label="邮件文件夹">
-      <nav className="flex min-w-0 items-center gap-0.5 overflow-x-auto" aria-label="邮件文件夹">
+    <div className="flex flex-wrap items-center justify-between gap-2" aria-label="邮件文件夹">
+      <nav className="flex min-w-0 flex-wrap items-center gap-1.5" aria-label="邮件文件夹">
         {(Object.keys(folderLabels) as Folder[]).filter(f => admin || f !== 'unknown').map(f => {
           const active = folder === f;
           return (
@@ -368,45 +368,47 @@ export function MailPage(): React.JSX.Element {
               aria-pressed={active}
               onClick={() => { setPage(1); setParams({ folder: f }); }}
               className={cn(
-                '-mb-px inline-flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs font-medium transition-colors',
+                'inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3.5 text-xs font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-                active ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+                active
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'border border-border/80 bg-card text-muted-foreground hover:border-primary/35 hover:text-foreground',
               )}
             >
               {f === 'inbox' ? <Inbox className="h-3.5 w-3.5" aria-hidden /> : f === 'sent' ? <Send className="h-3.5 w-3.5" aria-hidden /> : f === 'tasks' ? <Clock className="h-3.5 w-3.5" aria-hidden /> : f === 'followup' ? <BellRing className="h-3.5 w-3.5" aria-hidden /> : <MailSearch className="h-3.5 w-3.5" aria-hidden />}
               {folderLabels[f]}
-              {active ? <span className="tabular-nums text-[11px] text-muted-foreground">{total}</span> : null}
+              {active ? <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums">{total}</span> : null}
             </button>
           );
         })}
       </nav>
-      <p className="hidden pb-2 text-[11px] text-muted-foreground sm:block">列表自动刷新</p>
+      <p className="hidden text-xs text-muted-foreground sm:block">每 15 秒自动同步</p>
     </div>
 
-    {status && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border py-2 text-[11px] text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">
-        <span className={cn('h-1.5 w-1.5 rounded-full', syncOk ? 'bg-emerald-500' : 'bg-amber-500')} aria-hidden />
+    {status && <div className="panel flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-2 font-medium text-foreground">
+        <span className={cn('h-2 w-2 rounded-full', syncOk ? 'bg-status-developed' : 'bg-amberx')} aria-hidden />
         {syncOk
           ? `${status.source === 'personal' ? '个人' : '项目统一'}收件同步${status.mailboxAddress ? `：${status.mailboxAddress}` : ''}`
           : status.enabled ? '收件邮箱还没验证通过' : '收件邮箱未开通：开通后客户的来信会自动进来'}
       </span>
-      {syncOk && status.lastSyncAt && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" aria-hidden />最近收信 {formatDateTime(status.lastSyncAt)}</span>}
-      <span className="inline-flex items-center gap-1"><Send className="h-3 w-3" aria-hidden />发件方式：{status.channel === 'mock' ? '模拟发送' : '邮箱直发'}</span>
-      {status.lastError && <span className="inline-flex items-center gap-1 text-destructive"><BellRing className="h-3 w-3" aria-hidden />{admin ? status.lastError : '收件同步出错了，请联系管理员看一下'}</span>}
+      {syncOk && status.lastSyncAt && <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" aria-hidden />最近收信 {formatDateTime(status.lastSyncAt)}</span>}
+      <span className="inline-flex items-center gap-1"><Send className="h-3.5 w-3.5" aria-hidden />发件方式：{status.channel === 'mock' ? '模拟发送' : '邮箱直发'}</span>
+      {status.lastError && <span className="inline-flex items-center gap-1 text-destructive"><BellRing className="h-3.5 w-3.5" aria-hidden />{admin ? status.lastError : '收件同步出错了，请联系管理员看一下'}</span>}
       {status.skipped > 0 && <span>超大邮件已跳过：{status.skipped}</span>}
-      <Button variant="ghost" size="sm" className="ml-auto h-7 px-2 text-[11px]" disabled={busy || !syncOk || !status.configured} onClick={() => void action(() => apiPost('/mail/sync'))}>立即同步收件</Button>
+      <Button variant="outline" size="sm" className="ml-auto h-7 px-2.5 text-xs" disabled={busy || !syncOk || !status.configured} onClick={() => void action(() => apiPost('/mail/sync'))}>立即同步收件</Button>
     </div>}
 
     {error && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
     {compose && !selectedCustomer && customerPicker}
 
     <div className={cn(
-      'mail-workspace grid min-h-[540px] overflow-hidden rounded-lg border border-border bg-card lg:h-[calc(100dvh-14.25rem)]',
+      'mail-workspace panel grid min-h-[560px] overflow-hidden lg:h-[calc(100dvh-15.25rem)]',
       focusMode
-        ? (copilotOpen ? 'xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_25rem]' : 'lg:grid-cols-1')
+        ? (copilotOpen ? 'xl:grid-cols-[minmax(0,1fr)_22.5rem] 2xl:grid-cols-[minmax(0,1fr)_25rem]' : 'lg:grid-cols-1')
         : (copilotOpen
-          ? 'lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1fr)_21rem] 2xl:grid-cols-[18.5rem_minmax(0,1fr)_24rem]'
-          : 'lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]'),
+          ? 'lg:grid-cols-[17.5rem_minmax(0,1fr)] xl:grid-cols-[17.5rem_minmax(0,1fr)_21.5rem] 2xl:grid-cols-[19.5rem_minmax(0,1fr)_24.5rem]'
+          : 'lg:grid-cols-[18.5rem_minmax(0,1fr)] xl:grid-cols-[20.5rem_minmax(0,1fr)]'),
     )}>
       {!focusMode ? (
       <section className="flex min-w-0 flex-col overflow-hidden border-b border-border lg:border-b-0 lg:border-r" aria-label={folderLabels[folder]} aria-busy={loading}>
@@ -460,13 +462,13 @@ export function MailPage(): React.JSX.Element {
               key={item.id}
               onClick={() => open(item)}
               className={cn(
-                'block w-full border-b border-border px-3 py-2.5 text-left transition-colors',
-                'hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset',
-                selected && 'bg-muted',
+                'block w-full border-b border-border/75 border-l-2 border-l-transparent px-3.5 py-3 text-left transition-colors',
+                'hover:bg-primary-soft/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-inset',
+                selected && 'border-l-primary bg-primary-soft/65',
               )}
             >
               <span className="flex items-start gap-2.5">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold text-muted-foreground" aria-hidden>
+                <span className="avatar-bubble mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold" aria-hidden>
                   {initialsOf(who)}
                 </span>
                 <span className="min-w-0 flex-1">
