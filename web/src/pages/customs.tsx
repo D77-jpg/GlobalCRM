@@ -230,63 +230,96 @@ export function CustomsPage(): React.JSX.Element {
         </Card>
       ) : null}
 
-      <Card>
-        <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_220px_auto]">
-          <div>
-            <Label htmlFor="customs-query" className="text-xs">公司、产品、HS 或提单号</Label>
-            <div className="relative mt-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      {/* Spacious Trade Intelligence Omnibox Console (Fixes cramped label/input spacing) */}
+      <Card className="overflow-hidden">
+        <CardContent className="space-y-3.5 p-5">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
+            <div>
+              <Label htmlFor="customs-query" className="mb-2 block text-xs font-semibold tracking-wide text-foreground">
+                公司名称、产品关键词、HS 编码或提单号
+              </Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input
+                  id="customs-query"
+                  className="h-10 pl-10"
+                  value={query}
+                  placeholder="例如 jewellery pouch、420222、gift box 或海外进口商名称…"
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void load(); }}
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="customs-country" className="mb-2 block text-xs font-semibold tracking-wide text-foreground">
+                目标进口国家 / 地区
+              </Label>
               <Input
-                id="customs-query"
-                className="pl-9"
-                value={query}
-                placeholder="例如 jewellery pouch、420222、Acme"
-                onChange={(event) => setQuery(event.target.value)}
+                id="customs-country"
+                className="h-10"
+                value={country}
+                placeholder="如 US / GB / DE"
+                onChange={(event) => setCountry(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') void load(); }}
               />
             </div>
+            <div className="flex items-end">
+              <Button className="h-10 px-5" onClick={() => void load()} disabled={loading}>
+                {loading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <Search className="mr-1.5 h-4 w-4" aria-hidden />}
+                查询海关提单
+              </Button>
+            </div>
           </div>
-          <div>
-            <Label htmlFor="customs-country" className="text-xs">进口国家</Label>
-            <Input
-              id="customs-country"
-              className="mt-1"
-              value={country}
-              placeholder="US / Germany"
-              onChange={(event) => setCountry(event.target.value)}
-            />
-          </div>
-          <div className="flex items-end">
-            <Button onClick={() => void load()} disabled={loading}>
-              {loading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <Search className="mr-1.5 h-4 w-4" aria-hidden />}
-              查询公司
-            </Button>
+
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-3 text-[11px]">
+            <span className="mr-1 text-muted-foreground">快捷检索示例：</span>
+            {[
+              { label: 'HS 4202 · 箱包皮具', q: '4202', c: '' },
+              { label: 'HS 4819 · 纸盒包装', q: '4819', c: '' },
+              { label: 'Jewellery Pouch', q: 'jewellery pouch', c: '' },
+              { label: '美国进口商 (US)', q: query, c: 'US' },
+              { label: '德国进口商 (DE)', q: query, c: 'Germany' },
+            ].map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => {
+                  setQuery(chip.q);
+                  setCountry(chip.c);
+                }}
+                className="rounded-md border border-border/80 bg-surface/65 px-2.5 py-1 text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-card hover:text-foreground"
+              >
+                {chip.label}
+              </button>
+            ))}
           </div>
         </CardContent>
       </Card>
 
       {error ? <ErrorState description={error} onRetry={() => void load()} /> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem] xl:items-start">
-        <Card className="overflow-hidden">
-          <CardContent className="p-5">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-stretch">
+        <Card className="flex flex-col overflow-hidden">
+          <CardContent className="flex flex-1 flex-col p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <h2 className="section-title">采购商结果</h2>
-                <Badge variant="developed" className="tabular-nums">{total.toLocaleString('zh-CN')}</Badge>
+                <Badge variant="outline" className="tabular-nums">{total.toLocaleString('zh-CN')}</Badge>
               </div>
-              <Badge variant="outline" className="gap-1.5"><Globe2 className="h-3.5 w-3.5 text-primary" aria-hidden />欧美优先</Badge>
+              <Badge variant="outline" className="gap-1.5"><Globe2 className="h-3.5 w-3.5 text-foreground" aria-hidden />真实提单核验</Badge>
             </div>
 
             {!loading && !error && companies.length === 0 ? (
-              <EmptyState
-                icon={<Ship className="h-7 w-7" aria-hidden />}
-                title="开始你的市场调查"
-                description="当前项目暂无海关数据。管理员可通过 CSV 或授权供应商接口导入，导入后即可按公司维度查看真实采购记录与匹配画像。"
-                action={isAdmin ? (
-                  <Button size="sm" onClick={() => void openImport()}>导入海关数据</Button>
-                ) : undefined}
-              />
+              <div className="flex flex-1 items-center justify-center">
+                <EmptyState
+                  icon={<Ship className="h-7 w-7" aria-hidden />}
+                  title="开始你的海关提单情报检索"
+                  description="当前项目暂无匹配提单记录。管理员可通过 CSV 或授权海关数据接口导入提单，系统将自动聚合采购商频次、货值趋势与供应链画像。"
+                  action={isAdmin ? (
+                    <Button size="sm" onClick={() => void openImport()}>导入海关数据</Button>
+                  ) : undefined}
+                />
+              </div>
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
                 {companies.map((company) => (
@@ -297,30 +330,38 @@ export function CustomsPage(): React.JSX.Element {
           </CardContent>
         </Card>
 
-        <Card className="p-5">
-          <h2 className="section-title flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-primary" aria-hidden />
-            研究流程
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">四步从真实海关提单沉淀高价值外贸线索</p>
-          <ol className="mt-4 space-y-2.5">
-            {[
-              { step: '01', title: '导入数据', desc: '通过 CSV 或授权供应商接口导入真实提单' },
-              { step: '02', title: '筛选采购商', desc: '按产品关键词、HS 编码与目标进口国家检索' },
-              { step: '03', title: '核实公司画像', desc: '查看采购频次、金额趋势与主要供应商结构' },
-              { step: '04', title: '加入客户线索池', desc: '一键转入线索池补齐决策人邮箱并推进开发' },
-            ].map((item) => (
-              <li key={item.step} className="flex items-start gap-3 rounded-lg border border-border/85 bg-surface/55 p-3">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card font-mono text-[11px] font-semibold tabular-nums text-foreground">
-                  {item.step}
-                </span>
-                <div className="min-w-0">
+        {/* Continuous Timeline Rail instead of 4 Nested Mini-Cards */}
+        <Card className="flex flex-col justify-between p-5">
+          <div>
+            <h2 className="section-title flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-foreground" aria-hidden />
+              海关情报转化链路
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">四步从真实提单沉淀可触达外贸买家</p>
+            <ol className="relative mt-5 space-y-5 border-l border-border pl-5 before:hidden">
+              {[
+                { step: '01', title: '接入提单数据', desc: '导入海关 CSV 或授权供应商提单记录，按项目隔离归档' },
+                { step: '02', title: '多维检索买家', desc: '按 HS 编码、产品关键词与目标进口国精准锁定活跃买家' },
+                { step: '03', title: '穿透供应链画像', desc: '核验历史采购频次、单票货值与现有供应商集中度' },
+                { step: '04', title: '一键转入线索池', desc: '转入客户发现工作台自动补全决策人邮箱并起草首封开发信' },
+              ].map((item) => (
+                <li key={item.step} className="relative">
+                  <span className="absolute -left-[29px] top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-foreground/35 bg-card font-mono text-[9px] font-bold text-foreground">
+                    {item.step.slice(1)}
+                  </span>
                   <p className="text-[0.8125rem] font-semibold text-foreground">{item.title}</p>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{item.desc}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="mt-5 border-t border-border/75 pt-3.5">
+            <Button variant="outline" size="sm" className="w-full justify-between text-xs" onClick={() => navigate(ROUTES.prospecting)}>
+              <span>前往客户发现线索池</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            </Button>
+          </div>
         </Card>
       </div>
 

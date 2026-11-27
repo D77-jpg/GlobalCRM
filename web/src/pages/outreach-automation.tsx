@@ -1249,83 +1249,122 @@ export function OutreachAutomationPage(): React.JSX.Element {
                 ) : null}
               </div>
             ) : null}
-          </section>
 
-          <section aria-label="自动开发指标" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {[
-              { label: '今天已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit} 封`, hint: `当日发送量 · 剩余 ${overview.stats.remainingToday} 封`, icon: Send },
-              { label: '自动开发客户', value: `${overview.stats.enrolled} 位`, hint: `全部队列客户 · 正常排程 ${overview.stats.active} 位`, icon: Bot },
-              { label: '需要你处理', value: `${actionNeededCount} 位`, hint: actionNeededCount > 0 ? '仅统计需修改、待确认或未发出的邮件' : '当前无需人工处理', icon: ShieldCheck },
-              { label: '可加入客户', value: `${overview.stats.eligible} 位`, hint: `待开发或已有开发信${ruleStoppedCount > 0 ? ` · 已按规则停止 ${ruleStoppedCount} 位` : ''}`, icon: Users },
-            ].map((item) => (
-              <div key={item.label} className="panel flex items-start gap-3 p-4">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-                  <item.icon className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
-                  <p className="mt-1 text-xl font-bold leading-none tabular-nums tracking-[-0.025em] text-foreground">{item.value}</p>
-                  <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{item.hint}</p>
-                </div>
-              </div>
-            ))}
-          </section>
-
-          {/* Visual 6-Stage Outreach Pipeline Stepper (computed from live queue data) */}
-          {(() => {
-            const q = overview.queue;
-            const prepCount = q.filter((r) => r.status === 'active' && r.currentStep === 0 && !isActionNeededRow(r)).length;
-            const step1Count = q.filter((r) => r.status === 'active' && r.currentStep === 1 && !isActionNeededRow(r)).length;
-            const step2Count = q.filter((r) => r.status === 'active' && r.currentStep === 2 && !isActionNeededRow(r)).length;
-            const step3Count = q.filter((r) => r.status === 'active' && r.currentStep >= 3 && !isActionNeededRow(r)).length;
-            const doneCount = q.filter((r) => r.status === 'completed').length;
-            const stages = [
-              { label: '待准备', count: prepCount, sub: '收集资料 · 生成草稿', urgent: false, onClick: () => setQueueFilter('all') },
-              { label: '首封开发', count: step1Count, sub: '第 1 封触达阶段', urgent: false, onClick: () => setQueueFilter('all') },
-              { label: '第二封跟进', count: step2Count, sub: '第 3 天跟进节奏', urgent: false, onClick: () => setQueueFilter('all') },
-              { label: '第三封跟进', count: step3Count, sub: '第 7 天最终触达', urgent: false, onClick: () => setQueueFilter('all') },
-              { label: '需人工处理', count: actionNeededCount, sub: '审核 / 修改 / 确认', urgent: actionNeededCount > 0, onClick: () => setQueueFilter('action_needed') },
-              { label: '已完成', count: doneCount, sub: '已结束或收到回复', urgent: false, onClick: () => setQueueFilter('all') },
-            ];
-            return (
-              <section aria-label="开发任务流水线" className="panel p-4 sm:p-5">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h2 className="section-title">开发任务流水线</h2>
-                    <p className="mt-0.5 text-xs text-muted-foreground">标准三封节奏（0 / 3 / 7 天）· 每日上限 {overview.config.dailyLimit} 封 · 点击阶段快速定位</p>
-                  </div>
-                  <Badge variant={overview.config.enabled ? 'developed' : 'muted'}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${overview.config.enabled ? 'bg-status-developed' : 'bg-muted-foreground'}`} aria-hidden />
-                    {overview.config.enabled ? '自动引擎运行中' : '自动引擎已暂停'}
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
-                  {stages.map((st, idx) => (
-                    <button
-                      key={st.label}
-                      type="button"
-                      onClick={st.onClick}
-                      className={`group relative flex flex-col items-start rounded-xl border p-3.5 text-left transition-[border-color,transform] hover:-translate-y-0.5 hover:border-foreground/30 ${
-                        st.urgent ? 'border-amberx/35 bg-amberx-soft/50' : 'border-border/85 bg-surface/55'
-                      }`}
-                    >
-                      <div className="flex w-full items-center justify-between">
-                        <span className="rounded border border-border bg-card px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
-                          0{idx + 1}
+            {/* Integrated Telemetry Ribbon & Connected Cadence Journey Track (Eliminates 10 Nested KPI/Stage Cards) */}
+            {(() => {
+              const q = overview.queue;
+              const prepCount = q.filter((r) => r.status === 'active' && r.currentStep === 0 && !isActionNeededRow(r)).length;
+              const step1Count = q.filter((r) => r.status === 'active' && r.currentStep === 1 && !isActionNeededRow(r)).length;
+              const step2Count = q.filter((r) => r.status === 'active' && r.currentStep === 2 && !isActionNeededRow(r)).length;
+              const step3Count = q.filter((r) => r.status === 'active' && r.currentStep >= 3 && !isActionNeededRow(r)).length;
+              const doneCount = q.filter((r) => r.status === 'completed').length;
+              const quotaPct = Math.min(
+                100,
+                Math.round((overview.stats.sentToday / Math.max(1, overview.config.dailyLimit)) * 100),
+              );
+              const stations = [
+                { step: 'S0', timing: '入列准备', label: '智能备稿', sub: '结合资料与红线核验', count: prepCount, urgent: false, filter: 'all' as const },
+                { step: 'D0', timing: 'Day 0', label: '首封破冰', sub: '能力匹配与价值切入', count: step1Count, urgent: false, filter: 'all' as const },
+                { step: 'D3', timing: 'Day +3', label: '二轮跟进', sub: '规格确认与打样建议', count: step2Count, urgent: false, filter: 'all' as const },
+                { step: 'D7', timing: 'Day +7', label: '终轮触达', sub: '轻量提醒与礼貌收尾', count: step3Count, urgent: false, filter: 'all' as const },
+                { step: 'QA', timing: '人工护栏', label: '待你处理', sub: '口径待调或状态待确认', count: actionNeededCount, urgent: actionNeededCount > 0, filter: 'action_needed' as const },
+                { step: 'OK', timing: '闭环分流', label: '完结 / 回复', sub: '收到回复立即转人工', count: doneCount, urgent: false, filter: 'all' as const },
+              ];
+              return (
+                <div className="mt-4 border-t border-border/80 pt-4">
+                  {/* Inline Telemetry Strip */}
+                  <div className="grid grid-cols-2 gap-3 rounded-xl border border-border/80 bg-surface/55 p-3 sm:grid-cols-4">
+                    <div className="space-y-1 px-1">
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>今日发送配额</span>
+                        <span className="font-mono font-semibold tabular-nums text-foreground">
+                          {overview.stats.sentToday}/{overview.config.dailyLimit}
                         </span>
-                        <span className="text-lg font-bold leading-none tabular-nums text-foreground">{st.count}</span>
                       </div>
-                      <span className="mt-2.5 text-xs font-semibold text-foreground">{st.label}</span>
-                      <span className="mt-0.5 text-[10.5px] leading-tight text-muted-foreground">{st.sub}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            );
-          })()}
+                      <div className="h-1.5 overflow-hidden rounded-full bg-border/80">
+                        <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${quotaPct}%` }} />
+                      </div>
+                      <p className="text-[10.5px] text-muted-foreground">今日余量 {overview.stats.remainingToday} 封</p>
+                    </div>
+                    <div className="border-border/70 px-2 sm:border-l">
+                      <p className="text-[11px] text-muted-foreground">在跑序列客户</p>
+                      <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground">
+                        {overview.stats.enrolled} <span className="text-xs font-normal text-muted-foreground">位（活跃 {overview.stats.active}）</span>
+                      </p>
+                    </div>
+                    <div className="border-border/70 px-1 sm:border-l sm:px-2">
+                      <p className="text-[11px] text-muted-foreground">待人工介入</p>
+                      <p className={`mt-0.5 text-lg font-bold tabular-nums ${actionNeededCount > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'}`}>
+                        {actionNeededCount} <span className="text-xs font-normal text-muted-foreground">位</span>
+                      </p>
+                    </div>
+                    <div className="border-border/70 px-2 sm:border-l">
+                      <p className="text-[11px] text-muted-foreground">符合条件可入列</p>
+                      <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground">
+                        {overview.stats.eligible} <span className="text-xs font-normal text-muted-foreground">位{ruleStoppedCount > 0 ? ` · 规则停发 ${ruleStoppedCount}` : ''}</span>
+                      </p>
+                    </div>
+                  </div>
 
-          <div className="grid gap-4 2xl:grid-cols-[19.5rem_minmax(0,1fr)] 2xl:items-start">
-            <Card className="order-2 2xl:order-1">
+                  {/* Connected Horizontal Cadence Journey Blueprint */}
+                  <div aria-label="开发任务流水线" className="mt-4">
+                    <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-foreground">时序触达节律轨道（0 / 3 / 7 天买方工作日窗口）</span>
+                      <span className="text-[11px] text-muted-foreground">点击任意节律站点可快速筛选下方执行队列 · 客户一旦回复自动熔断停发</span>
+                    </div>
+
+                    <div className="relative overflow-x-auto pb-1">
+                      {/* Continuous Architectural Track Line on Desktop */}
+                      <div className="pointer-events-none absolute left-10 right-10 top-7 hidden h-px bg-border xl:block" aria-hidden />
+                      <ol className="grid min-w-[680px] grid-cols-6 gap-2">
+                        {stations.map((st, idx) => (
+                          <li key={st.label} className="relative">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setQueueFilter(st.filter);
+                                queueCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                              }}
+                              className={`group flex w-full flex-col items-center rounded-xl px-2 py-2 text-center transition-colors hover:bg-surface/80 ${
+                                st.urgent ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''
+                              }`}
+                            >
+                              <div className="relative z-10 flex items-center justify-center">
+                                <span
+                                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 font-mono text-sm font-bold tabular-nums transition-transform group-hover:scale-105 ${
+                                    st.urgent
+                                      ? 'border-amber-500 bg-card text-amber-700 dark:text-amber-300'
+                                      : st.count > 0
+                                        ? 'border-foreground bg-foreground text-background shadow-xs'
+                                        : 'border-border bg-card text-foreground'
+                                  }`}
+                                >
+                                  {st.count}
+                                </span>
+                                <span className="absolute -top-1.5 -right-3 rounded border border-border bg-surface px-1 py-0 font-mono text-[9px] font-semibold text-muted-foreground">
+                                  {st.timing}
+                                </span>
+                              </div>
+                              <span className="mt-2 text-xs font-semibold text-foreground">{st.label}</span>
+                              <span className="mt-0.5 line-clamp-1 text-[10.5px] text-muted-foreground">{st.sub}</span>
+                              {idx < stations.length - 1 ? (
+                                <span className="pointer-events-none absolute -right-2 top-5 hidden text-xs text-muted-foreground/50 xl:inline" aria-hidden>
+                                  →
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </section>
+
+          <div className="grid gap-4 xl:grid-cols-[296px_minmax(0,1fr)] xl:items-stretch">
+            <Card className="order-2 xl:order-1">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Settings2 className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -1442,7 +1481,7 @@ export function OutreachAutomationPage(): React.JSX.Element {
               </CardContent>
             </Card>
 
-            <Card ref={queueCardRef} className="order-1 min-w-0 2xl:order-2">
+            <Card ref={queueCardRef} className="order-1 flex min-w-0 flex-col xl:order-2">
               <CardHeader className="flex-col items-start justify-between gap-3 pb-2 sm:flex-row sm:items-center">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-sm">

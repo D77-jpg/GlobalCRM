@@ -76,7 +76,7 @@ function socialHref(value: string, host: string, prefix = '') {
 }
 
 function scoreBadgeClass(score: number) {
-  if (score >= 80) return 'border-foreground/20 bg-primary text-primary-foreground';
+  if (score >= 80) return 'border-emerald-300/75 bg-emerald-50/85 text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300';
   if (score >= 60) return 'border-border bg-surface text-foreground';
   return 'border-border bg-muted text-muted-foreground';
 }
@@ -454,78 +454,74 @@ export function ProspectingPage(): React.JSX.Element {
         }
       />
 
-      {/* Scope Tabs */}
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border pb-2.5">
-        {([
-          { key: 'mine' as const, label: '我的线索池', count: data?.scopeTotals?.mine ?? 0 },
-          { key: 'shared' as const, label: '公共线索池', count: data?.scopeTotals?.shared ?? 0 },
-          ...(isAdmin ? [{ key: 'team' as const, label: '团队线索池', count: data?.scopeTotals?.team ?? 0 }] : []),
-        ]).map((tab) => (
+      {/* Unified Trade OS Scope Switcher + Inline Telemetry Strip */}
+      <div className="os-telemetry-strip grid-cols-1 lg:grid-cols-[auto_1fr]">
+        <div className="flex flex-wrap items-center gap-2 p-3">
+          <div className="os-segmented">
+            {([
+              { key: 'mine' as const, label: '我的线索池', count: data?.scopeTotals?.mine ?? 0 },
+              { key: 'shared' as const, label: '公共线索池', count: data?.scopeTotals?.shared ?? 0 },
+              ...(isAdmin ? [{ key: 'team' as const, label: '团队线索池', count: data?.scopeTotals?.team ?? 0 }] : []),
+            ]).map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                aria-pressed={scope === tab.key}
+                onClick={() => {
+                  setScope(tab.key);
+                  setStatusFilter('all');
+                }}
+                className={cn('os-segmented-item', scope === tab.key && 'os-segmented-item-active')}
+              >
+                <span>{tab.label}</span>
+                <span className="tabular-nums text-[11px] text-muted-foreground">{tab.count}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 divide-x divide-border/75 sm:grid-cols-5">
+          {[
+            { label: '待处理总量', value: counts?.total ?? 0, sub: counts?.carriedFromEarlier ? `含往期 ${counts.carriedFromEarlier}` : '池内线索', filter: 'all' as const },
+            { label: '可立即触达', value: counts?.ready ?? 0, sub: '已备邮箱', filter: 'ready' as const },
+            { label: '待补决策人', value: counts?.needsContact ?? 0, sub: '官网可补查', filter: 'needs_contact' as const },
+            { label: '已转化客户', value: counts?.converted ?? 0, sub: '已入正式库', filter: null },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => item.filter && setStatusFilter(item.filter)}
+              className={cn(
+                'flex flex-col justify-center px-3.5 py-2.5 text-left transition-colors hover:bg-surface/65',
+                item.filter && statusFilter === item.filter && 'bg-surface/85',
+              )}
+            >
+              <span className="text-[11px] font-medium text-muted-foreground">{item.label}</span>
+              <div className="mt-0.5 flex items-baseline gap-1.5">
+                <span className="text-base font-bold tabular-nums tracking-tight text-foreground">{item.value}</span>
+                <span className="truncate text-[10.5px] text-muted-foreground">{item.sub}</span>
+              </div>
+            </button>
+          ))}
+
           <button
-            key={tab.key}
             type="button"
-            aria-pressed={scope === tab.key}
-            onClick={() => {
-              setScope(tab.key);
-              setStatusFilter('all');
-            }}
-            className={cn(
-              'inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors',
-              scope === tab.key
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'border border-border bg-card text-muted-foreground hover:border-foreground/25 hover:text-foreground',
-            )}
+            onClick={() =>
+              openAgentWithPrompt('请结合当前项目的行业画像与产品特点，为我推荐高潜力海外目标市场、买家类型及线索筛选策略。')
+            }
+            className="group col-span-2 flex items-center justify-between gap-2 bg-surface/40 px-3.5 py-2.5 text-left transition-colors hover:bg-surface sm:col-span-1"
           >
-            {tab.label}
-            <span className={cn('tabular-nums text-[11px]', scope === tab.key ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
-              ({tab.count})
-            </span>
-          </button>
-        ))}
-        <span className="ml-auto hidden text-xs text-muted-foreground lg:block">
-          {scope === 'mine' ? '个人搜索、领取或导入的线索' : scope === 'shared' ? '未领取的共用线索，领取后归你负责' : '团队成员名下线索汇总'}
-        </span>
-      </div>
-
-      {/* 5-Card Top Metrics + AI Strategy Strip */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        {[
-          { label: '匹配线索', value: counts?.total ?? 0, sub: counts?.carriedFromEarlier ? `含往期 ${counts.carriedFromEarlier}` : '当前池内待处理', icon: Target },
-          { label: '可立即联系', value: counts?.ready ?? 0, sub: '已具备联系邮箱', icon: Check },
-          { label: '待补联系方式', value: counts?.needsContact ?? 0, sub: '可批量补查决策人', icon: AtSign },
-          { label: '已转客户', value: counts?.converted ?? 0, sub: '已建档跟进', icon: Sparkles },
-        ].map((item) => (
-          <div key={item.label} className="panel flex items-start gap-3 p-3.5">
-            <span className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-              <item.icon className="h-4 w-4" />
-            </span>
             <div className="min-w-0">
-              <p className="truncate text-xs font-medium text-muted-foreground">{item.label}</p>
-              <p className="mt-1 text-xl font-bold leading-none tracking-[-0.03em] tabular-nums text-foreground">{item.value}</p>
-              <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.sub}</p>
+              <p className="flex items-center gap-1 text-[11px] font-semibold text-foreground">
+                <Sparkles className="h-3 w-3 shrink-0" aria-hidden />AI 拓客策略
+              </p>
+              <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                {(counts?.ready ?? 0) > 0 ? `优先转化 ${counts?.ready} 条含邮箱线索` : '生成目标市场搜索词'}
+              </p>
             </div>
-          </div>
-        ))}
-
-        <button
-          type="button"
-          onClick={() =>
-            openAgentWithPrompt('请结合当前项目的行业画像与产品特点，为我推荐高潜力海外目标市场、买家类型及线索筛选策略。')
-          }
-          className="panel group col-span-2 flex items-start justify-between gap-2 p-3.5 text-left transition-colors hover:border-foreground/25 sm:col-span-1"
-        >
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-              <Sparkles className="h-3.5 w-3.5" aria-hidden />AI 策略建议
-            </p>
-            <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-              {(counts?.ready ?? 0) > 0
-                ? `优先转化 ${counts?.ready} 条已含邮箱线索，后台自动起草三封跟进信。`
-                : '点击让 AI 结合项目产品目录推荐高匹配目标市场与搜索词。'}
-            </p>
-          </div>
-          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
-        </button>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden />
+          </button>
+        </div>
       </div>
 
       {run ? (
@@ -553,11 +549,14 @@ export function ProspectingPage(): React.JSX.Element {
       ) : null}
 
       {/* ====================================================================
-         TRUE 3-PANE PROSPECT RESEARCH WORKBENCH
+         TRUE 3-PANE VIEWPORT-ALIGNED PROSPECT RESEARCH WORKBENCH
          ==================================================================== */}
-      <div ref={resultsTopRef} className="grid items-start gap-4 lg:grid-cols-[224px_320px_minmax(0,1fr)] xl:grid-cols-[236px_348px_minmax(0,1fr)]">
+      <div
+        ref={resultsTopRef}
+        className="grid gap-4 lg:grid-cols-[224px_320px_minmax(0,1fr)] xl:h-[calc(100dvh-14.25rem)] xl:min-h-[610px] xl:grid-cols-[236px_348px_minmax(0,1fr)] xl:items-stretch"
+      >
         {/* PANE 1: Left Structured Filter Rail */}
-        <aside aria-label="线索筛选条件" className="panel space-y-4 p-4">
+        <aside aria-label="线索筛选条件" className="panel space-y-4 p-4 xl:flex xl:h-full xl:flex-col xl:overflow-y-auto">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold uppercase tracking-[0.06em] text-foreground">筛选条件</h2>
             <button
@@ -579,7 +578,7 @@ export function ProspectingPage(): React.JSX.Element {
             />
           </div>
 
-          <div className="space-y-1.5 border-t border-border/75 pt-3">
+          <div className="space-y-1 border-t border-border/75 pt-3">
             <p className="text-[11px] font-semibold text-muted-foreground">处理状态</p>
             {([
               { key: 'all' as const, label: '全部待处理', count: totalOpen },
@@ -592,19 +591,21 @@ export function ProspectingPage(): React.JSX.Element {
                 type="button"
                 onClick={() => setStatusFilter(opt.key)}
                 className={cn(
-                  'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-xs transition-colors',
-                  statusFilter === opt.key ? 'bg-primary font-medium text-primary-foreground' : 'text-foreground/85 hover:bg-surface',
+                  'flex w-full items-center justify-between rounded-md border px-2.5 py-1.5 text-xs transition-colors',
+                  statusFilter === opt.key
+                    ? 'border-foreground/25 bg-foreground/[0.065] font-semibold text-foreground'
+                    : 'border-transparent text-foreground/80 hover:bg-surface',
                 )}
               >
                 <span>{opt.label}</span>
-                <span className={cn('tabular-nums text-[11px]', statusFilter === opt.key ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+                <span className="tabular-nums text-[11px] text-muted-foreground">
                   {opt.count}
                 </span>
               </button>
             ))}
           </div>
 
-          <div className="space-y-1.5 border-t border-border/75 pt-3">
+          <div className="space-y-1 border-t border-border/75 pt-3">
             <p className="text-[11px] font-semibold text-muted-foreground">匹配度分层</p>
             {([
               ['all', '全部评分'],
@@ -635,7 +636,7 @@ export function ProspectingPage(): React.JSX.Element {
                   onClick={() => setCountryFilter('all')}
                   className={cn(
                     'rounded-md border px-2 py-0.5 text-[11px] transition-colors',
-                    countryFilter === 'all' ? 'border-foreground bg-primary text-primary-foreground' : 'border-border bg-surface text-muted-foreground hover:text-foreground',
+                    countryFilter === 'all' ? 'os-pill-active' : 'border-border bg-surface text-muted-foreground hover:text-foreground',
                   )}
                 >
                   全部
@@ -647,7 +648,7 @@ export function ProspectingPage(): React.JSX.Element {
                     onClick={() => setCountryFilter(country === countryFilter ? 'all' : country)}
                     className={cn(
                       'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors',
-                      countryFilter === country ? 'border-foreground bg-primary text-primary-foreground' : 'border-border bg-card text-foreground hover:bg-surface',
+                      countryFilter === country ? 'os-pill-active' : 'border-border bg-card text-foreground hover:bg-surface',
                     )}
                   >
                     <CountryFlag value={country} />
@@ -659,7 +660,7 @@ export function ProspectingPage(): React.JSX.Element {
             </div>
           ) : null}
 
-          <div className="space-y-1.5 border-t border-border/75 pt-3">
+          <div className="space-y-1 border-t border-border/75 pt-3">
             <p className="text-[11px] font-semibold text-muted-foreground">数据来源</p>
             {([
               ['all', '全部来源'],
@@ -681,7 +682,7 @@ export function ProspectingPage(): React.JSX.Element {
             ))}
           </div>
 
-          <div className="border-t border-border/75 pt-3">
+          <div className="mt-auto border-t border-border/75 pt-3">
             <Button type="button" className="w-full text-xs" size="sm" onClick={() => void openRun()} disabled={run?.status === 'running'}>
               {run?.status === 'running' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
               生成今日线索
@@ -690,8 +691,8 @@ export function ProspectingPage(): React.JSX.Element {
         </aside>
 
         {/* PANE 2: Center High-Density Prospect Stream */}
-        <section aria-label="线索列表" className="panel flex flex-col overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3.5 py-3">
+        <section aria-label="线索列表" className="panel flex flex-col overflow-hidden xl:h-full">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3.5 py-3">
             <div className="flex items-center gap-2">
               <h2 className="text-[0.875rem] font-semibold text-foreground">
                 线索结果
@@ -717,8 +718,9 @@ export function ProspectingPage(): React.JSX.Element {
                 </button>
                 <Button
                   type="button"
+                  variant="outline"
                   size="sm"
-                  className="h-7 px-2.5 text-[11px]"
+                  className="h-7 border-foreground/25 bg-surface/80 px-2.5 text-[11px] font-semibold hover:bg-card"
                   disabled={Boolean(batch)}
                   onClick={triggerBatchConvert}
                 >
@@ -729,7 +731,7 @@ export function ProspectingPage(): React.JSX.Element {
             ) : null}
           </div>
 
-          <div className="max-h-[680px] divide-y divide-border/75 overflow-y-auto">
+          <div className="max-h-[680px] divide-y divide-border/75 overflow-y-auto xl:max-h-none xl:min-h-0 xl:flex-1">
             {loading ? (
               <p className="py-16 text-center text-xs text-muted-foreground">正在加载线索池…</p>
             ) : filteredProspects.length === 0 ? (
@@ -846,9 +848,9 @@ export function ProspectingPage(): React.JSX.Element {
         </section>
 
         {/* PANE 3: Right Deep Research & Conversion Workspace */}
-        <section aria-label="线索深度研究工作区" className="panel min-w-0 p-5">
+        <section aria-label="线索深度研究工作区" className="panel min-w-0 p-5 xl:flex xl:h-full xl:flex-col xl:overflow-y-auto">
           {activeProspect ? (
-            <div className="space-y-4">
+            <div className="flex flex-1 flex-col space-y-4">
               {/* Top Company Identity Header */}
               <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3.5">
@@ -1065,6 +1067,71 @@ export function ProspectingPage(): React.JSX.Element {
                           转为客户并准备开发信
                         </Button>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Bottom Full-Span Trade OS Dossier & Execution Rhythm Strip (Fills Right Studio Naturally) */}
+                  <div className="xl:col-span-2 grid gap-3 rounded-xl border border-border/80 bg-surface/45 p-4 sm:grid-cols-2">
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground">企业触达通道与关键字段</span>
+                        <button
+                          type="button"
+                          onClick={() => setInspectorTab('profile')}
+                          className="text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                          完整档案 →
+                        </button>
+                      </div>
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11.5px]">
+                        <div>
+                          <dt className="text-muted-foreground">主域名</dt>
+                          <dd className="truncate font-medium text-foreground">{activeProspect.domain || '—'}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">决策人 / 职位</dt>
+                          <dd className="truncate font-medium text-foreground">
+                            {activeProspect.contactName
+                              ? `${activeProspect.contactName}${activeProspect.contactTitle ? ` · ${activeProspect.contactTitle}` : ''}`
+                              : '待采集'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">验证邮箱</dt>
+                          <dd className="truncate font-medium text-foreground">{activeProspect.emails[0] || '待补全'}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">社媒 / 电话</dt>
+                          <dd className="truncate font-medium text-foreground">
+                            {[
+                              activeProspect.phone,
+                              activeProspect.whatsapp ? 'WhatsApp' : '',
+                              activeProspect.linkedin ? 'LinkedIn' : '',
+                              activeProspect.instagram ? 'Instagram' : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' · ') || '未公开'}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    <div className="space-y-2 border-t border-border/70 pt-3 text-xs sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                      <span className="font-semibold text-foreground">Trade OS 转化后自动推进链路</span>
+                      <ol className="space-y-1.5 text-[11.5px] text-muted-foreground">
+                        <li className="flex items-center gap-2">
+                          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-card font-mono text-[10px] font-semibold text-foreground ring-1 ring-border">1</span>
+                          <span>自动去重写入当前项目客户库，保留原始发现来源</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-card font-mono text-[10px] font-semibold text-foreground ring-1 ring-border">2</span>
+                          <span>联动本项目知识库与对外口径，起草个性化开发信</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-card font-mono text-[10px] font-semibold text-foreground ring-1 ring-border">3</span>
+                          <span>进入待审核草稿池，由业务员确认后发送或排入跟进序列</span>
+                        </li>
+                      </ol>
                     </div>
                   </div>
                 </div>

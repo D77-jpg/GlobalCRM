@@ -20,7 +20,7 @@ import { ErrorState } from '@/components/common/empty-state';
 import { PageHeader } from '@/components/common/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogBody,
@@ -209,113 +209,117 @@ function ProviderCard({
   const testing = busy === `test:${provider.id}`;
   const activating = busy === `activate:${provider.id}`;
   return (
-    <Card
+    <div
       className={cn(
-        'overflow-hidden shadow-none transition-colors',
-        provider.isActive && 'border-primary/25 bg-primary/[0.018]',
+        'group flex flex-col gap-3 px-5 py-4 transition-colors sm:flex-row sm:items-center sm:justify-between',
+        provider.isActive ? 'bg-surface/75' : 'hover:bg-surface/40',
       )}
     >
-      <CardContent className="p-4 sm:pt-4">
-        <div className="flex items-start gap-3">
-          <ProviderIcon provider={provider} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h3 className="truncate text-[0.875rem] font-semibold tracking-[-0.01em]">{provider.name}</h3>
-              <ProviderStatus provider={provider} />
-              <span className="text-[11px] text-muted-foreground">{kindLabel(provider)}</span>
-            </div>
-            <div className="mt-3 grid gap-x-5 gap-y-2 text-xs sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto]">
-              <div className="min-w-0">
-                <span className="text-muted-foreground">模型</span>
-                <p className="mt-0.5 truncate font-mono text-[11px] text-foreground">{provider.kind === 'mock' ? '不调用模型' : provider.model}</p>
-              </div>
-              <div className="min-w-0">
-                <span className="text-muted-foreground">接口地址</span>
-                <p className="mt-0.5 truncate font-mono text-[11px] text-foreground">{provider.kind === 'mock' ? '本地演示' : provider.baseUrl || '—'}</p>
-              </div>
-              <div className="min-w-0 sm:text-right">
-                <span className="text-muted-foreground">密钥</span>
-                <p className="mt-0.5 flex items-center gap-1 text-[11px] sm:justify-end">
-                  {provider.kind === 'mock' ? (
-                    <span className="text-muted-foreground">无需密钥</span>
-                  ) : provider.keyConfigured ? (
-                    <><ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden />已安全保存</>
-                  ) : (
-                    <span className="text-muted-foreground">未配置</span>
-                  )}
-                </p>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <span>上次测试：{formatTime(provider.lastTestedAt)}{provider.lastTestStatus === 'failed' ? ' · 失败' : ''}</span>
-              {provider.isActive ? <span>所有项目当前共用这个服务</span> : null}
-            </div>
+      <div className="flex min-w-0 flex-1 items-start gap-3.5">
+        <span
+          className={cn(
+            'mt-2.5 hidden h-2.5 w-2.5 shrink-0 rounded-full sm:inline-block',
+            provider.isActive ? 'bg-emerald-600 ring-4 ring-emerald-500/15' : 'border border-border bg-card',
+          )}
+          aria-hidden
+        />
+        <ProviderIcon provider={provider} className="mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-[0.875rem] font-semibold tracking-[-0.01em] text-foreground">{provider.name}</h3>
+            <ProviderStatus provider={provider} />
+            <span className="text-[11px] text-muted-foreground">{kindLabel(provider)}</span>
           </div>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {!provider.isActive ? (
-              <>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="sm:hidden"
-                  aria-label={`启用 ${provider.name}`}
-                  title="设为当前"
-                  onClick={() => onActivate(provider)}
-                  disabled={Boolean(busy)}
-                >
-                  {activating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="hidden sm:inline-flex"
-                  onClick={() => onActivate(provider)}
-                  disabled={Boolean(busy)}
-                >
-                  {activating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
-                  设为当前
-                </Button>
-              </>
-            ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`测试 ${provider.name}`}
-              title="测试连接"
-              onClick={() => onTest(provider)}
-              disabled={Boolean(busy)}
-            >
-              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <FlaskConical className="h-3.5 w-3.5" aria-hidden />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`编辑 ${provider.name}`}
-              title="编辑"
-              onClick={() => onEdit(provider)}
-              disabled={Boolean(busy)}
-            >
-              <Pencil className="h-3.5 w-3.5" aria-hidden />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`删除 ${provider.name}`}
-              title={provider.isActive ? '当前使用的服务不能删除' : '删除'}
-              onClick={() => onDelete(provider)}
-              disabled={Boolean(busy) || provider.isActive}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-            </Button>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span>模型</span>
+              <code className="rounded border border-border/80 bg-card px-1.5 py-0.5 font-mono text-[11px] font-medium text-foreground">
+                {provider.kind === 'mock' ? 'mock-local' : provider.model}
+              </code>
+            </span>
+            <span className="min-w-0 truncate font-mono text-[11px]">
+              {provider.kind === 'mock' ? '本地演示引擎' : provider.baseUrl || '—'}
+            </span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              {provider.kind === 'mock' ? (
+                '无需密钥'
+              ) : provider.keyConfigured ? (
+                <><ShieldCheck className="h-3 w-3 text-emerald-600" aria-hidden />密钥已加密</>
+              ) : (
+                '未配置密钥'
+              )}
+            </span>
+            <span>·</span>
+            <span>验证：{formatTime(provider.lastTestedAt)}{provider.lastTestStatus === 'failed' ? '（失败）' : ''}</span>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1 sm:pl-3">
+        {!provider.isActive ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="sm:hidden"
+              aria-label={`启用 ${provider.name}`}
+              title="设为当前"
+              onClick={() => onActivate(provider)}
+              disabled={Boolean(busy)}
+            >
+              {activating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="hidden h-8 text-xs sm:inline-flex"
+              onClick={() => onActivate(provider)}
+              disabled={Boolean(busy)}
+            >
+              {activating ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
+              设为当前
+            </Button>
+          </>
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`测试 ${provider.name}`}
+          title="测试连接"
+          onClick={() => onTest(provider)}
+          disabled={Boolean(busy)}
+        >
+          {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <FlaskConical className="h-3.5 w-3.5" aria-hidden />}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`编辑 ${provider.name}`}
+          title="编辑"
+          onClick={() => onEdit(provider)}
+          disabled={Boolean(busy)}
+        >
+          <Pencil className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`删除 ${provider.name}`}
+          title={provider.isActive ? '当前使用的服务不能删除' : '删除'}
+          onClick={() => onDelete(provider)}
+          disabled={Boolean(busy) || provider.isActive}
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -536,113 +540,147 @@ export function AiSettingsPage(): React.JSX.Element {
         }
       />
 
-      {/* 4 Executive Status KPI Cards */}
-      <div className="grid grid-cols-2 gap-3.5 xl:grid-cols-4">
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-            <Server className="h-4 w-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">已配置服务商</p>
-            <p className="mt-1 text-2xl font-bold leading-none tabular-nums text-foreground">{providers.length}</p>
-            <p className="mt-1.5 text-[11px] text-muted-foreground">全局共享同一激活服务</p>
-          </div>
-        </div>
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+      {/* Unified Trade OS Model Gateway Telemetry Strip (Eliminates 4 Generic KPI Boxes) */}
+      <div className="os-telemetry-strip grid-cols-2 lg:grid-cols-4">
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
             <Zap className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">当前使用</p>
-            <p className="mt-1 truncate text-base font-bold text-foreground">{activeProvider?.name ?? '系统默认'}</p>
-            <p className="mt-1 text-[11px] font-medium text-foreground">{activeProvider ? '运行中' : '回退环境变量'}</p>
+            <p className="text-[11px] font-medium text-muted-foreground">当前激活网关</p>
+            <p className="mt-0.5 truncate text-sm font-bold text-foreground">{activeProvider?.name ?? '系统默认配置'}</p>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
             <Bot className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">当前模型</p>
-            <p className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
+            <p className="text-[11px] font-medium text-muted-foreground">在线推理模型</p>
+            <p className="mt-0.5 truncate font-mono text-xs font-semibold text-foreground">
               {activeProvider?.model || catalog?.fallback.model || '—'}
             </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">{activeProvider ? kindLabel(activeProvider) : '系统默认'}</p>
           </div>
         </div>
-        <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
+            <Server className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-muted-foreground">注册路由节点</p>
+            <p className="mt-0.5 text-sm font-bold tabular-nums text-foreground">{providers.length} 个服务商</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 px-4 py-3.5">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
             <ShieldCheck className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground">最近验证</p>
-            <p className="mt-1 text-base font-bold text-foreground">{formatTime(activeProvider?.lastTestedAt ?? null)}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {activeProvider?.lastTestStatus === 'ok' ? '连接正常' : activeProvider?.lastTestStatus === 'failed' ? '上次测试失败' : '以实际测试为准'}
-            </p>
+            <p className="text-[11px] font-medium text-muted-foreground">最近连通性校验</p>
+            <p className="mt-0.5 truncate text-sm font-bold text-foreground">{formatTime(activeProvider?.lastTestedAt ?? null)}</p>
           </div>
         </div>
       </div>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_356px]">
-        <div className="min-w-0 space-y-4">
-          <Card className="overflow-hidden border-border">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 px-4 py-3.5">
+      {/* Equal-Height Hairline Routing Matrix + Spacious Active Gateway Inspector */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_372px] xl:items-stretch">
+        <Card className="flex min-w-0 flex-col justify-between overflow-hidden">
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 px-5 py-4">
               <div>
-                <h2 id="ai-provider-list-title" className="text-sm font-semibold tracking-[-0.01em] text-foreground">服务商列表</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">同一时间只有一个服务商处于激活态，切换后立即对全局项目生效。</p>
+                <h2 id="ai-provider-list-title" className="text-sm font-semibold tracking-[-0.01em] text-foreground">
+                  模型路由注册表
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  全局单活路由：切换激活节点后，所有项目的开发信、会话副驾驶与洞察分析立即同步切换。
+                </p>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="tabular-nums">{providers.length} 个</Badge>
-                <Button type="button" size="sm" onClick={() => openCreate()}>
+              <Badge variant="outline" className="tabular-nums">{providers.length} 个节点</Badge>
+            </div>
+
+            {providers.length ? (
+              <div className="divide-y divide-border/75" aria-labelledby="ai-provider-list-title">
+                {providers.map((provider) => (
+                  <ProviderCard
+                    key={provider.id}
+                    provider={provider}
+                    busy={busy}
+                    onActivate={(item) => void activate(item)}
+                    onEdit={openEdit}
+                    onTest={(item) => void testProvider(item)}
+                    onDelete={setDeleteTarget}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-2.5 px-6 py-14 text-center">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground">
+                  <Bot className="h-5 w-5" aria-hidden />
+                </span>
+                <p className="text-sm font-medium text-foreground">尚未注册托管模型服务商</p>
+                <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+                  支持接入任意 OpenAI 兼容网关（DeepSeek / OpenAI / OpenRouter / 私有网关），也可启用零成本本地演示模式。
+                </p>
+                <Button type="button" variant="outline" size="sm" className="mt-1" onClick={() => openCreate()}>
                   <Plus className="h-3.5 w-3.5" aria-hidden />
-                  添加服务商
+                  添加第一个服务节点
                 </Button>
               </div>
-            </div>
-            <CardContent className="p-4">
-              {providers.length ? (
-                <div className="space-y-2.5" aria-labelledby="ai-provider-list-title">
-                  {providers.map((provider) => (
-                    <ProviderCard
-                      key={provider.id}
-                      provider={provider}
-                      busy={busy}
-                      onActivate={(item) => void activate(item)}
-                      onEdit={openEdit}
-                      onTest={(item) => void testProvider(item)}
-                      onDelete={setDeleteTarget}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground"><Bot className="h-5 w-5" aria-hidden /></span>
-                  <p className="text-sm font-medium text-foreground">还没有配置服务商</p>
-                  <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">添加一个 OpenAI 兼容接口，或先使用演示模式熟悉流程。</p>
-                  <Button type="button" variant="outline" size="sm" className="mt-1" onClick={() => openCreate()}>
-                    <Plus className="h-3.5 w-3.5" aria-hidden />
-                    添加第一个服务
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </div>
 
-        <aside className="space-y-4 xl:sticky xl:top-4">
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-border/80 pb-3">
-              <CardTitle className="text-sm">当前服务配置</CardTitle>
-              <Badge variant="outline">{activeProvider ? '已生效' : '默认回退'}</Badge>
-            </CardHeader>
-            <CardContent className="space-y-3.5 pt-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/75 bg-surface/45 px-5 py-3 text-xs">
+            <span className="text-muted-foreground">快捷接入主流协议模板：</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => {
+                    setEditing(null);
+                    setDraft({
+                      ...emptyDraft,
+                      kind: 'openai',
+                      name: preset.label,
+                      baseUrl: preset.baseUrl,
+                      model: preset.model,
+                    });
+                    setErrors({});
+                    setFormError('');
+                    setTested(null);
+                    setEditorOpen(true);
+                  }}
+                  className="rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:border-foreground/35 hover:bg-surface"
+                >
+                  + {preset.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => openCreate('mock')}
+                className="rounded-md border border-border bg-card px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-foreground/35 hover:text-foreground"
+              >
+                + 演示引擎
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Right Unified Active Gateway Inspector (Generous Padding — Fixes cramped text/border) */}
+        <Card className="flex flex-col justify-between overflow-hidden">
+          <div>
+            <div className="flex items-center justify-between border-b border-border/80 px-5 py-4">
+              <h2 className="text-sm font-semibold text-foreground">当前生效网关详情</h2>
+              <Badge variant="outline">{activeProvider ? '在线生效' : '默认回退'}</Badge>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border/80 bg-surface/55 p-3.5">
+                <div className="flex min-w-0 items-center gap-3">
                   {activeProvider ? (
-                    <ProviderIcon provider={activeProvider} className="h-9 w-9" />
+                    <ProviderIcon provider={activeProvider} className="h-10 w-10 bg-card" />
                   ) : (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-foreground">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground">
                       <Sparkles className="h-4 w-4" aria-hidden />
                     </span>
                   )}
@@ -650,8 +688,12 @@ export function AiSettingsPage(): React.JSX.Element {
                     <p className="truncate text-sm font-semibold text-foreground">
                       {activeProvider?.name ?? '系统默认配置'}
                     </p>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {activeProvider ? kindLabel(activeProvider) : catalog?.fallback.source === 'environment' ? '环境变量回退' : '内置默认'}
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {activeProvider
+                        ? kindLabel(activeProvider)
+                        : catalog?.fallback.source === 'environment'
+                          ? '环境变量回退'
+                          : '内置默认'}
                     </p>
                   </div>
                 </div>
@@ -660,24 +702,33 @@ export function AiSettingsPage(): React.JSX.Element {
                     type="button"
                     variant="outline"
                     size="sm"
+                    className="shrink-0 bg-card text-xs"
                     onClick={() => void testProvider(activeProvider)}
                     disabled={Boolean(busy)}
                   >
-                    {busy === `test:${activeProvider.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
+                    {busy === `test:${activeProvider.id}` ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5" aria-hidden />
+                    )}
                     测试连接
                   </Button>
                 ) : null}
               </div>
 
-              <dl className="divide-y divide-border/70 border-t border-border/75 text-xs">
-                <div className="flex items-center justify-between gap-3 py-2.5">
-                  <dt className="shrink-0 text-muted-foreground">接入方式</dt>
+              <dl className="divide-y divide-border/70 text-xs">
+                <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0">
+                  <dt className="shrink-0 text-muted-foreground">接入协议</dt>
                   <dd className="truncate font-medium text-foreground">
-                    {activeProvider ? kindLabel(activeProvider) : catalog?.fallback.provider === 'mock' ? '演示模式' : 'OpenAI 兼容'}
+                    {activeProvider
+                      ? kindLabel(activeProvider)
+                      : catalog?.fallback.provider === 'mock'
+                        ? '演示模式'
+                        : 'OpenAI 兼容'}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-3 py-2.5">
-                  <dt className="shrink-0 text-muted-foreground">Base URL</dt>
+                  <dt className="shrink-0 text-muted-foreground">路由端点 (Base URL)</dt>
                   <dd className="min-w-0 truncate font-mono text-[11px] text-foreground">
                     {activeProvider
                       ? activeProvider.kind === 'mock'
@@ -689,24 +740,27 @@ export function AiSettingsPage(): React.JSX.Element {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-3 py-2.5">
-                  <dt className="shrink-0 text-muted-foreground">API Key</dt>
-                  <dd className="flex items-center gap-1 font-medium text-foreground">
+                  <dt className="shrink-0 text-muted-foreground">密钥存储状态</dt>
+                  <dd className="flex items-center gap-1.5 font-medium text-foreground">
                     {activeProvider ? (
                       activeProvider.kind === 'mock' ? (
                         <span className="text-muted-foreground">无需密钥</span>
                       ) : activeProvider.keyConfigured ? (
-                        <><KeyRound className="h-3 w-3 text-muted-foreground" aria-hidden />•••••••• · 已加密</>
+                        <>
+                          <KeyRound className="h-3 w-3 text-muted-foreground" aria-hidden />
+                          <span>•••••••• · 加密落库</span>
+                        </>
                       ) : (
                         <span className="text-muted-foreground">未配置</span>
                       )
                     ) : catalog?.fallback.keyConfigured ? (
-                      '环境变量已注入'
+                      '环境变量注入'
                     ) : (
                       <span className="text-muted-foreground">未配置</span>
                     )}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-3 py-2.5">
+                <div className="flex items-center justify-between gap-3 py-2.5 last:pb-0">
                   <dt className="shrink-0 text-muted-foreground">模型标识</dt>
                   <dd className="min-w-0 truncate font-mono text-[11px] font-semibold text-foreground">
                     {activeProvider?.model || catalog?.fallback.model || '—'}
@@ -715,43 +769,32 @@ export function AiSettingsPage(): React.JSX.Element {
               </dl>
 
               {activeProvider ? (
-                <Button type="button" variant="outline" size="sm" className="w-full" onClick={() => openEdit(activeProvider)} disabled={Boolean(busy)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => openEdit(activeProvider)}
+                  disabled={Boolean(busy)}
+                >
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
-                  编辑当前服务配置
+                  编辑当前网关参数
                 </Button>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm"><ShieldCheck className="h-4 w-4 text-foreground" aria-hidden />运行规则与安全护栏</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 text-xs leading-relaxed text-muted-foreground">
-              <div className="flex items-start justify-between gap-2 rounded-lg border border-border/75 bg-surface/50 p-2.5">
-                <div>
-                  <p className="font-semibold text-foreground">全局生效</p>
-                  <p className="mt-0.5 text-[11px]">开发信、客户洞察、邮件分析与翻译共用当前激活服务。</p>
-                </div>
-                <Badge variant="outline" className="shrink-0">开启</Badge>
-              </div>
-              <div className="flex items-start justify-between gap-2 rounded-lg border border-border/75 bg-surface/50 p-2.5">
-                <div>
-                  <p className="font-semibold text-foreground">管理员权限保护</p>
-                  <p className="mt-0.5 text-[11px]">仅系统管理员可新增、修改或切换服务商。</p>
-                </div>
-                <Badge variant="outline" className="shrink-0">开启</Badge>
-              </div>
-              <div className="flex items-start justify-between gap-2 rounded-lg border border-border/75 bg-surface/50 p-2.5">
-                <div>
-                  <p className="font-semibold text-foreground">密钥与地址校验</p>
-                  <p className="mt-0.5 text-[11px]">API Key 加密落库不回显；生产环境强制校验 HTTPS 与内网保护。</p>
-                </div>
-                <Badge variant="outline" className="shrink-0">开启</Badge>
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
+          <div className="border-t border-border/80 bg-surface/45 px-5 py-4 text-xs">
+            <p className="flex items-center gap-1.5 font-semibold text-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+              安全与路由护栏
+            </p>
+            <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-muted-foreground">
+              <li>· 仅系统管理员可新增或切换模型，API Key 单向加密保存永不回显。</li>
+              <li>· 生产环境强制校验 HTTPS 与内网地址防护，连通测试不携带任何客户数据。</li>
+            </ul>
+          </div>
+        </Card>
       </div>
 
       <Dialog open={editorOpen} onOpenChange={(open) => { if (!busy) setEditorOpen(open); }}>

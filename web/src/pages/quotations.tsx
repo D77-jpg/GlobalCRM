@@ -442,86 +442,56 @@ export function QuotationsPage(): React.JSX.Element {
         }
       />
 
-      {/* Top 4 KPI Cards */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="p-4">
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-              <FileText className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-muted-foreground">草稿待报价</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{summary?.draft ?? 0}</p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">累计报价单 {summary?.total ?? 0} 份</p>
-            </div>
+      {/* Unified Quotation & RFQ Telemetry Bar + Mode Switcher */}
+      <div className="os-telemetry-strip">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="os-segmented" role="tablist" aria-label="报价工作台视图">
+            {([
+              ['builder', '创建报价'],
+              ['rfq', `非标 RFQ 核价 (${rfqs.length})`],
+              ['list', `全部报价与审批 (${quotations.length})`],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`os-segmented-item text-xs ${tab === key ? 'os-segmented-item-active' : ''}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-              <ReceiptText className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-muted-foreground">已发送 / 谈判中</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{(summary?.sent ?? 0) + (summary?.negotiating ?? 0)}</p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">在谈金额 {formatMoney(summary?.activePipelineAmount ?? 0, 'USD')}</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-              <ShieldCheck className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-muted-foreground">待主管审批 / RFQ</p>
-              <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{summary?.pendingApproval ?? 0} <span className="text-sm font-normal text-muted-foreground">/ {rfqs.length} RFQ</span></p>
-              <p className="mt-1.5 text-[11px] text-muted-foreground">支持非标多档核价与内部核准</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground" aria-hidden>
-                <CheckCircle2 className="h-4 w-4" />
-              </span>
-              <div className="min-w-0">
-                <p className="whitespace-nowrap text-xs font-medium text-muted-foreground">已成交报价额</p>
-                <p className="mt-1 whitespace-nowrap text-xl font-bold leading-none tabular-nums tracking-[-0.03em] text-foreground">
-                  {formatMoney(summary?.acceptedAmount ?? 0, 'USD')}
-                </p>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">成交 {summary?.accepted ?? 0} 份</p>
-              </div>
-            </div>
-            <MiniSparkline values={[0, summary?.draft ?? 0, (summary?.sent ?? 0) + (summary?.negotiating ?? 0), summary?.accepted ?? 0]} className="hidden 2xl:block w-16 shrink-0" />
-          </div>
-        </Card>
-      </div>
 
-      {/* Mode Tabs */}
-      <nav className="flex flex-wrap items-center gap-5 border-b border-border">
-        {([
-          ['builder', '创建报价'],
-          ['rfq', `非标定制 RFQ 核价表 (${rfqs.length})`],
-          ['list', `全部报价与审批 (${quotations.length})`],
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
-              tab === key ? 'border-foreground font-semibold text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+          <div className="flex flex-wrap items-center divide-x divide-border/70">
+            <button type="button" onClick={() => setTab('list')} className="flex items-baseline gap-2 pr-4 text-left hover:opacity-80">
+              <FileText className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">草稿待报</span>
+              <span className="text-lg font-bold tabular-nums tracking-tight text-foreground">{summary?.draft ?? 0}</span>
+            </button>
+            <button type="button" onClick={() => setTab('list')} className="flex items-baseline gap-2 px-4 text-left hover:opacity-80">
+              <ReceiptText className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">在谈报价</span>
+              <span className="text-lg font-bold tabular-nums tracking-tight text-foreground">{(summary?.sent ?? 0) + (summary?.negotiating ?? 0)}</span>
+              <span className="hidden text-[11px] text-muted-foreground 2xl:inline">({formatMoney(summary?.activePipelineAmount ?? 0, 'USD')})</span>
+            </button>
+            <button type="button" onClick={() => setTab('rfq')} className="flex items-baseline gap-2 px-4 text-left hover:opacity-80">
+              <ShieldCheck className="h-3.5 w-3.5 self-center text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">待批 / RFQ</span>
+              <span className="text-lg font-bold tabular-nums tracking-tight text-foreground">{summary?.pendingApproval ?? 0}<span className="text-xs font-normal text-muted-foreground">/{rfqs.length}</span></span>
+            </button>
+            <div className="flex items-center gap-2.5 pl-4">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+              <span className="text-xs text-muted-foreground">成交总额</span>
+              <span className="text-base font-bold tabular-nums tracking-tight text-foreground">{formatMoney(summary?.acceptedAmount ?? 0, 'USD')}</span>
+              <MiniSparkline values={[0, summary?.draft ?? 0, (summary?.sent ?? 0) + (summary?.negotiating ?? 0), summary?.accepted ?? 0]} className="hidden w-12 shrink-0 2xl:block" />
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* TAB 1: Standard 3-Column Quotation Builder (active from xl 1280px+) */}
       {tab === 'builder' ? (
-        <div className="grid gap-4 xl:grid-cols-[248px_minmax(0,1fr)_296px] xl:items-start">
+        <div className="grid gap-4 xl:grid-cols-[248px_minmax(0,1fr)_296px] xl:items-stretch">
           {/* Left: Customer & Product Picker */}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
             <Card>
@@ -656,7 +626,7 @@ export function QuotationsPage(): React.JSX.Element {
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-[8.5rem_9.5rem_minmax(0,1fr)]">
                 <div>
                   <Label>预估运费 ({currency})</Label>
                   <Input type="number" min={0} step="0.01" value={estimatedFreight} onChange={(e) => setEstimatedFreight(Number(e.target.value) || 0)} className="mt-1" />
@@ -684,8 +654,8 @@ export function QuotationsPage(): React.JSX.Element {
                     <thead className="bg-muted/50 text-[11px] text-muted-foreground">
                       <tr>
                         <th className="min-w-[9.5rem] whitespace-nowrap p-2">产品名称 / 规格</th>
-                        <th className="w-20 whitespace-nowrap p-2">数量</th>
-                        <th className="w-24 whitespace-nowrap p-2">单价 ({currency})</th>
+                        <th className="w-24 min-w-[5.5rem] whitespace-nowrap p-2">数量</th>
+                        <th className="w-28 min-w-[6.25rem] whitespace-nowrap p-2">单价 ({currency})</th>
                         <th className="w-24 whitespace-nowrap p-2">核价状态</th>
                         <th className="w-20 whitespace-nowrap p-2 text-right">小计</th>
                         <th className="w-9 p-2" />
@@ -699,10 +669,10 @@ export function QuotationsPage(): React.JSX.Element {
                             <Input value={r.model} onChange={(e) => setRows((p) => p.map((x, i) => i === idx ? { ...x, model: e.target.value } : x))} placeholder="规格/材质/颜色（选填）" className="h-6 text-[11px]" />
                           </td>
                           <td className="p-1.5">
-                            <Input type="number" min={1} value={r.quantity} onChange={(e) => updateRowQty(idx, Number(e.target.value) || 0)} className="h-7 text-xs" />
+                            <Input type="number" min={1} value={r.quantity} onChange={(e) => updateRowQty(idx, Number(e.target.value) || 0)} className="h-7 px-2 text-xs tabular-nums" />
                           </td>
                           <td className="p-1.5">
-                            <Input type="number" min={0} step="0.01" value={r.unitPrice} onChange={(e) => setRows((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: Number(e.target.value) || 0 } : x))} className="h-7 text-xs" />
+                            <Input type="number" min={0} step="0.01" value={r.unitPrice} onChange={(e) => setRows((p) => p.map((x, i) => i === idx ? { ...x, unitPrice: Number(e.target.value) || 0 } : x))} className="h-7 px-2 text-xs tabular-nums" />
                           </td>
                           <td className="p-1.5">
                             <Select value={r.pricingStatus} onValueChange={(v) => setRows((p) => p.map((x, i) => i === idx ? { ...x, pricingStatus: v as 'approved' | 'pending' } : x))}>

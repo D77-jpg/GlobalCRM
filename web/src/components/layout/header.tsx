@@ -45,7 +45,7 @@ function GlobalSearch(): React.JSX.Element {
   }
 
   return (
-    <form onSubmit={submit} role="search" className="relative hidden min-w-[13.5rem] max-w-[25rem] flex-1 md:block">
+    <form onSubmit={submit} role="search" className="relative hidden min-w-[11rem] max-w-[25rem] flex-1 lg:block">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
       <input
         value={value}
@@ -156,14 +156,14 @@ export function Header({ onOpenMobileNav, sidebarCollapsed, onToggleSidebar }: H
           <TooltipTrigger asChild>
             <Button
               type="button"
-              variant="default"
+              variant={agentOpen ? 'default' : 'outline'}
               size="sm"
               onClick={toggleAgent}
               aria-label={agentOpen ? t('header.assistantClose') : t('header.assistantOpen')}
               aria-expanded={agentOpen}
               className={cn(
-                'h-8 gap-1.5 rounded-lg px-3 text-xs font-medium shadow-sm',
-                agentOpen && 'ring-2 ring-foreground/20 ring-offset-1 ring-offset-card',
+                'h-8 gap-1.5 rounded-lg px-3 text-xs font-semibold transition-all',
+                !agentOpen && 'border-foreground/20 bg-surface/85 text-foreground hover:border-foreground/35 hover:bg-card',
               )}
             >
               <Sparkles className="h-3.5 w-3.5" aria-hidden />

@@ -35,6 +35,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ChannelBrandIcon } from '@/components/common/channel-icon';
 import { MailCopilotPane } from '@/components/workbench/mail-copilot-pane';
 import { CustomerWorkbenchSidebar } from '@/components/workbench/customer-workbench-sidebar';
 import type {
@@ -507,8 +508,8 @@ export function ChannelsPage(): React.JSX.Element {
       <div className={cn(
         'grid min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card',
         copilotOpen
-          ? 'grid-cols-1 lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1fr)_21rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_24rem]'
-          : 'grid-cols-1 lg:grid-cols-[17.5rem_minmax(0,1fr)]',
+          ? 'grid-cols-1 lg:grid-cols-[19.5rem_minmax(0,1fr)] xl:grid-cols-[19.5rem_minmax(0,1fr)_21rem] 2xl:grid-cols-[20.5rem_minmax(0,1fr)_24rem]'
+          : 'grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)]',
       )}>
         {/* LEFT PANE: Conversation List */}
         <aside className="flex min-h-0 flex-col border-b border-border lg:border-b-0 lg:border-r">
@@ -523,20 +524,21 @@ export function ChannelsPage(): React.JSX.Element {
               />
             </div>
 
-            <div className="flex flex-wrap gap-1">
+            <div className="grid grid-cols-3 gap-1">
               {([['all', '全部'], ['whatsapp', 'WhatsApp'], ['alibaba', '阿里'], ['instagram', 'IG'], ['wechat', '微信'], ['trademanager', '旺旺']] as const).map(([val, label]) => (
                 <button
                   key={val}
                   type="button"
                   onClick={() => setChannelFilter(val)}
                   className={cn(
-                    'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
+                    'inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-1 text-[10.5px] transition-all',
                     channelFilter === val
-                      ? 'border-primary bg-primary/10 font-medium text-primary'
-                      : 'border-border text-muted-foreground hover:bg-muted/60',
+                      ? 'border-foreground/25 bg-card font-semibold text-foreground shadow-xs'
+                      : 'border-border/70 bg-surface/40 text-muted-foreground hover:bg-surface hover:text-foreground',
                   )}
                 >
-                  {label}
+                  <ChannelBrandIcon channel={val} className="h-3.5 w-3.5" />
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
@@ -592,8 +594,13 @@ export function ChannelsPage(): React.JSX.Element {
                       active && 'border-l-primary bg-primary-soft/65',
                     )}
                   >
-                    <div className="avatar-bubble flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold">
-                      {initialsOf(conv.contactName)}
+                    <div className="relative shrink-0">
+                      <div className="avatar-bubble flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold">
+                        {initialsOf(conv.contactName)}
+                      </div>
+                      <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-card p-[1px] shadow-xs">
+                        <ChannelBrandIcon channel={conv.channel} className="h-3.5 w-3.5" />
+                      </span>
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
@@ -606,7 +613,8 @@ export function ChannelsPage(): React.JSX.Element {
                         {conv.lastMessageDirection === 'outbound' ? '我：' : ''}{conv.lastMessagePreview || '（无消息）'}
                       </p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        <span className={cn('rounded border px-1.5 py-0 text-[9px] font-medium', meta.badgeClass)}>
+                        <span className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0 text-[9.5px] font-medium', meta.badgeClass)}>
+                          <ChannelBrandIcon channel={conv.channel} className="h-2.5 w-2.5" />
                           {meta.short}
                         </span>
                         {conv.contactCountry ? (
@@ -656,7 +664,8 @@ export function ChannelsPage(): React.JSX.Element {
                       >
                         <Star className={cn('h-3.5 w-3.5', detail.conversation.starred && 'fill-amber-400 text-amber-400')} />
                       </button>
-                      <span className={cn('rounded border px-1.5 py-0 text-[10px] font-medium', CHANNEL_META[detail.conversation.channel].badgeClass)}>
+                      <span className={cn('inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium', CHANNEL_META[detail.conversation.channel].badgeClass)}>
+                        <ChannelBrandIcon channel={detail.conversation.channel} className="h-3 w-3" />
                         {CHANNEL_META[detail.conversation.channel].label}
                       </span>
                     </div>
@@ -702,27 +711,27 @@ export function ChannelsPage(): React.JSX.Element {
               </div>
 
               {/* Sub-tabs */}
-              <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/20 px-4 py-1.5 text-xs">
-                {([
-                  ['chat', `聊天对话 (${detail.messages.length})`],
-                  ['customer', '客户档案'],
-                  ['quotations', `报价单 (${detail.quotations.length})`],
-                  ['items', `未解决问题 (${detail.openItemsCount})`],
-                ] as const).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setCenterTab(key)}
-                    className={cn(
-                      'rounded-md px-2.5 py-1 transition-colors',
-                      centerTab === key
-                        ? 'bg-primary text-primary-foreground font-medium'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <div className="flex shrink-0 items-center gap-1 border-b border-border bg-surface/40 px-4 py-1.5 text-xs">
+                <div className="os-segmented">
+                  {([
+                    ['chat', `聊天对话 (${detail.messages.length})`],
+                    ['customer', '客户档案'],
+                    ['quotations', `报价单 (${detail.quotations.length})`],
+                    ['items', `未解决问题 (${detail.openItemsCount})`],
+                  ] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setCenterTab(key)}
+                      className={cn(
+                        'os-segmented-item text-xs',
+                        centerTab === key && 'os-segmented-item-active',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {detailLoading ? (
@@ -815,13 +824,13 @@ export function ChannelsPage(): React.JSX.Element {
                   {/* Composer */}
                   <div className="shrink-0 space-y-2 border-t border-border bg-card p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-[11px]">
+                      <div className="os-segmented text-[11px]">
                         <button
                           type="button"
                           onClick={() => setComposerDirection('outbound')}
                           className={cn(
-                            'rounded px-2.5 py-0.5 transition-colors',
-                            composerDirection === 'outbound' ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground',
+                            'os-segmented-item text-[11px]',
+                            composerDirection === 'outbound' && 'os-segmented-item-active',
                           )}
                         >
                           我方回复（右侧）
@@ -830,8 +839,8 @@ export function ChannelsPage(): React.JSX.Element {
                           type="button"
                           onClick={() => setComposerDirection('inbound')}
                           className={cn(
-                            'rounded px-2.5 py-0.5 transition-colors',
-                            composerDirection === 'inbound' ? 'bg-foreground text-background font-medium' : 'text-muted-foreground',
+                            'os-segmented-item text-[11px]',
+                            composerDirection === 'inbound' && 'os-segmented-item-active',
                           )}
                         >
                           录入客户新消息（左侧）

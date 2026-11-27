@@ -34,7 +34,6 @@ import { MiniSparkline } from '@/components/common/charts';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { LetterTable } from '@/components/letters/letter-table';
 import { LetterViewDialog } from '@/components/letters/letter-view-dialog';
 import { SendLetterDialog } from '@/components/letters/send-letter-dialog';
@@ -313,123 +312,71 @@ export function LettersPage(): React.JSX.Element {
         }
       />
 
-      {mailChannel === 'mock' ? (
-        <Alert variant="warning">
-          <AlertDescription>
-            当前是「模拟发送」：开发信会完整记录并计入统计，但不会真的发到客户邮箱。
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      {/* Unified Outreach Delivery Telemetry Strip + Status Segmented Switcher */}
+      <section aria-label="开发信统计概览" className="os-telemetry-strip">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <nav aria-label="开发信状态快速切换" className="os-segmented">
+            {(
+              [
+                ['all', '全部记录'],
+                ['draft', '草稿'],
+                ['sent', '已发送'],
+                ['opened', '已打开'],
+                ['failed', '失败与待确认'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilters({ status: key })}
+                className={`os-segmented-item text-xs ${status === key ? 'os-segmented-item-active' : ''}`}
+              >
+                {label}
+                {status === key && total > 0 ? (
+                  <span className="ml-1 rounded-full bg-surface px-1.5 py-0 text-[10px] font-semibold tabular-nums text-foreground">
+                    {total}
+                  </span>
+                ) : key === 'draft' && draftQueue.length > 0 && status !== 'draft' ? (
+                  <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 py-0 text-[10px] font-medium tabular-nums text-amber-800 dark:text-amber-300">
+                    {draftQueue.length}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </nav>
 
-      {/* ---------------------------- 4 维核心指标条 ---------------------------- */}
-      <section aria-label="开发信统计概览" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-              <Send className="h-4 w-4" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <p className="whitespace-nowrap text-xs text-muted-foreground">全部记录</p>
-              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
-                {total.toLocaleString('zh-CN')}
-              </p>
-              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
-                当前页 {items.length} 条
-              </p>
+          <div className="flex flex-wrap items-center divide-x divide-border/70">
+            {mailChannel === 'mock' ? (
+              <div className="flex items-center gap-1.5 pr-4 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                模拟发送模式
+              </div>
+            ) : null}
+            <div className="flex items-center gap-2 px-4">
+              <Send className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">全部记录</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{total.toLocaleString('zh-CN')}</span>
+              <MiniSparkline className="hidden w-12 shrink-0 2xl:block" values={[Math.max(1, items.length - 3), Math.max(1, items.length - 1), items.length, Math.max(total, items.length)]} />
+            </div>
+            <div className="flex items-center gap-2 px-4">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+              <span className="text-xs text-muted-foreground">本页投递</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{stats.delivered}</span>
+            </div>
+            <div className="flex items-center gap-2 px-4">
+              <Eye className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">已打开</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{stats.opened}</span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">({stats.openRate}%)</span>
+            </div>
+            <div className="flex items-center gap-2 pl-4">
+              <Clock3 className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              <span className="text-xs text-muted-foreground">待审与异常</span>
+              <span className="text-lg font-bold tabular-nums text-foreground">{stats.pendingAction}</span>
             </div>
           </div>
-          <MiniSparkline className="w-16 shrink-0" values={[Math.max(1, items.length - 3), Math.max(1, items.length - 1), items.length, Math.max(total, items.length)]} />
-        </div>
-
-        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-              <CheckCircle2 className="h-4 w-4" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <p className="whitespace-nowrap text-xs text-muted-foreground">本页已投递</p>
-              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
-                {stats.delivered}
-              </p>
-              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">
-                已发出记录
-              </p>
-            </div>
-          </div>
-          <MiniSparkline className="w-16 shrink-0" values={[1, Math.max(1, Math.floor(stats.delivered * 0.6)), Math.max(1, stats.delivered)]} />
-        </div>
-
-        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-              <Eye className="h-4 w-4" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <p className="whitespace-nowrap text-xs text-muted-foreground">本页已打开</p>
-              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
-                {stats.opened}
-              </p>
-              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
-                打开率 {stats.openRate}%
-              </p>
-            </div>
-          </div>
-          <MiniSparkline className="w-16 shrink-0" values={[0, Math.max(1, Math.floor(stats.opened * 0.5)), stats.opened]} />
-        </div>
-
-        <div className="flex items-end justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3.5 shadow-xs">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-surface text-foreground">
-              <Clock3 className="h-4 w-4" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <p className="whitespace-nowrap text-xs text-muted-foreground">待审与异常</p>
-              <p className="mt-0.5 text-xl font-bold tracking-tight text-foreground tabular-nums">
-                {stats.pendingAction}
-              </p>
-              <p className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground tabular-nums">
-                待审草稿 {draftQueue.length} 封
-              </p>
-            </div>
-          </div>
-          <MiniSparkline className="w-16 shrink-0" values={[0, draftQueue.length, stats.pendingAction]} />
         </div>
       </section>
-
-      {/* Quick Status Tabs */}
-      <nav aria-label="开发信状态快速切换" className="flex flex-wrap items-center gap-5 border-b border-border">
-        {(
-          [
-            ['all', '全部记录'],
-            ['draft', '草稿'],
-            ['sent', '已发送'],
-            ['opened', '已打开'],
-            ['failed', '失败与待确认'],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setFilters({ status: key })}
-            className={`-mb-px inline-flex h-10 items-center border-b-2 px-1 text-[0.8125rem] font-medium transition-colors ${
-              status === key
-                ? 'border-foreground font-semibold text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-            {status === key && total > 0 ? (
-              <span className="ml-1.5 rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-foreground">
-                {total}
-              </span>
-            ) : key === 'draft' && draftQueue.length > 0 && status !== 'draft' ? (
-              <span className="ml-1.5 rounded-full bg-surface px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-muted-foreground">
-                {draftQueue.length}
-              </span>
-            ) : null}
-          </button>
-        ))}
-      </nav>
 
       {/* ---------------------------- 筛选栏 ---------------------------- */}
 
@@ -473,8 +420,8 @@ export function LettersPage(): React.JSX.Element {
 
       {/* ---------------------------- Master-Detail 双栏工作台 ---------------------------- */}
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_324px] 2xl:grid-cols-[minmax(0,1fr)_356px]">
-        <Card className="relative min-w-0 overflow-hidden">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_324px] xl:items-stretch 2xl:grid-cols-[minmax(0,1fr)_356px]">
+        <Card className="relative flex min-w-0 flex-col overflow-hidden">
           <LetterTable
             letters={items}
             loading={loading}
@@ -513,7 +460,7 @@ export function LettersPage(): React.JSX.Element {
         {/* 右侧常驻「开发信详情」检查器 */}
         <aside
           aria-label="开发信详情预览"
-          className="rounded-xl border border-border bg-card p-4 shadow-xs xl:sticky xl:top-4"
+          className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-xs"
         >
           <div className="flex items-center justify-between gap-2 border-b border-border/80 pb-3">
             <div className="flex items-center gap-2">
