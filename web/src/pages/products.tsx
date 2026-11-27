@@ -217,13 +217,40 @@ export function ProductsPage(): React.JSX.Element {
       </>}
     />
 
-    <div className="grid gap-3 sm:grid-cols-3">
-      <div className="rounded-lg border bg-card px-4 py-3"><div className="text-[11px] text-muted-foreground">产品总数</div><div className="mt-1 text-xl font-semibold tabular-nums">{total}</div><div className="mt-0.5 text-[11px] text-muted-foreground">当前筛选 {products.length} 条 · 启用 {activeCount} 条</div></div>
-      <div className="rounded-lg border bg-card px-4 py-3"><div className="flex items-center gap-1 text-[11px] text-muted-foreground"><Layers3 className="h-3.5 w-3.5" />规格字段</div><div className="mt-1 text-xl font-semibold tabular-nums">{specCount}</div><div className="mt-0.5 text-[11px] text-muted-foreground">材质、尺寸、工艺等可引用字段</div></div>
-      <div className="rounded-lg border bg-card px-4 py-3"><div className="flex items-center gap-1 text-[11px] text-muted-foreground"><DollarSign className="h-3.5 w-3.5" />阶梯价档</div><div className="mt-1 text-xl font-semibold tabular-nums">{tierCount}</div><div className="mt-0.5 text-[11px] text-muted-foreground">按数量匹配，不跨档猜测</div></div>
+    <div className="grid gap-3.5 sm:grid-cols-3">
+      <div className="panel flex items-start gap-3 p-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
+          <PackageOpen className="h-[18px] w-[18px]" />
+        </span>
+        <div>
+          <div className="text-xs font-medium text-muted-foreground">产品总数</div>
+          <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{total}</div>
+          <div className="mt-1.5 text-[11px] text-muted-foreground">当前筛选 {products.length} 条 · 启用 {activeCount} 条</div>
+        </div>
+      </div>
+      <div className="panel flex items-start gap-3 p-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
+          <Layers3 className="h-[18px] w-[18px]" />
+        </span>
+        <div>
+          <div className="text-xs font-medium text-muted-foreground">规格字段</div>
+          <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{specCount}</div>
+          <div className="mt-1.5 text-[11px] text-muted-foreground">材质、尺寸、工艺等可引用字段</div>
+        </div>
+      </div>
+      <div className="panel flex items-start gap-3 p-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft text-gold" aria-hidden>
+          <DollarSign className="h-[18px] w-[18px]" />
+        </span>
+        <div>
+          <div className="text-xs font-medium text-muted-foreground">阶梯价档</div>
+          <div className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{tierCount}</div>
+          <div className="mt-1.5 text-[11px] text-muted-foreground">按数量匹配，不跨档猜测</div>
+        </div>
+      </div>
     </div>
 
-    <div className="rounded-lg border bg-card">
+    <div className="panel overflow-hidden">
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
         <div className="relative min-w-[220px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="pl-8" placeholder="搜索 SKU、产品名、规格值" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
         <Select value={status} onValueChange={(value) => setStatus(value as typeof status)}><SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部状态</SelectItem><SelectItem value="active">启用</SelectItem><SelectItem value="archived">已归档</SelectItem></SelectContent></Select>

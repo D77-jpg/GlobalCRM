@@ -365,7 +365,7 @@ export function MailCopilotPane({
           <Input
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
-            placeholder="可选指示：如“礼貌催上周报价反馈”或“告知大货下周出货并确认收货地址”"
+            placeholder="可选指示：如“礼貌催报价反馈”或“确认出货地址”"
             className="h-8 text-xs"
           />
         </div>

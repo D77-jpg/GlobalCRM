@@ -1,12 +1,12 @@
 /**
- * Badge — compact status label. Color is reserved for meaningful state.
+ * Badge — refined botanical semantic pills.
  */
 import * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const badgeVariants = cva(
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-medium leading-none transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-1',
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-1',
   {
     variants: {
       variant: {
@@ -19,6 +19,7 @@ const badgeVariants = cva(
         developed: 'chip-mint border-transparent',
         failed: 'chip-rose border-transparent',
         warning: 'chip-amber border-transparent',
+        gold: 'chip-gold border-transparent',
       },
     },
     defaultVariants: { variant: 'default' },

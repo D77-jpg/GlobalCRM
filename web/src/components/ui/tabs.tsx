@@ -1,5 +1,5 @@
 /**
- * Tabs — quiet underline navigation used for page and detail sections.
+ * Tabs — crisp forest-emerald underline navigation for sections & workspaces.
  */
 import * as React from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
@@ -14,7 +14,7 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      'workspace-tabs inline-flex min-h-9 max-w-full items-center justify-start gap-4 overflow-x-auto border-b border-border text-muted-foreground',
+      'workspace-tabs inline-flex min-h-10 max-w-full items-center justify-start gap-5 overflow-x-auto border-b border-border text-muted-foreground',
       className,
     )}
     {...props}
@@ -30,11 +30,11 @@ const TabsTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       [
-        'inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-0.5 py-1.5 text-[0.8125rem] font-medium',
+        'inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-1 py-2 text-[0.8125rem] font-medium',
         'ring-offset-background transition-colors duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1',
         'hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
-        'data-[state=active]:border-foreground data-[state=active]:text-foreground',
+        'data-[state=active]:border-primary data-[state=active]:font-semibold data-[state=active]:text-primary',
       ].join(' '),
       className,
     )}
@@ -50,7 +50,7 @@ const TabsContent = React.forwardRef<
   <TabsPrimitive.Content
     ref={ref}
     className={cn(
-      'mt-3 data-[state=inactive]:hidden ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1',
+      'mt-4 data-[state=inactive]:hidden ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-1',
       className,
     )}
     {...props}

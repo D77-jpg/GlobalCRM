@@ -1251,23 +1251,74 @@ export function OutreachAutomationPage(): React.JSX.Element {
             ) : null}
           </section>
 
-          <section aria-label="自动开发指标" className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <section aria-label="自动开发指标" className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
             {[
-              { label: '今天已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit} 封`, hint: `当日发送量 · 剩余 ${overview.stats.remainingToday} 封`, icon: Send },
-              { label: '自动开发客户', value: `${overview.stats.enrolled} 位`, hint: `全部队列客户 · 正常排程 ${overview.stats.active} 位`, icon: Bot },
-              { label: '需要你处理', value: `${actionNeededCount} 位`, hint: actionNeededCount > 0 ? '仅统计需修改、待确认或未发出的邮件' : '当前无需人工处理', icon: ShieldCheck },
-              { label: '可加入客户', value: `${overview.stats.eligible} 位`, hint: `待开发或已有开发信${ruleStoppedCount > 0 ? ` · 已按规则停止 ${ruleStoppedCount} 位` : ''}`, icon: Users },
+              { label: '今天已发', value: `${overview.stats.sentToday}/${overview.config.dailyLimit} 封`, hint: `当日发送量 · 剩余 ${overview.stats.remainingToday} 封`, icon: Send, tone: 'bg-primary-soft text-primary' },
+              { label: '自动开发客户', value: `${overview.stats.enrolled} 位`, hint: `全部队列客户 · 正常排程 ${overview.stats.active} 位`, icon: Bot, tone: 'bg-mint-soft text-mint' },
+              { label: '需要你处理', value: `${actionNeededCount} 位`, hint: actionNeededCount > 0 ? '仅统计需修改、待确认或未发出的邮件' : '当前无需人工处理', icon: ShieldCheck, tone: actionNeededCount > 0 ? 'bg-amberx-soft text-amberx' : 'bg-primary-soft text-primary' },
+              { label: '可加入客户', value: `${overview.stats.eligible} 位`, hint: `待开发或已有开发信${ruleStoppedCount > 0 ? ` · 已按规则停止 ${ruleStoppedCount} 位` : ''}`, icon: Users, tone: 'bg-gold-soft text-gold' },
             ].map((item) => (
-              <div key={item.label} className="rounded-lg border bg-card p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <item.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              <div key={item.label} className="panel flex items-start gap-3 p-4">
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${item.tone}`} aria-hidden>
+                  <item.icon className="h-[18px] w-[18px]" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
+                  <p className="mt-1 text-xl font-bold leading-none tabular-nums tracking-[-0.025em] text-foreground">{item.value}</p>
+                  <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{item.hint}</p>
                 </div>
-                <p className="mt-1 text-xl font-semibold tabular-nums">{item.value}</p>
-                <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{item.hint}</p>
               </div>
             ))}
           </section>
+
+          {/* Visual 6-Stage Outreach Pipeline Stepper (computed from live queue data) */}
+          {(() => {
+            const q = overview.queue;
+            const prepCount = q.filter((r) => r.status === 'active' && r.currentStep === 0 && !isActionNeededRow(r)).length;
+            const step1Count = q.filter((r) => r.status === 'active' && r.currentStep === 1 && !isActionNeededRow(r)).length;
+            const step2Count = q.filter((r) => r.status === 'active' && r.currentStep === 2 && !isActionNeededRow(r)).length;
+            const step3Count = q.filter((r) => r.status === 'active' && r.currentStep >= 3 && !isActionNeededRow(r)).length;
+            const doneCount = q.filter((r) => r.status === 'completed').length;
+            const stages = [
+              { label: '待准备', count: prepCount, sub: '收集资料 · 生成草稿', tone: 'bg-surface border-border/80', badge: 'bg-primary-soft text-primary', onClick: () => setQueueFilter('all') },
+              { label: '首封开发', count: step1Count, sub: '第 1 封触达阶段', tone: 'bg-surface border-border/80', badge: 'bg-primary-soft text-primary', onClick: () => setQueueFilter('all') },
+              { label: '第二封跟进', count: step2Count, sub: '第 3 天跟进节奏', tone: 'bg-surface border-border/80', badge: 'bg-primary-soft text-primary', onClick: () => setQueueFilter('all') },
+              { label: '第三封跟进', count: step3Count, sub: '第 7 天最终触达', tone: 'bg-surface border-border/80', badge: 'bg-primary-soft text-primary', onClick: () => setQueueFilter('all') },
+              { label: '需人工处理', count: actionNeededCount, sub: '审核 / 修改 / 确认', tone: actionNeededCount > 0 ? 'bg-amberx-soft/65 border-amberx/30' : 'bg-surface border-border/80', badge: actionNeededCount > 0 ? 'bg-amberx text-white' : 'bg-muted text-muted-foreground', onClick: () => setQueueFilter('action_needed') },
+              { label: '已完成', count: doneCount, sub: '已结束或收到回复', tone: 'bg-primary-soft/40 border-primary/15', badge: 'bg-primary text-primary-foreground', onClick: () => setQueueFilter('all') },
+            ];
+            return (
+              <section aria-label="开发任务流水线" className="panel p-4 sm:p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="section-title">开发任务流水线</h2>
+                    <p className="mt-0.5 text-xs text-muted-foreground">标准三封节奏（0 / 3 / 7 天）· 每日上限 {overview.config.dailyLimit} 封 · 点击阶段快速定位</p>
+                  </div>
+                  <Badge variant={overview.config.enabled ? 'developed' : 'muted'}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${overview.config.enabled ? 'bg-status-developed' : 'bg-muted-foreground'}`} aria-hidden />
+                    {overview.config.enabled ? '自动引擎运行中' : '自动引擎已暂停'}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+                  {stages.map((st, idx) => (
+                    <button
+                      key={st.label}
+                      type="button"
+                      onClick={st.onClick}
+                      className={`group relative flex flex-col items-center rounded-xl border p-3 text-center transition-[border-color,transform] hover:-translate-y-0.5 hover:border-primary/40 ${st.tone}`}
+                    >
+                      <span className={`mb-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${st.badge}`}>
+                        {idx + 1}
+                      </span>
+                      <span className="text-xs font-semibold text-foreground">{st.label}</span>
+                      <span className="mt-1 text-xl font-bold leading-none tabular-nums text-foreground">{st.count}</span>
+                      <span className="mt-1 text-[10.5px] leading-tight text-muted-foreground">{st.sub}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            );
+          })()}
 
           <div className="grid gap-4 2xl:grid-cols-[19.5rem_minmax(0,1fr)] 2xl:items-start">
             <Card className="order-2 2xl:order-1">

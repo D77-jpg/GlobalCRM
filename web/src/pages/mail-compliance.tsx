@@ -173,29 +173,33 @@ export function MailCompliancePage(): React.JSX.Element {
 
       {loading && !overview ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading')}</div> : null}
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-start">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm"><ShieldAlert className="h-4 w-4 text-primary" aria-hidden />{t('compliance.suppressionTitle')}</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-[0.9375rem]"><ShieldAlert className="h-4 w-4 text-primary" aria-hidden />{t('compliance.suppressionTitle')}</CardTitle>
             <CardDescription>{t('compliance.suppressionDesc')}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('compliance.searchPlaceholder')} className="max-w-[16rem]" />
+          <CardContent className="space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('compliance.searchPlaceholder')} className="max-w-[18rem]" />
               <Button type="button" size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" aria-hidden />{t('compliance.addSuppression')}</Button>
             </div>
-            <div className="overflow-x-auto rounded-md border">
+            <div className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full text-left text-xs">
-                <thead className="bg-muted/45 text-muted-foreground">
-                  <tr><th className="px-2.5 py-2 font-medium">{t('compliance.email')}</th><th className="px-2.5 py-2 font-medium">{t('compliance.reason')}</th><th className="px-2.5 py-2 font-medium">{t('compliance.scope')}</th><th className="px-2.5 py-2" /></tr>
+                <thead className="bg-surface text-muted-foreground">
+                  <tr><th className="px-3 py-2.5 font-semibold">{t('compliance.email')}</th><th className="px-3 py-2.5 font-semibold">{t('compliance.reason')}</th><th className="px-3 py-2.5 font-semibold">{t('compliance.scope')}</th><th className="px-3 py-2.5" /></tr>
                 </thead>
                 <tbody>
                   {suppressions.map((row) => (
-                    <tr key={row._id} className="border-t border-border/70">
-                      <td className="max-w-[15rem] truncate px-2.5 py-2" title={row.email}>{row.email}</td>
-                      <td className="px-2.5 py-2"><Badge variant="outline">{t(REASON_KEYS[row.reason])}</Badge></td>
-                      <td className="px-2.5 py-2 text-muted-foreground">{row.scopeKey === 'global' ? t('compliance.globalScope') : t('compliance.projectScope')}</td>
-                      <td className="px-2.5 py-2 text-right">
+                    <tr key={row._id} className="border-t border-border/75 transition-colors hover:bg-primary-soft/30">
+                      <td className="max-w-[15rem] truncate px-3 py-2.5 font-medium" title={row.email}>{row.email}</td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant={row.reason === 'hard_bounce' || row.reason === 'complaint' || row.reason === 'spam' ? 'warning' : 'developed'}>
+                          {t(REASON_KEYS[row.reason])}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{row.scopeKey === 'global' ? t('compliance.globalScope') : t('compliance.projectScope')}</td>
+                      <td className="px-3 py-2.5 text-right">
                         {row.scopeKey === 'global' && !isAdmin ? null : (
                           <Button type="button" variant="ghost" size="icon-sm" aria-label={t('compliance.remove')} onClick={() => setRemoveTarget(row)}>
                             <Trash2 className="h-3.5 w-3.5" />
@@ -204,7 +208,7 @@ export function MailCompliancePage(): React.JSX.Element {
                       </td>
                     </tr>
                   ))}
-                  {!suppressions.length ? <tr><td colSpan={4} className="px-2.5 py-8 text-center text-muted-foreground">{loading ? t('common.loading') : t('compliance.empty')}</td></tr> : null}
+                  {!suppressions.length ? <tr><td colSpan={4} className="px-3 py-10 text-center text-muted-foreground">{loading ? t('common.loading') : t('compliance.empty')}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -214,28 +218,35 @@ export function MailCompliancePage(): React.JSX.Element {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden />{t('compliance.domainTitle')}</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-[0.9375rem]"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden />{t('compliance.domainTitle')}</CardTitle>
             <CardDescription>{t('compliance.domainDesc')}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-3.5">
             <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-end">
               <div><Label htmlFor="compliance-domain">{t('compliance.domain')}</Label><Input id="compliance-domain" className="mt-1.5" value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="example.com" /></div>
               <div><Label htmlFor="compliance-selector">{t('compliance.selector')}</Label><Input id="compliance-selector" className="mt-1.5 w-28" value={selector} onChange={(event) => setSelector(event.target.value)} /></div>
               <Button type="button" size="sm" loading={checking} disabled={!domain.trim()} onClick={() => void checkDns()}>{t('compliance.check')}</Button>
             </div>
             {domainHealth ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs"><span className="font-medium">{domainHealth.domain}</span><StatusBadge status={domainHealth.overall === 'ok' ? 'ok' : domainHealth.overall === 'error' ? 'error' : 'warning'} /></div>
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between rounded-lg bg-surface px-3 py-2 text-xs">
+                  <span className="font-semibold text-foreground">{domainHealth.domain}</span>
+                  <StatusBadge status={domainHealth.overall === 'ok' ? 'ok' : domainHealth.overall === 'error' ? 'error' : 'warning'} />
+                </div>
                 {([['spf', t('compliance.spf')], ['dkim', t('compliance.dkim')], ['dmarc', t('compliance.dmarc')]] as const).map(([key, label]) => {
                   const item = domainHealth[key];
-                  return <div key={key} className="rounded-md border p-2 text-xs">
-                    <div className="flex items-center justify-between"><span className="font-medium">{label}</span><StatusBadge status={item.status} /></div>
+                  return <div key={key} className="rounded-xl border border-border/80 bg-surface/50 p-3 text-xs">
+                    <div className="flex items-center justify-between"><span className="font-semibold text-foreground">{label}</span><StatusBadge status={item.status} /></div>
                     <p className="mt-1 text-muted-foreground">{item.message}</p>
-                    {item.records.length ? <code className="mt-1 block break-all rounded bg-muted/60 px-1.5 py-1 text-[10px]">{item.records.join('\n')}</code> : null}
+                    {item.records.length ? <code className="mt-1.5 block break-all rounded-md bg-card px-2 py-1.5 text-[10.5px]">{item.records.join('\n')}</code> : null}
                   </div>;
                 })}
               </div>
-            ) : <p className="text-xs text-muted-foreground">{t('common.notConfigured')}</p>}
+            ) : (
+              <div className="callout-sage">
+                仅展示真实 DNS 检测结果，不会将未检测状态标记为通过。点击「{t('compliance.check')}」立即验证。
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

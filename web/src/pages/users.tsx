@@ -117,8 +117,10 @@ function RowActions({
 function UserRow({
   user,
   isSelf,
+  selected,
+  onSelect,
   ...handlers
-}: { user: UserDto; isSelf: boolean } & RowActionHandlers): React.JSX.Element {
+}: { user: UserDto; isSelf: boolean; selected?: boolean; onSelect?: () => void } & RowActionHandlers): React.JSX.Element {
   const { t } = useI18n();
   const roleLabel = user.role === 'admin'
     ? t('users.role.admin')
@@ -126,9 +128,15 @@ function UserRow({
       ? t('users.role.project_admin')
       : user.role === 'viewer' ? t('users.role.viewer') : t('users.role.user');
   return (
-    <li className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+    <li
+      onClick={onSelect}
+      className={cn(
+        'flex cursor-pointer flex-wrap items-center gap-3 border-l-2 border-l-transparent px-4 py-3 transition-colors hover:bg-primary-soft/30',
+        selected && 'border-l-primary bg-primary-soft/55',
+      )}
+    >
       <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-medium text-muted-foreground"
+        className="avatar-bubble flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
         aria-hidden
       >
         {initials(user.displayName || user.username)}
@@ -214,6 +222,15 @@ export function UsersPage(): React.JSX.Element {
   }, [fetchList]);
 
   const adminCount = React.useMemo(() => items.filter((user) => user.role === 'admin').length, [items]);
+  const salesCount = React.useMemo(() => items.filter((user) => user.role !== 'admin').length, [items]);
+  const [selectedUserId, setSelectedUserId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setSelectedUserId((prev) => (prev && items.some((u) => u.id === prev) ? prev : items[0]?.id ?? null));
+  }, [items]);
+  const selectedUser = React.useMemo(
+    () => (selectedUserId ? items.find((u) => u.id === selectedUserId) ?? null : null),
+    [items, selectedUserId],
+  );
 
   const openCreate = React.useCallback(() => {
     setEditingUser(null);
@@ -311,6 +328,8 @@ export function UsersPage(): React.JSX.Element {
             key={user.id}
             user={user}
             isSelf={currentUserId === user.id}
+            selected={selectedUserId === user.id}
+            onSelect={() => setSelectedUserId(user.id)}
             onEdit={openEdit}
             onResetPassword={openReset}
             onConfigureMail={openMailAccount}
@@ -347,7 +366,92 @@ export function UsersPage(): React.JSX.Element {
         }
       />
 
-      <Card className="overflow-hidden">{body}</Card>
+      <div className="grid gap-3.5 sm:grid-cols-3">
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary" aria-hidden>
+            <UserCog className="h-[18px] w-[18px]" />
+          </span>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">团队账号</p>
+            <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{items.length}</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">当前系统的团队成员总数</p>
+          </div>
+        </div>
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold-soft text-gold" aria-hidden>
+            <ShieldCheck className="h-[18px] w-[18px]" />
+          </span>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">系统管理员</p>
+            <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{adminCount}</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">可管理系统设置、用户与权限</p>
+          </div>
+        </div>
+        <div className="panel flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-mint-soft text-mint" aria-hidden>
+            <MailCheck className="h-[18px] w-[18px]" />
+          </span>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">业务成员账号</p>
+            <p className="mt-1 text-2xl font-bold leading-none tabular-nums tracking-[-0.03em]">{salesCount}</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">独立分配客户与个人发件邮箱</p>
+          </div>
+        </div>
+      </div>
+
+      <div className={cn('grid gap-4', selectedUser && 'xl:grid-cols-[minmax(0,1fr)_20.5rem] xl:items-start')}>
+        <Card className="overflow-hidden">{body}</Card>
+
+        {selectedUser ? (
+          <Card className="hidden p-5 xl:block">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="avatar-bubble flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ring-1 ring-primary/15">
+                  {initials(selectedUser.displayName || selectedUser.username)}
+                </span>
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold text-foreground">{selectedUser.displayName || selectedUser.username}</h2>
+                  <p className="truncate text-xs text-muted-foreground">@{selectedUser.username}</p>
+                </div>
+              </div>
+              <Badge variant="outline" className={USER_STATUS_BADGE_CLASS[selectedUser.status]}>
+                {USER_STATUS_LABEL[selectedUser.status]}
+              </Badge>
+            </div>
+            <dl className="mt-4 space-y-3 border-t border-border/75 pt-4 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">角色权限</dt>
+                <dd><Badge variant="outline" className={USER_ROLE_BADGE_CLASS[selectedUser.role]}>{selectedUser.role === 'admin' ? '系统管理员' : selectedUser.role === 'project_admin' ? '项目管理员' : selectedUser.role === 'viewer' ? '只读' : '销售'}</Badge></dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">发件邮箱</dt>
+                <dd className="truncate font-medium text-foreground">{selectedUser.mailbox?.email || '未配置'}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">两步验证 (2FA)</dt>
+                <dd className="font-medium text-foreground">{selectedUser.twoFactorEnabled ? '已开启' : '未开启'}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="text-muted-foreground">创建时间</dt>
+                <dd className="tabular-nums text-foreground">{formatDateTime(selectedUser.createdAt)}</dd>
+              </div>
+            </dl>
+            <div className="mt-4 space-y-2 border-t border-border/75 pt-4">
+              <Button type="button" size="sm" className="w-full" onClick={() => openEdit(selectedUser)}>
+                <Pencil className="h-3.5 w-3.5" aria-hidden />编辑成员资料
+              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => openMailAccount(selectedUser)}>
+                  <MailCheck className="h-3.5 w-3.5" aria-hidden />发件邮箱
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => openReset(selectedUser)}>
+                  <KeyRound className="h-3.5 w-3.5" aria-hidden />重置密码
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : null}
+      </div>
 
       <UserFormDialog key={editingUser?.id ?? 'new'} open={formOpen} onOpenChange={setFormOpen} user={editingUser} />
       <ResetPasswordDialog open={resetOpen} onOpenChange={setResetOpen} user={resetTarget} />

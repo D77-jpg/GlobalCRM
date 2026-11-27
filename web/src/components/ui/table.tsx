@@ -1,8 +1,5 @@
 /**
- * Table —— 语义化表格元素 + 可排序表头
- * ------------------------------------------------------------------
- * 表格本身不接管数据，排序状态由调用方（store）持有，
- * SortableHeader 只负责渲染箭头与触发回调。
+ * Table — refined warm-header table with generous scannable spacing.
  */
 import * as React from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
@@ -50,8 +47,8 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
     <tr
       ref={ref}
       className={cn(
-        'border-b border-border/80 transition-colors last:border-0',
-        'hover:bg-muted/45 data-[state=selected]:bg-primary/[0.04] data-[disabled]:opacity-60',
+        'border-b border-border/75 transition-colors last:border-0',
+        'hover:bg-primary-soft/35 data-[state=selected]:bg-primary-soft/60 data-[disabled]:opacity-60',
         className,
       )}
       {...props}
@@ -65,7 +62,7 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
     <th
       ref={ref}
       className={cn(
-        'h-9 whitespace-nowrap px-3 text-left align-middle text-[11px] font-medium tracking-[0.01em] text-muted-foreground',
+        'h-10 whitespace-nowrap px-3.5 text-left align-middle text-[11.5px] font-semibold tracking-[0.01em] text-muted-foreground',
         className,
       )}
       {...props}
@@ -76,7 +73,7 @@ TableHead.displayName = 'TableHead';
 
 const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
   ({ className, ...props }, ref) => (
-    <td ref={ref} className={cn('px-3 py-2.5 align-middle', className)} {...props} />
+    <td ref={ref} className={cn('px-3.5 py-3 align-middle', className)} {...props} />
   ),
 );
 TableCell.displayName = 'TableCell';
@@ -88,10 +85,7 @@ const TableCaption = React.forwardRef<HTMLTableCaptionElement, React.HTMLAttribu
 );
 TableCaption.displayName = 'TableCaption';
 
-/* ---------------------------- 可排序表头 ---------------------------- */
-
 export interface SortableHeaderProps extends React.ThHTMLAttributes<HTMLTableCellElement> {
-  /** 当前列对应的排序字段 */
   field: string;
   activeField: string;
   activeOrder: 'asc' | 'desc';
@@ -116,13 +110,13 @@ function SortableHeader({
         type="button"
         onClick={() => onSort(field)}
         className={cn(
-          'flex h-11 w-full items-center gap-1 px-3 text-left text-xs font-medium tracking-normal transition-colors',
+          'flex h-10 w-full items-center gap-1 px-3.5 text-left text-[11.5px] font-semibold tracking-[0.01em] transition-colors',
           'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70',
-          active ? 'text-foreground' : 'text-muted-foreground',
+          active ? 'text-primary' : 'text-muted-foreground',
         )}
       >
         {children}
-        <Icon className={cn('h-3.5 w-3.5 shrink-0', active ? 'text-primary opacity-90' : 'opacity-40')} aria-hidden />
+        <Icon className={cn('h-3.5 w-3.5 shrink-0', active ? 'text-primary opacity-100' : 'opacity-40')} aria-hidden />
       </button>
     </TableHead>
   );

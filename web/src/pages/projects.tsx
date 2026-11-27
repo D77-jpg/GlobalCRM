@@ -205,64 +205,99 @@ export function ProjectsPage(): React.JSX.Element {
       <PageHeader title={t('projects.title')} description={t('projects.subtitle')}
         actions={isAdmin ? <Button type="button" size="sm" onClick={openCreate}><Plus className="h-4 w-4" aria-hidden />{t('projects.new')}</Button> : undefined} />
 
-      <p role="note" className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-        <CircleHelp className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span>多个项目可以同时使用，数据互不混淆。顶部切换器决定当前工作空间；要归档当前项目，请先切换到别的项目。</span>
-      </p>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {items.map((project) => {
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {items.map((project, idx) => {
           const isCurrent = project.id === activeProject?.id;
+          const bannerTone = idx % 3 === 0
+            ? 'from-[#EFE6D4] via-[#F6F1E5] to-[#E2ECE5] text-[#223B2D]'
+            : idx % 3 === 1
+              ? 'from-[#1F2421] via-[#282E2A] to-[#1A2620] text-[#F5F2EA]'
+              : 'from-[#E9E6DF] via-[#F3F1EB] to-[#E5EBE7] text-[#283B35]';
           return (
-          <Card key={project.id} className={'overflow-hidden ' + (project.status === 'archived' ? 'opacity-70' : isCurrent ? 'border-foreground/30' : '')}>
+          <Card key={project.id} className={'flex flex-col overflow-hidden transition-[border-color,box-shadow] ' + (project.status === 'archived' ? 'opacity-70' : isCurrent ? 'border-primary/45 ring-1 ring-primary/15' : 'hover:border-primary/30')}>
             {project.coverImage ? (
-              <div className="h-28 w-full bg-muted">
+              <div className="relative h-36 w-full overflow-hidden bg-muted">
                 <img src={project.coverImage} alt={`${project.name} 封面`} className="h-full w-full object-cover" loading="lazy" />
               </div>
-            ) : null}
-            <CardHeader className="flex-row items-start justify-between gap-3 space-y-0 p-3.5 pb-2">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <ProjectLogo project={project} size="sm" />
-                <div className="min-w-0"><CardTitle className="truncate text-[0.8125rem]" title={project.name}>{project.name}</CardTitle><p className="truncate text-[11px] text-muted-foreground">{project.code} · {project.industry || '未设置行业'}</p></div>
+            ) : (
+              <div className={`relative flex h-36 w-full flex-col justify-between bg-gradient-to-br p-5 ${bannerTone}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.18em] opacity-75">{project.code}</span>
+                  <ProjectLogo project={project} size="sm" compact />
+                </div>
+                <div>
+                  <p className="truncate text-lg font-bold tracking-[0.04em]">{project.name.toUpperCase()}</p>
+                  <p className="mt-0.5 truncate text-[11px] opacity-75">{project.industry || project.companyName}</p>
+                </div>
               </div>
-              <Badge variant="outline" className="gap-1.5 font-normal">
-                <span className={isCurrent && project.status !== 'archived' ? 'h-1.5 w-1.5 rounded-full bg-primary' : 'h-1.5 w-1.5 rounded-full bg-muted-foreground/40'} aria-hidden />
+            )}
+            <CardHeader className="flex-row items-start justify-between gap-3 space-y-0 pb-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="min-w-0">
+                  <CardTitle className="truncate text-base" title={project.name}>{project.name}</CardTitle>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{project.code} · {project.industry || '未设置行业'}</p>
+                </div>
+              </div>
+              <Badge variant={isCurrent && project.status !== 'archived' ? 'developed' : 'outline'} className="shrink-0 gap-1.5">
+                <span className={isCurrent && project.status !== 'archived' ? 'h-1.5 w-1.5 rounded-full bg-status-developed' : 'h-1.5 w-1.5 rounded-full bg-muted-foreground/45'} aria-hidden />
                 {project.status === 'archived' ? '已归档' : isCurrent ? '当前使用' : '可切换'}
               </Badge>
             </CardHeader>
-            <CardContent className="space-y-2.5 p-3.5 pt-0 text-[0.8125rem]">
-              <div className="flex items-baseline gap-2"><p className="shrink-0 text-[11px] text-muted-foreground">公司主体</p><p className="min-w-0 truncate" title={project.companyName}>{project.companyName}</p></div>
-              <div className="flex flex-wrap gap-1.5"><Badge variant="muted">{project.mailChannel === 'smtp' ? '邮箱直发' : '模拟发送'}</Badge>{project.isDefault ? <Badge variant="outline">默认项目</Badge> : null}</div>
-              <div className="flex flex-wrap gap-1.5 border-t border-border pt-2.5">
-                <Button type="button" variant="outline" size="sm" disabled={project.status !== 'active'} onClick={() => { writeStorage(STORAGE_KEYS.activeProject, project.id); window.location.assign('/projects/integrations'); }}>{t('integrations.title')}</Button>
+            <CardContent className="flex flex-1 flex-col justify-between space-y-3 pt-1 text-[0.8125rem]">
+              <dl className="space-y-2 border-t border-border/70 pt-3 text-xs">
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">公司主体</dt>
+                  <dd className="min-w-0 truncate font-medium text-foreground" title={project.companyName}>{project.companyName}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="shrink-0 text-muted-foreground">发送模式</dt>
+                  <dd className="flex items-center gap-1.5">
+                    <Badge variant={project.mailChannel === 'smtp' ? 'developed' : 'muted'}>{project.mailChannel === 'smtp' ? '邮箱直发' : '模拟发送'}</Badge>
+                    {project.isDefault ? <Badge variant="gold">默认</Badge> : null}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="space-y-2 border-t border-border/75 pt-3">
                 {project.status === 'active' && !isCurrent ? (
-                  <Button type="button" size="sm" onClick={() => switchProject(project.id)}>
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />切换
+                  <Button type="button" size="sm" className="w-full" onClick={() => switchProject(project.id)}>
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />打开工作空间
                   </Button>
                 ) : null}
-                <Button type="button" variant="outline" size="sm" onClick={() => openBrand(project)}><Sparkles className="h-3.5 w-3.5" aria-hidden />{t('projects.brandTitle')}</Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => openEdit(project)}><Pencil className="h-3.5 w-3.5" aria-hidden />{t('common.edit')}</Button>
-                <Button type="button" variant="ghost" size="sm"
-                  disabled={project.isDefault || (isCurrent && project.status === 'active')}
-                  aria-describedby={`project-archive-help-${project.id}`}
-                  onClick={() => void toggleArchive(project.id, project.status === 'archived')}>
-                  {project.status === 'archived' ? <RotateCcw className="h-3.5 w-3.5" aria-hidden /> : <Archive className="h-3.5 w-3.5" aria-hidden />}
-                  {project.status === 'archived' ? '恢复' : '归档'}
-                </Button>
-                {!project.isDefault && isAdmin ? <Button type="button" variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => { setDeleteTarget(project); setDeleteConfirm(''); }} aria-label={`删除项目 ${project.name}`}>
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                </Button> : null}
+                <div className="flex flex-wrap gap-1.5">
+                  <Button type="button" variant="outline" size="sm" disabled={project.status !== 'active'} onClick={() => { writeStorage(STORAGE_KEYS.activeProject, project.id); window.location.assign('/projects/integrations'); }}>{t('integrations.title')}</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => openBrand(project)}><Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden />{t('projects.brandTitle')}</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => openEdit(project)}><Pencil className="h-3.5 w-3.5" aria-hidden />{t('common.edit')}</Button>
+                  <Button type="button" variant="ghost" size="sm"
+                    disabled={project.isDefault || (isCurrent && project.status === 'active')}
+                    aria-describedby={`project-archive-help-${project.id}`}
+                    onClick={() => void toggleArchive(project.id, project.status === 'archived')}>
+                    {project.status === 'archived' ? <RotateCcw className="h-3.5 w-3.5" aria-hidden /> : <Archive className="h-3.5 w-3.5" aria-hidden />}
+                    {project.status === 'archived' ? '恢复' : '归档'}
+                  </Button>
+                  {!project.isDefault && isAdmin ? <Button type="button" variant="ghost" size="sm" className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => { setDeleteTarget(project); setDeleteConfirm(''); }} aria-label={`删除项目 ${project.name}`}>
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                  </Button> : null}
+                </div>
+                {project.isDefault || (isCurrent && project.status === 'active') ? (
+                  <p id={`project-archive-help-${project.id}`} className="text-[11px] text-muted-foreground">
+                    {project.isDefault ? '默认项目保留历史数据，不能归档。' : '当前使用中；切换到别的项目后可归档。'}
+                  </p>
+                ) : null}
               </div>
-              {project.isDefault || (isCurrent && project.status === 'active') ? (
-                <p id={`project-archive-help-${project.id}`} className="text-[10px] text-muted-foreground">
-                  {project.isDefault ? '默认项目保留历史数据，不能归档。' : '使用中；切换到别的项目后可归档。'}
-                </p>
-              ) : null}
             </CardContent>
           </Card>
           );
         })}
+      </div>
+
+      <div role="note" className="callout-sage flex items-center gap-3">
+        <CircleHelp className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+        <span>
+          <strong className="font-semibold text-foreground">项目隔离保护：</strong>
+          项目切换只改变当前工作上下文；各品牌的客户档案、知识库、产品价格、报价单及发送策略严格隔离，互不混淆。
+        </span>
       </div>
 
       <Dialog open={open} onOpenChange={(next) => !saving && setOpen(next)}>

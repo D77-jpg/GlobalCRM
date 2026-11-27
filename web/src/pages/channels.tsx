@@ -450,21 +450,21 @@ export function ChannelsPage(): React.JSX.Element {
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="hidden items-center gap-2 text-xs lg:flex">
-            <div className="rounded-md border border-border bg-card px-2.5 py-1">
+            <div className="rounded-xl border border-border bg-card px-3 py-1.5 shadow-card">
               <span className="text-muted-foreground">今日消息 </span>
-              <span className="font-semibold tabular-nums">{stats.todayMessages}</span>
+              <span className="font-bold tabular-nums text-foreground">{stats.todayMessages}</span>
             </div>
-            <div className="rounded-md border border-border bg-card px-2.5 py-1">
+            <div className="rounded-xl border border-border bg-card px-3 py-1.5 shadow-card">
               <span className="text-muted-foreground">在谈会话 </span>
-              <span className="font-semibold tabular-nums">{stats.activeConversations}</span>
+              <span className="font-bold tabular-nums text-foreground">{stats.activeConversations}</span>
             </div>
-            <div className="rounded-md border border-border bg-card px-2.5 py-1">
-              <span className="text-muted-foreground">未读 </span>
-              <span className="font-semibold tabular-nums text-primary">{stats.unreadTotal}</span>
+            <div className="rounded-xl border border-primary/20 bg-primary-soft/60 px-3 py-1.5">
+              <span className="text-primary/80">未读 </span>
+              <span className="font-bold tabular-nums text-primary">{stats.unreadTotal}</span>
             </div>
-            <div className="rounded-md border border-border bg-card px-2.5 py-1">
-              <span className="text-muted-foreground">待跟进 </span>
-              <span className="font-semibold tabular-nums text-amber-600 dark:text-amber-400">{stats.pendingFollowup}</span>
+            <div className="rounded-xl border border-amberx/25 bg-amberx-soft/70 px-3 py-1.5">
+              <span className="text-amberx/85">待跟进 </span>
+              <span className="font-bold tabular-nums text-amberx">{stats.pendingFollowup}</span>
             </div>
           </div>
 
@@ -587,11 +587,11 @@ export function ChannelsPage(): React.JSX.Element {
                     type="button"
                     onClick={() => setSelectedId(conv.id)}
                     className={cn(
-                      'flex w-full items-start gap-2.5 p-3 text-left transition-colors hover:bg-muted/40',
-                      active && 'bg-primary/5 ring-1 ring-inset ring-primary/30',
+                      'flex w-full items-start gap-2.5 border-l-2 border-l-transparent p-3 text-left transition-colors hover:bg-primary-soft/30',
+                      active && 'border-l-primary bg-primary-soft/65',
                     )}
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                    <div className="avatar-bubble flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold">
                       {initialsOf(conv.contactName)}
                     </div>
                     <div className="min-w-0 flex-1">

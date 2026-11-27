@@ -168,24 +168,27 @@ export function CustomerWorkbenchSidebar({
           <CardDescription className="text-xs">实时追踪成交意向、打样进度与未决事项</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-xs">
-          <div className="flex items-center gap-3.5">
-            <div className="relative flex h-16 w-16 shrink-0 items-center justify-center">
-              <svg className="h-16 w-16 -rotate-90" viewBox="0 0 64 64" aria-hidden>
-                <circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" strokeWidth="6" className="text-muted" />
+          <div className="flex items-center gap-4">
+            <div className="relative flex h-[76px] w-[76px] shrink-0 items-center justify-center">
+              <svg className="h-[76px] w-[76px] -rotate-90" viewBox="0 0 64 64" aria-hidden>
+                <circle cx="32" cy="32" r="26" fill="none" stroke="currentColor" strokeWidth="5.5" className="text-muted" />
                 <circle
                   cx="32"
                   cy="32"
                   r="26"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="6"
+                  strokeWidth="5.5"
                   strokeDasharray={ringStroke}
                   strokeDashoffset={ringOffset}
                   strokeLinecap="round"
-                  className={computedIntentScore >= 75 ? 'text-emerald-600' : computedIntentScore >= 45 ? 'text-amber-500' : 'text-muted-foreground'}
+                  className={computedIntentScore >= 75 ? 'text-primary' : computedIntentScore >= 45 ? 'text-amberx' : 'text-muted-foreground'}
                 />
               </svg>
-              <span className="absolute text-sm font-bold tabular-nums">{computedIntentScore}</span>
+              <div className="absolute flex flex-col items-center">
+                <span className="text-base font-bold leading-none tabular-nums text-foreground">{computedIntentScore}</span>
+                <span className="mt-0.5 text-[9.5px] font-medium text-muted-foreground">健康度</span>
+              </div>
             </div>
             <div className="min-w-0 flex-1 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
