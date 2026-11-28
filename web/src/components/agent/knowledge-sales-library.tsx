@@ -7,12 +7,10 @@ import {
   ChevronRight,
   ChevronUp,
   FileCheck2,
-  FolderTree,
   Loader2,
   Mail,
   Pencil,
   RefreshCw,
-  Search,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -21,7 +19,6 @@ import {
   knowledgeEmailPrompt,
   matchesSalesKnowledge,
   salesKnowledge,
-  salesMatchExcerpt,
   salesTermDetails,
   salesTermState,
   salesTitle,
@@ -45,41 +42,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { AgentMessageContent } from './agent-message-content';
-
-const categories = {
-  reference: '参考资料',
-  company: '公司与品牌',
-  product: '产品与定制',
-  trade: '起订量与交易条件',
-  compliance: '质量与认证',
-  sales_rules: '销售注意事项',
-  faq: '常见问题',
-};
-
-function Highlighted({ text, query }: { text: string; query: string }) {
-  const terms = [...new Set(query.trim().split(/\s+/).filter(Boolean))];
-  if (!terms.length || !text) return <>{text}</>;
-  const pattern = new RegExp(
-    '(' + terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')',
-    'gi',
-  );
-  return (
-    <>
-      {text.split(pattern).map((part, index) =>
-        terms.some((term) => part.toLocaleLowerCase() === term.toLocaleLowerCase()) ? (
-          <mark
-            key={index}
-            className="rounded-sm bg-amber-200/80 px-0.5 text-foreground dark:bg-amber-400/30"
-          >
-            {part}
-          </mark>
-        ) : (
-          <React.Fragment key={index}>{part}</React.Fragment>
-        ),
-      )}
-    </>
-  );
-}
+import { KnowledgeDirectory } from './knowledge-directory';
 
 type HighlightRegistry = { set: (name: string, value: unknown) => void; delete: (name: string) => void };
 const highlightRegistry = () => (CSS as unknown as { highlights?: HighlightRegistry }).highlights;
@@ -151,7 +114,6 @@ export function KnowledgeSalesLibrary({
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [query, setQuery] = React.useState('');
-  const [category, setCategory] = React.useState('all');
   const [selectedId, setSelectedId] = React.useState(initialId ?? '');
   const [mobileDetail, setMobileDetail] = React.useState(!!initialId);
   const [picker, setPicker] = React.useState<SalesKnowledge | null>(null);
@@ -177,7 +139,7 @@ export function KnowledgeSalesLibrary({
   }, [refresh]);
 
   const entries = salesKnowledge(rows);
-  const found = entries.filter((item) => matchesSalesKnowledge(item, query, category));
+  const found = query.trim() ? entries.filter((item) => matchesSalesKnowledge(item, query, 'all')) : entries;
   const needle = query.trim().toLocaleLowerCase();
   const matches = needle
     ? [...found].sort(
@@ -276,7 +238,6 @@ export function KnowledgeSalesLibrary({
            3-COLUMN NOTION / LINEAR-GRADE KNOWLEDGE & FACT CITATION STUDIO
            ================================================================== */
         <div className="grid min-h-0 flex-1 xl:grid-cols-[276px_minmax(0,1fr)_272px]">
-          {/* COLUMN 1: Integrated Search + Category Facets + Document Tree */}
           <section
             aria-label="已发布资料列表"
             className={
@@ -284,113 +245,14 @@ export function KnowledgeSalesLibrary({
               ' min-h-0 min-w-0 flex-col border-b border-border bg-surface/35 xl:border-b-0 xl:border-r'
             }
           >
-            <div className="space-y-2.5 border-b border-border/80 p-3.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="sales-knowledge-query" className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                  <FolderTree className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                  知识目录树
-                </label>
-                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                  {matches.length}/{entries.length} 篇
-                </span>
-              </div>
-
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                <Input
-                  id="sales-knowledge-query"
-                  className="h-8 bg-card pl-8 text-xs"
-                  value={query}
-                  onChange={(e) => search(e.target.value)}
-                  placeholder="检索产品、工艺、MOQ、条款…"
-                />
-              </div>
-
-              <nav aria-label="销售资料分类" className="flex flex-wrap gap-1 pt-0.5">
-                {[['all', '全部'], ...Object.entries(categories)].map(([key, label]) => {
-                  const cnt = key === 'all' ? entries.length : entries.filter((e) => e.revision.category === key).length;
-                  if (key !== 'all' && cnt === 0 && category !== key) return null;
-                  const activeCat = category === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-pressed={activeCat}
-                      onClick={() => {
-                        setCategory(key);
-                        setMobileDetail(false);
-                      }}
-                      className={
-                        'inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ' +
-                        (activeCat
-                          ? 'os-pill-active'
-                          : 'border-border/80 bg-card text-muted-foreground hover:text-foreground')
-                      }
-                    >
-                      <span>{label}</span>
-                      <span className="font-mono text-[10px] tabular-nums opacity-75">{cnt}</span>
-                    </button>
-                  );
-                })}
-              </nav>
-            </div>
-
-            {!matches.length ? (
-              <div className="p-6 text-center text-xs">
-                <p className="font-medium text-foreground">无匹配文档</p>
-                <p className="mt-1 text-muted-foreground">可缩短关键词或重置分类筛选</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-3 h-7 text-xs"
-                  onClick={() => {
-                    setQuery('');
-                    setCategory('all');
-                  }}
-                >
-                  清除筛选
-                </Button>
-              </div>
-            ) : (
-              <ul className="min-h-0 flex-1 divide-y divide-border/65 overflow-y-auto">
-                {matches.map((item) => {
-                  const excerpt = query.trim() ? salesMatchExcerpt(item, query) : '';
-                  const isCurrent = selected?.id === item.id;
-                  return (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        aria-current={isCurrent ? 'true' : undefined}
-                        onClick={() => choose(item)}
-                        className={
-                          'w-full min-w-0 border-l-2 px-3.5 py-2.5 text-left transition-colors focus-visible:outline-none ' +
-                          (isCurrent
-                            ? 'border-foreground bg-card shadow-[inset_0_1px_0_hsl(var(--border)/0.4)]'
-                            : 'border-transparent hover:bg-card/70')
-                        }
-                      >
-                        <div className="flex items-center justify-between gap-2 text-[10.5px] text-muted-foreground">
-                          <span>{knowledgeCategories[item.revision.category ?? 'product']}</span>
-                          <span className="font-mono">v{item.revision.version}</span>
-                        </div>
-                        <span className="mt-0.5 block break-words text-[0.8125rem] font-semibold leading-snug text-foreground">
-                          <Highlighted text={salesTitle(item.revision.title)} query={query} />
-                        </span>
-                        {excerpt ? (
-                          <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-muted-foreground">
-                            <Highlighted text={excerpt} query={query} />
-                          </span>
-                        ) : item.revision.products?.length ? (
-                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                            {item.revision.products.join(' · ')}
-                          </span>
-                        ) : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <KnowledgeDirectory
+              matches={matches}
+              total={entries.length}
+              selected={selected}
+              query={query}
+              onSearch={search}
+              onChoose={choose}
+            />
 
             <div className="flex items-center justify-between border-t border-border/80 bg-card/60 px-3.5 py-2 text-[11px] text-muted-foreground">
               <span role="status">
