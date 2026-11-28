@@ -591,31 +591,6 @@
   .workspace-page .min-h-10 { min-height: 2.125rem; }
 }
 
-.knowledge-sales-library nav[aria-label="销售资料分类"] {
-  gap: 0.25rem;
-  border-bottom: 1px solid hsl(var(--border));
-}
-.knowledge-sales-library nav[aria-label="销售资料分类"] button {
-  min-height: 2.25rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  padding: 0 0.75rem;
-  color: hsl(var(--muted-foreground));
-  font-size: 0.8125rem;
-  font-weight: 500;
-}
-.knowledge-sales-library nav[aria-label="销售资料分类"] button[aria-pressed="true"] {
-  border-bottom-color: hsl(var(--foreground));
-  background: transparent;
-  color: hsl(var(--foreground));
-  font-weight: 600;
-}
-.knowledge-sales-library [aria-current="true"] {
-  border-left-color: hsl(var(--foreground)) !important;
-  background: hsl(var(--surface)) !important;
-}
 .knowledge-sales-library .bg-primary\/5 {
   background: hsl(var(--surface));
 }
